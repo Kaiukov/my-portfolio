@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+
+# Data and cache
+data/cache/
+data/transactions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.csv
+!portfolio.csv
+!yahoo_portfolio_comparison.csv
