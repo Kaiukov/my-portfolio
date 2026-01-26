@@ -1,0 +1,149 @@
+---
+name: portfolio-cli
+description: This skill should be used when the user asks to "add transaction", "check portfolio", "show summary", "import transactions", "list trades", "export portfolio", or mentions portfolio tracking, P&L calculation, or position management.
+version: 0.1.0
+---
+
+# Portfolio CLI Skill
+
+## Purpose
+
+Execute portfolio transactions and analyze holdings using FIFO cost basis tracking. Provides commands for adding trades, viewing positions, calculating P&L, and managing cash across multiple currencies.
+
+## Commands
+
+### Add Transaction
+```bash
+uv run python -m src.cli add SYMBOL QUANTITY --price PRICE --asset-type TYPE --action ACTION [options]
+```
+
+**Asset Types:** crypto, stock, etf, cash
+**Actions:** buy, sell, deposit, withdrawal
+**Options:**
+- `--currency` - USD, EUR, GBP (default: USD)
+- `--fees` - Transaction fees (default: 0)
+- `--date` - YYYY-MM-DD format (default: today)
+- `--exchange` - Broker name (Binance, Paysera, etc.)
+
+**Examples:**
+```bash
+# Buy stock
+uv run python -m src.cli add AAPL 10 --price 150 --asset-type stock --action buy
+
+# Sell crypto
+uv run python -m src.cli add BTC-USD 0.5 --price 95000 --asset-type crypto --action sell --fees 5
+
+# Deposit cash
+uv run python -m src.cli add CASH 1000 --price 1 --asset-type cash --action deposit --currency USD
+
+# Historical transaction
+uv run python -m src.cli add ETH-USD 2 --price 3500 --asset-type crypto --action buy --date 2025-06-15
+```
+
+### View Portfolio
+```bash
+# Portfolio summary with P&L (table format)
+uv run python -m src.cli summary
+
+# Portfolio summary as JSON (terminal output)
+uv run python -m src.cli summary --output terminal
+
+# Cash balances by currency
+uv run python -m src.cli cash
+
+# Asset allocation
+uv run python -m src.cli allocation
+
+# All transactions (filterable)
+uv run python -m src.cli list
+uv run python -m src.cli list --symbol BTC-USD
+uv run python -m src.cli list --type crypto
+```
+
+**Summary Output Formats:**
+- `--output table` (default) - Rich formatted table view with colors
+- `--output terminal` - JSON format suitable for parsing/scripting
+
+### Import CSV
+```bash
+uv run python -m src.cli import-csv /path/to/file.csv [--clear-first] [--format FORMAT]
+```
+
+**Formats:** auto (default), simplified, ib (Interactive Brokers)
+
+```bash
+# Auto-detect & import
+uv run python -m src.cli import-csv portfolio.csv
+
+# Clear existing & import
+uv run python -m src.cli import-csv portfolio.csv --clear-first
+
+# Specific format
+uv run python -m src.cli import-csv portfolio.csv --format simplified
+```
+
+### Export Portfolio
+```bash
+uv run python -m src.cli export --format FORMAT [--output FILE]
+```
+
+**Formats:** json, csv
+
+```bash
+# Export as JSON
+uv run python -m src.cli export --format json --output my_portfolio.json
+
+# Export as CSV
+uv run python -m src.cli export --format csv --output my_portfolio.csv
+```
+
+## Portfolio Features
+
+**FIFO Cost Basis:** Oldest lots sold first for accurate capital gains tracking
+**Multi-Currency:** Automatic USD conversion with live exchange rates
+**Auto Cash Tracking:** Buying/selling automatically adjusts cash balances
+**Real-Time P&L:** Current holdings valued at live market prices
+
+**Calculations:**
+- **Unrealized P&L** = Current Value - Cost Basis (open positions)
+- **Realized P&L** = Locked gains/losses from sold positions
+- **Total P&L** = Unrealized + Realized
+
+## Data Storage
+
+Transactions stored in `/data/transactions.json` with full history and FIFO lot tracking.
+
+## Common Workflows
+
+**Add multiple trades quickly:**
+```bash
+uv run python -m src.cli add BTC-USD 0.1 --price 45000 --asset-type crypto --action buy --date 2025-01-15
+uv run python -m src.cli add ETH-USD 2 --price 3000 --asset-type crypto --action buy --date 2025-01-16
+uv run python -m src.cli add BTC-USD 0.05 --price 50000 --asset-type crypto --action sell --date 2025-01-20
+```
+
+**Manage multi-currency cash:**
+```bash
+uv run python -m src.cli add CASH 500 --price 1 --asset-type cash --action deposit --currency EUR
+uv run python -m src.cli add CASH 1000 --price 1 --asset-type cash --action deposit --currency USD
+uv run python -m src.cli cash
+```
+
+**Import & analyze:**
+```bash
+uv run python -m src.cli import-csv transactions.csv --clear-first
+uv run python -m src.cli summary
+uv run python -m src.cli allocation
+```
+
+**Get portfolio data as JSON:**
+```bash
+# Output JSON summary to terminal
+uv run python -m src.cli summary --output terminal
+
+# Save JSON to file
+uv run python -m src.cli summary --output terminal > portfolio_summary.json
+
+# Export transactions (alternative JSON export)
+uv run python -m src.cli export --format json --output transactions.json
+```

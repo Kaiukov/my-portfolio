@@ -1,5 +1,6 @@
 """CLI interface for portfolio management."""
 
+import json
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -12,7 +13,7 @@ from src.models import AssetType, TransactionType, Transaction
 from src.storage import TransactionStorage
 from src.prices import PriceFetcher
 from src.portfolio import PortfolioAnalyzer
-from src.importer import InteractiveBrokersImporter
+from src.importer import InteractiveBrokersImporter, SimplifiedPortfolioImporter
 
 app = typer.Typer(help="Portfolio tracking with FIFO cost basis")
 console = Console()
@@ -25,12 +26,34 @@ analyzer = PortfolioAnalyzer(storage, fetcher)
 
 @app.command()
 def import_csv(
-    csv_file: str = typer.Argument(..., help="Path to Interactive Brokers CSV file"),
+    csv_file: str = typer.Argument(..., help="Path to CSV file (simplified portfolio or Interactive Brokers format)"),
     clear_first: bool = typer.Option(False, "--clear-first", help="Clear existing transactions before import"),
+    format: str = typer.Option("auto", "--format", help="CSV format: 'auto', 'simplified', or 'ib'"),
 ):
-    """Import transactions from Interactive Brokers CSV."""
-    count = InteractiveBrokersImporter.import_csv(csv_file, storage, clear_first)
-    console.print(f"[green]✓[/green] Imported {count} transactions from {csv_file}")
+    """Import transactions from CSV file (simplified portfolio or Interactive Brokers format)."""
+    count = 0
+
+    if format == "auto":
+        # Try simplified format first (more common)
+        count = SimplifiedPortfolioImporter.import_csv(csv_file, storage, clear_first)
+        if count > 0:
+            console.print(f"[green]✓[/green] Imported {count} transactions from {csv_file} (simplified format)")
+        else:
+            # Fall back to Interactive Brokers format
+            count = InteractiveBrokersImporter.import_csv(csv_file, storage, clear_first)
+            if count > 0:
+                console.print(f"[green]✓[/green] Imported {count} transactions from {csv_file} (Interactive Brokers format)")
+            else:
+                console.print(f"[yellow]⚠[/yellow] No transactions imported from {csv_file}")
+    elif format == "simplified":
+        count = SimplifiedPortfolioImporter.import_csv(csv_file, storage, clear_first)
+        console.print(f"[green]✓[/green] Imported {count} transactions from {csv_file} (simplified format)")
+    elif format == "ib":
+        count = InteractiveBrokersImporter.import_csv(csv_file, storage, clear_first)
+        console.print(f"[green]✓[/green] Imported {count} transactions from {csv_file} (Interactive Brokers format)")
+    else:
+        console.print(f"[red]✗ Error:[/red] Unknown format: {format}")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -67,6 +90,40 @@ def add(
 
         storage.add_transaction(txn)
         console.print(f"[green]✓[/green] Added {quantity} {symbol} @ {price} {currency} ({action})")
+
+        # Auto-deduct CASH when buying non-CASH assets
+        if action == "buy" and asset_type != "cash":
+            cash_amount = Decimal(quantity) * Decimal(price) + Decimal(fees)
+            cash_txn = Transaction(
+                date=txn_date_obj,
+                asset="CASH",
+                asset_type=AssetType.CASH,
+                action=TransactionType.WITHDRAWAL,
+                quantity=cash_amount,
+                price=Decimal("1"),
+                currency=currency,
+                fees=Decimal("0"),
+                exchange="",
+            )
+            storage.add_transaction(cash_txn)
+            console.print(f"[dim]  Auto-deducted {cash_amount} {currency} from CASH[/dim]")
+
+        # Auto-deposit CASH when selling non-CASH assets
+        elif action == "sell" and asset_type != "cash":
+            cash_amount = Decimal(quantity) * Decimal(price) - Decimal(fees)
+            cash_txn = Transaction(
+                date=txn_date_obj,
+                asset="CASH",
+                asset_type=AssetType.CASH,
+                action=TransactionType.DEPOSIT,
+                quantity=cash_amount,
+                price=Decimal("1"),
+                currency=currency,
+                fees=Decimal("0"),
+                exchange="",
+            )
+            storage.add_transaction(cash_txn)
+            console.print(f"[dim]  Auto-deposited {cash_amount} {currency} to CASH[/dim]")
 
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {e}")
@@ -120,12 +177,56 @@ def list(
 
 
 @app.command()
-def summary():
+def summary(
+    output: str = typer.Option("table", "--output", help="Output format (table or terminal)"),
+):
     """Show portfolio summary with current values and P&L."""
     positions = analyzer.get_current_positions()
 
     if not positions:
         console.print("[yellow]No positions found[/yellow]")
+        return
+
+    if output == "terminal":
+        # JSON output to terminal
+        totals = analyzer.get_total_value()
+
+        positions_data = []
+        for pos in positions:
+            # Convert non-USD value to USD for display
+            usd_value = pos["current_value"]
+            usd_cost_basis = pos["cost_basis"]
+
+            if pos["currency"] != "USD":
+                rate = fetcher.get_exchange_rate(pos["currency"], "USD")
+                if rate:
+                    usd_value = pos["current_value"] * rate
+                    usd_cost_basis = pos["cost_basis"] * rate
+
+            positions_data.append({
+                "symbol": pos["symbol"],
+                "asset_type": pos["asset_type"],
+                "currency": pos["currency"],
+                "quantity": str(pos["quantity"]),
+                "current_price": float(pos["current_price"]),
+                "value_usd": float(usd_value),
+                "cost_basis_usd": float(usd_cost_basis),
+                "unrealized_pl_usd": float(pos["unrealized_pl"]),
+                "unrealized_pl_pct": float(pos["unrealized_pl_pct"]),
+            })
+
+        summary_data = {
+            "positions": positions_data,
+            "totals": {
+                "total_investment": float(totals["total_investment"]),
+                "total_cash": float(totals["total_cash"]),
+                "total_value": float(totals["total_value"]),
+                "total_pl": float(totals["total_pl"]),
+                "total_pl_pct": float(totals["total_pl_pct"]),
+            }
+        }
+
+        console.print(json.dumps(summary_data, indent=2))
         return
 
     # Create table

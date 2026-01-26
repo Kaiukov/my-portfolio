@@ -40,11 +40,19 @@ class PortfolioAnalyzer:
                 pos.add_lot(txn.date, txn.quantity, txn.price, txn.fees)
 
             elif txn.action in [TransactionType.SELL, TransactionType.WITHDRAWAL]:
-                # Remove from position using FIFO
-                pos.sell_quantity(txn.quantity, txn.price)
+                if txn.asset_type == AssetType.CASH:
+                    # For CASH: allow overdrafts (negative balance)
+                    pos.quantity -= txn.quantity
+                else:
+                    # For other assets: use FIFO selling
+                    pos.sell_quantity(txn.quantity, txn.price)
 
-        # Remove positions with zero quantity
-        return {k: v for k, v in positions.items() if v.quantity > 0}
+        # Remove positions with zero quantity (but allow CASH positions including negative balances)
+        return {
+            k: v
+            for k, v in positions.items()
+            if v.quantity > 0 or v.asset_type == AssetType.CASH
+        }
 
     def get_current_positions(self) -> List[Dict]:
         """

@@ -10,6 +10,115 @@ from src.models import Transaction, AssetType, TransactionType
 from src.storage import TransactionStorage
 
 
+class SimplifiedPortfolioImporter:
+    """Imports transactions from simplified portfolio CSV format."""
+
+    @staticmethod
+    def import_csv(
+        csv_path: str,
+        storage: TransactionStorage,
+        clear_first: bool = False,
+    ) -> int:
+        """
+        Import transactions from simplified portfolio CSV.
+        Expected columns: date, asset, asset_type, action, quantity, price, currency, fees, exchange
+
+        Args:
+            csv_path: Path to CSV file
+            storage: TransactionStorage instance
+            clear_first: Clear existing transactions before import
+
+        Returns:
+            Number of transactions imported
+        """
+        if clear_first:
+            storage.clear_all()
+
+        count = 0
+
+        try:
+            with open(csv_path, "r") as f:
+                reader = csv.DictReader(f)
+
+                for row in reader:
+                    try:
+                        # Parse required fields
+                        date_str = row.get("date", "").strip()
+                        asset = row.get("asset", "").strip()
+                        asset_type_str = row.get("asset_type", "").strip()
+                        action_str = row.get("action", "").strip()
+                        quantity_str = row.get("quantity", "0").strip()
+                        price_str = row.get("price", "0").strip()
+                        currency = row.get("currency", "USD").strip() or "USD"
+                        fees_str = row.get("fees", "0").strip()
+                        exchange = row.get("exchange", "").strip()
+
+                        # Validate required fields
+                        if not date_str or not asset or not asset_type_str or not action_str:
+                            continue
+
+                        # Parse date (format: YYYY-MM-DD)
+                        try:
+                            txn_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                        except ValueError:
+                            continue
+
+                        # Parse asset type
+                        try:
+                            asset_type = AssetType(asset_type_str.lower())
+                        except ValueError:
+                            continue
+
+                        # Parse transaction type
+                        try:
+                            action = TransactionType(action_str.lower())
+                        except ValueError:
+                            continue
+
+                        # Parse quantity and price
+                        try:
+                            quantity = Decimal(quantity_str or "0")
+                            price = Decimal(price_str or "0")
+                            fees = Decimal(fees_str or "0")
+                        except Exception:
+                            continue
+
+                        # Validate quantity and price
+                        if quantity <= 0:
+                            continue
+
+                        fees = abs(fees)  # Ensure fees are positive
+
+                        # Create transaction
+                        txn = Transaction(
+                            date=txn_date,
+                            asset=asset,
+                            asset_type=asset_type,
+                            action=action,
+                            quantity=quantity,
+                            price=price,
+                            currency=currency,
+                            fees=fees,
+                            exchange=exchange,
+                        )
+
+                        storage.add_transaction(txn)
+                        count += 1
+
+                    except Exception:
+                        # Skip problematic rows
+                        continue
+
+        except FileNotFoundError:
+            print(f"Error: File not found: {csv_path}")
+            return 0
+        except Exception as e:
+            print(f"Error reading CSV: {e}")
+            return 0
+
+        return count
+
+
 class InteractiveBrokersImporter:
     """Imports transactions from Interactive Brokers CSV format."""
 
