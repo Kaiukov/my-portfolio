@@ -8,7 +8,8 @@ description: "Daily portfolio analysis"
 
 ## Задачи
 - прочитай новостную сводку за послении 24 часа: $ARGUMENTS
-- Используй reports/Sample.md n reports/Template.md как образец репорта
+- Испольщуй "bash tree ."
+- Используй Sample.md n Template.md как образец репорта
 - Запустить "bash uv run python -m src.cli summary"
 - Запустить "bash uv run python -m src.cli cash"
 - Запустить "bash uv run python -m src.cli allocation"
