@@ -285,6 +285,44 @@ def summary(
 
 
 @app.command()
+def dividend(
+    amount: str = typer.Argument(..., help="Dividend amount"),
+    currency: str = typer.Option("USD", "--currency", help="Currency (USD, EUR, GBP, etc.)"),
+    symbol: Optional[str] = typer.Option(None, "--symbol", help="Asset symbol dividend came from (optional)"),
+    txn_date: Optional[str] = typer.Option(None, "--date", help="Transaction date (YYYY-MM-DD), default today"),
+):
+    """Add dividend deposit to cash balance."""
+    try:
+        # Parse date or use today
+        if txn_date:
+            txn_date_obj = date.fromisoformat(txn_date)
+        else:
+            txn_date_obj = date.today()
+
+        dividend_amount = Decimal(amount)
+
+        # Create CASH deposit transaction
+        txn = Transaction(
+            date=txn_date_obj,
+            asset="CASH",
+            asset_type=AssetType.CASH,
+            action=TransactionType.DEPOSIT,
+            quantity=dividend_amount,
+            price=Decimal("1"),
+            currency=currency,
+            fees=Decimal("0"),
+            exchange="dividend" + (f" ({symbol})" if symbol else ""),
+        )
+
+        storage.add_transaction(txn)
+        console.print(f"[green]✓[/green] Added dividend: +{amount} {currency} to CASH{f' from {symbol}' if symbol else ''}")
+
+    except Exception as e:
+        console.print(f"[red]✗ Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
 def cash():
     """Show cash balances by currency."""
     cash_balances = analyzer.get_cash_balances()

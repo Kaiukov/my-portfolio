@@ -1,6 +1,6 @@
 ---
 name: portfolio-cli
-description: This skill should be used when the user asks to "add transaction", "check portfolio", "show summary", "import transactions", "list trades", "export portfolio", or mentions portfolio tracking, P&L calculation, or position management.
+description: This skill should be used when the user asks to "add transaction", "add dividend", "deposit cash", "check portfolio", "show summary", "import transactions", "list trades", "export portfolio", or mentions portfolio tracking, P&L calculation, position management, or cash deposits.
 version: 0.1.0
 ---
 
@@ -39,6 +39,36 @@ uv run python -m src.cli add CASH 1000 --price 1 --asset-type cash --action depo
 # Historical transaction
 uv run python -m src.cli add ETH-USD 2 --price 3500 --asset-type crypto --action buy --date 2025-06-15
 ```
+
+### Add Dividend
+```bash
+uv run python -m src.cli dividend AMOUNT --currency CURRENCY [--symbol SYMBOL] [--date DATE]
+```
+
+**Parameters:**
+- `AMOUNT` - Dividend amount (required)
+- `--currency` - Currency code (USD, EUR, GBP, etc., default: USD)
+- `--symbol` - Asset symbol dividend came from (optional, for reference)
+- `--date` - YYYY-MM-DD format (default: today)
+
+**Behavior:** Deposits dividend to appropriate currency cash position. Creates CASH DEPOSIT transaction automatically.
+
+**Examples:**
+```bash
+# Add USD dividend
+uv run python -m src.cli dividend 100 --currency USD
+
+# Add EUR dividend from AAPL
+uv run python -m src.cli dividend 50 --currency EUR --symbol AAPL
+
+# Add GBP dividend from Unilever
+uv run python -m src.cli dividend 25 --currency GBP --symbol UNILEVER
+
+# Historical dividend
+uv run python -m src.cli dividend 75.50 --currency USD --symbol MSFT --date 2025-01-10
+```
+
+**Result:** Dividend recorded as CASH DEPOSIT. Balance for `CASH-{CURRENCY}` increases automatically (e.g., dividend 100 USD → CASH-USD +100).
 
 ### View Portfolio
 ```bash
@@ -126,6 +156,8 @@ uv run python -m src.cli add BTC-USD 0.05 --price 50000 --asset-type crypto --ac
 ```bash
 uv run python -m src.cli add CASH 500 --price 1 --asset-type cash --action deposit --currency EUR
 uv run python -m src.cli add CASH 1000 --price 1 --asset-type cash --action deposit --currency USD
+uv run python -m src.cli dividend 100 --currency USD
+uv run python -m src.cli dividend 50 --currency EUR --symbol AAPL
 uv run python -m src.cli cash
 ```
 
