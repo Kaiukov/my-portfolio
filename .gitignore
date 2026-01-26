@@ -28,7 +28,7 @@ env/
 
 # Data and cache
 data/cache/
-data/transactions.json
+
 
 # OS
 .DS_Store
