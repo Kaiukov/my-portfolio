@@ -319,6 +319,7 @@ For detailed section templates, data presentation formats, and best-practice exa
 - **`references/best-practices.md`** - Tone, language, critical analysis patterns
 - **`references/how-to-html.md`** - HTML semantics guide (<h1>-<h3>, <strong>, <table>, <ul>)
 - **`references/source.md`** - Sources to avoid 
+- **`references/rrs.md`** - RSS feeds for latest news, market analysis, etc.
 
 ### Example Reports
 Working HTML examples in `examples/`:
