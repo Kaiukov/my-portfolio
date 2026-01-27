@@ -75,14 +75,20 @@ uv run python -m src.cli dividend 75.50 --currency USD --symbol MSFT --date 2025
 # Portfolio summary with P&L (table format)
 uv run python -m src.cli summary
 
-# Portfolio summary as JSON (terminal output)
-uv run python -m src.cli summary --output terminal
+# Portfolio summary as JSON (LLM-ready)
+uv run python -m src.cli summary --json
 
 # Cash balances by currency
 uv run python -m src.cli cash
 
+# Cash balances as JSON (LLM-ready)
+uv run python -m src.cli cash --json
+
 # Asset allocation
 uv run python -m src.cli allocation
+
+# Asset allocation as JSON (LLM-ready)
+uv run python -m src.cli allocation --json
 
 # All transactions (filterable)
 uv run python -m src.cli list
@@ -90,9 +96,11 @@ uv run python -m src.cli list --symbol BTC-USD
 uv run python -m src.cli list --type crypto
 ```
 
-**Summary Output Formats:**
-- `--output table` (default) - Rich formatted table view with colors
-- `--output terminal` - JSON format suitable for parsing/scripting
+**JSON Output (--json flag):**
+All view commands support `--json` for LLM-ready structured output:
+- `summary --json` - Positions array + totals object
+- `cash --json` - Balances array + total_usd
+- `allocation --json` - Allocation array + total_value_usd
 
 ### Import CSV
 ```bash
@@ -168,13 +176,19 @@ uv run python -m src.cli summary
 uv run python -m src.cli allocation
 ```
 
-**Get portfolio data as JSON:**
+**Get portfolio data as JSON (LLM-ready):**
 ```bash
-# Output JSON summary to terminal
-uv run python -m src.cli summary --output terminal
+# Output JSON summary
+uv run python -m src.cli summary --json
+
+# Output cash balances as JSON
+uv run python -m src.cli cash --json
+
+# Output allocation as JSON
+uv run python -m src.cli allocation --json
 
 # Save JSON to file
-uv run python -m src.cli summary --output terminal > portfolio_summary.json
+uv run python -m src.cli summary --json > portfolio_summary.json
 
 # Export transactions (alternative JSON export)
 uv run python -m src.cli export --format json --output transactions.json

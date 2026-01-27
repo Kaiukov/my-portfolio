@@ -179,15 +179,19 @@ def list(
 @app.command()
 def summary(
     output: str = typer.Option("table", "--output", help="Output format (table or terminal)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON (LLM-ready format)"),
 ):
     """Show portfolio summary with current values and P&L."""
     positions = analyzer.get_current_positions()
 
     if not positions:
+        if json_output:
+            print(json.dumps({"positions": [], "totals": {}}))
+            return
         console.print("[yellow]No positions found[/yellow]")
         return
 
-    if output == "terminal":
+    if json_output or output == "terminal":
         # JSON output to terminal
         totals = analyzer.get_total_value()
 
@@ -323,15 +327,36 @@ def dividend(
 
 
 @app.command()
-def cash():
+def cash(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON (LLM-ready format)"),
+):
     """Show cash balances by currency."""
     cash_balances = analyzer.get_cash_balances()
 
     if not cash_balances or "_total_usd" not in cash_balances:
+        if json_output:
+            print(json.dumps({"balances": [], "total_usd": 0}))
+            return
         console.print("[yellow]No cash positions found[/yellow]")
         return
 
     total_usd = cash_balances.pop("_total_usd")
+
+    if json_output:
+        balances_data = []
+        for currency in sorted(cash_balances.keys()):
+            bal = cash_balances[currency]
+            balances_data.append({
+                "currency": currency,
+                "quantity": float(bal["quantity"]),
+                "usd_value": float(bal["usd_value"]),
+                "usd_rate": float(bal["usd_rate"]),
+            })
+        print(json.dumps({
+            "balances": balances_data,
+            "total_usd": float(total_usd),
+        }))
+        return
 
     # Create table
     table = Table(title="Cash Balances")
@@ -354,10 +379,28 @@ def cash():
 
 
 @app.command()
-def allocation():
+def allocation(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON (LLM-ready format)"),
+):
     """Show portfolio allocation by asset type."""
     alloc = analyzer.get_allocation()
     totals = analyzer.get_total_value()
+
+    if json_output:
+        allocation_data = []
+        for asset_type in ["crypto", "stock", "etf", "cash"]:
+            if asset_type in alloc:
+                data = alloc[asset_type]
+                allocation_data.append({
+                    "asset_type": asset_type,
+                    "value_usd": float(data["value"]),
+                    "percentage": float(data["pct"]),
+                })
+        print(json.dumps({
+            "allocation": allocation_data,
+            "total_value_usd": float(totals["total_value"]),
+        }))
+        return
 
     # Create table
     table = Table(title="Asset Allocation")

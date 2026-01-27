@@ -166,7 +166,7 @@
   },
   {
     "date": "2024-11-13",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "3",
@@ -177,7 +177,7 @@
   },
   {
     "date": "2024-11-13",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "9",
@@ -342,7 +342,7 @@
   },
   {
     "date": "2024-12-19",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "3",
@@ -419,7 +419,7 @@
   },
   {
     "date": "2025-01-13",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "2",
@@ -474,7 +474,7 @@
   },
   {
     "date": "2025-02-03",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "3",
@@ -540,7 +540,7 @@
   },
   {
     "date": "2025-03-03",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "3",
@@ -584,7 +584,7 @@
   },
   {
     "date": "2025-04-01",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "buy",
     "quantity": "3",
@@ -1068,7 +1068,7 @@
   },
   {
     "date": "2025-10-20",
-    "asset": "SPLG",
+    "asset": "SPYM",
     "asset_type": "etf",
     "action": "sell",
     "quantity": "13",
