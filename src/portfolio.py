@@ -695,3 +695,208 @@ class PortfolioAnalyzer:
             metrics["benchmark_return_pct"] = benchmark_return_pct
 
         return metrics
+
+    # ═══════════════════════════════════════════════════════
+    # PERFORMANCE METRICS: Structural Calculations
+    # ═══════════════════════════════════════════════════════
+
+    def count_trades(self) -> int:
+        """Count total buy/sell transactions (excluding deposits/withdrawals)."""
+        transactions = self.storage.load_transactions()
+        return sum(
+            1 for txn in transactions
+            if txn.action in [TransactionType.BUY, TransactionType.SELL]
+        )
+
+    def get_trades_per_month(self) -> Decimal:
+        """Calculate average trades per month."""
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+
+        if not start_date or years_invested <= 0:
+            return Decimal("0")
+
+        total_trades = self.count_trades()
+        months = years_invested * 12
+
+        return Decimal(str(total_trades)) / Decimal(str(months)) if months > 0 else Decimal("0")
+
+    def get_average_portfolio_value(self) -> Decimal:
+        """Calculate average portfolio value over time."""
+        totals = self.get_total_value()
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+
+        if not start_date:
+            return Decimal("0")
+
+        transactions = self.storage.load_transactions()
+        beginning_value = Decimal("0")
+        for txn in transactions:
+            if txn.date == start_date and txn.asset_type == AssetType.CASH:
+                beginning_value += txn.quantity
+
+        ending_value = totals["total_value"]
+
+        # Simple average of beginning and ending values
+        # In production, use actual historical values
+        average = (beginning_value + ending_value) / 2 if beginning_value > 0 else ending_value
+
+        return average
+
+    def calculate_turnover(self) -> Dict:
+        """
+        Calculate portfolio turnover ratio.
+
+        Formula: (Sum of trades / Average portfolio value) / years
+
+        Interprets trading activity: high = active trader, low = buy-and-hold
+
+        Returns:
+            Dictionary with annual_turnover_pct, trades_per_month, trading_style
+        """
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+
+        if not start_date or years_invested <= 0:
+            return {
+                "annual_turnover_pct": Decimal("0"),
+                "trades_per_month": Decimal("0"),
+                "trading_style": "insufficient_data",
+            }
+
+        total_trades = self.count_trades()
+        avg_value = self.get_average_portfolio_value()
+
+        if avg_value <= 0:
+            return {
+                "annual_turnover_pct": Decimal("0"),
+                "trades_per_month": Decimal("0"),
+                "trading_style": "no_activity",
+            }
+
+        # Annualized turnover
+        annual_turnover = (Decimal(str(total_trades)) / avg_value) / Decimal(str(years_invested)) * 100
+
+        trades_per_month = self.get_trades_per_month()
+
+        # Classify trading style
+        if annual_turnover > 200:
+            trading_style = "very_active"
+        elif annual_turnover > 100:
+            trading_style = "active"
+        elif annual_turnover > 50:
+            trading_style = "moderate"
+        elif annual_turnover > 10:
+            trading_style = "low"
+        else:
+            trading_style = "very_low"
+
+        return {
+            "annual_turnover_pct": annual_turnover,
+            "trades_per_month": trades_per_month,
+            "trading_style": trading_style,
+        }
+
+    def calculate_diversification_index(self) -> Dict:
+        """
+        Calculate diversification index using Herfindahl-Hirschman Index.
+
+        Formula: 1 - Σ(weight_i²)
+
+        Range: 0 (single asset) to ~1 (perfect diversification)
+
+        Returns:
+            Dictionary with total_index, by_type, by_symbol, interpretation
+        """
+        positions = self.get_current_positions()
+        totals = self.get_total_value()
+        total_value = totals["total_value"]
+
+        if total_value <= 0 or not positions:
+            return {
+                "total_index": Decimal("0"),
+                "by_type": {},
+                "by_symbol": {},
+                "interpretation": "insufficient_data",
+            }
+
+        # By symbol
+        symbol_weights = {}
+        for pos in positions:
+            if pos["asset_type"] != "cash":
+                weight = pos["current_value"] / total_value
+                symbol_weights[pos["symbol"]] = weight
+
+        hhi_symbol = sum(w ** 2 for w in symbol_weights.values())
+        div_index_symbol = 1 - hhi_symbol
+
+        # By asset type
+        allocation = self.get_allocation()
+        type_weights = {
+            "crypto": allocation["crypto"]["value"] / total_value,
+            "stock": allocation["stock"]["value"] / total_value,
+            "etf": allocation["etf"]["value"] / total_value,
+            "cash": allocation["cash"]["value"] / total_value,
+        }
+
+        hhi_type = sum(w ** 2 for w in type_weights.values() if w > 0)
+        div_index_type = 1 - hhi_type
+
+        # Interpretation
+        if div_index_symbol > 0.75:
+            interpretation = "excellent"
+        elif div_index_symbol > 0.60:
+            interpretation = "good"
+        elif div_index_symbol > 0.40:
+            interpretation = "moderate"
+        else:
+            interpretation = "poor"
+
+        return {
+            "total_index": div_index_symbol,
+            "by_symbol": symbol_weights,
+            "by_type": type_weights,
+            "interpretation": interpretation,
+        }
+
+    def calculate_tracking_error(self, benchmark_return_pct: Decimal) -> Decimal:
+        """
+        Calculate tracking error (deviation from benchmark).
+
+        Formula: StdDev(Portfolio Return - Benchmark Return)
+
+        Low tracking error = follows benchmark (passive)
+        High tracking error = active strategy (intentional deviation)
+
+        Args:
+            benchmark_return_pct: Benchmark return %
+
+        Returns:
+            Tracking error as percentage
+        """
+        absolute = self.calculate_absolute_return()
+        portfolio_return = absolute["pct"]
+
+        # Simplified: use difference as proxy for tracking error
+        tracking_error = abs(portfolio_return - benchmark_return_pct)
+
+        return tracking_error
+
+    def get_structural_metrics(self, benchmark_return_pct: Optional[Decimal] = None) -> Dict:
+        """
+        Get all structural metrics combined.
+
+        Args:
+            benchmark_return_pct: Optional benchmark return for tracking error
+
+        Returns:
+            Dictionary with all structural metrics
+        """
+        metrics = {
+            "turnover": self.calculate_turnover(),
+            "diversification": self.calculate_diversification_index(),
+        }
+
+        if benchmark_return_pct is not None:
+            metrics["tracking_error_pct"] = self.calculate_tracking_error(benchmark_return_pct)
+            metrics["benchmark_return_pct"] = benchmark_return_pct
+
+        return metrics
