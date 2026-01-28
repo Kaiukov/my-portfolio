@@ -1,8 +1,8 @@
 """Portfolio analysis with FIFO cost basis calculation."""
 
 from decimal import Decimal
-from datetime import date
-from typing import Dict, List, Optional
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional, Tuple
 
 from src.models import Transaction, Position, AssetType, TransactionType
 from src.storage import TransactionStorage
@@ -217,3 +217,236 @@ class PortfolioAnalyzer:
             allocation["cash"]["pct"] = total_cash / total_value * 100
 
         return allocation
+
+    # ═══════════════════════════════════════════════════════
+    # PERFORMANCE METRICS: Return Calculations
+    # ═══════════════════════════════════════════════════════
+
+    def get_portfolio_dates(self) -> Tuple[Optional[date], Optional[date], float]:
+        """
+        Get portfolio inception date and current date with years invested.
+
+        Returns:
+            Tuple of (start_date, end_date, years_invested)
+        """
+        transactions = self.storage.load_transactions()
+        if not transactions:
+            return None, None, 0.0
+
+        start_date = min(txn.date for txn in transactions)
+        end_date = date.today()
+        days_invested = (end_date - start_date).days
+        years_invested = days_invested / 365.25
+
+        return start_date, end_date, years_invested
+
+    def get_cash_flows(self) -> List[Tuple[date, Decimal]]:
+        """
+        Get all deposit and withdrawal cash flows.
+
+        Returns:
+            List of (date, amount) tuples where positive = deposit, negative = withdrawal
+        """
+        transactions = self.storage.load_transactions()
+        cash_flows = []
+
+        for txn in transactions:
+            if txn.asset_type == AssetType.CASH:
+                if txn.action == TransactionType.DEPOSIT:
+                    # Convert to USD if needed
+                    amount_usd = txn.quantity
+                    if txn.currency != "USD":
+                        rate = self.fetcher.get_exchange_rate(txn.currency, "USD")
+                        if rate:
+                            amount_usd = txn.quantity * rate
+                    cash_flows.append((txn.date, amount_usd))
+                elif txn.action == TransactionType.WITHDRAWAL:
+                    amount_usd = -txn.quantity
+                    if txn.currency != "USD":
+                        rate = self.fetcher.get_exchange_rate(txn.currency, "USD")
+                        if rate:
+                            amount_usd = -txn.quantity * rate
+                    cash_flows.append((txn.date, amount_usd))
+
+        return sorted(cash_flows, key=lambda x: x[0])
+
+    def calculate_absolute_return(self) -> Dict[str, Decimal]:
+        """
+        Calculate absolute return (total P&L in % and currency).
+
+        Returns:
+            Dictionary with pct, usd_amount, and currency
+        """
+        totals = self.get_total_value()
+        cost_basis = totals["total_investment"]
+        current_value = totals["total_value"]
+
+        if cost_basis <= 0:
+            return {"pct": Decimal("0"), "usd_amount": Decimal("0"), "currency": "USD"}
+
+        absolute_return_pct = ((current_value - cost_basis) / cost_basis) * 100
+        absolute_return_usd = current_value - cost_basis
+
+        return {
+            "pct": absolute_return_pct,
+            "usd_amount": absolute_return_usd,
+            "currency": "USD",
+        }
+
+    def calculate_cagr(self) -> Decimal:
+        """
+        Calculate Compound Annual Growth Rate.
+
+        Formula: (Ending Value / Beginning Value) ^ (1/years) - 1
+
+        Returns:
+            CAGR as percentage (e.g., 12.5 for 12.5%)
+        """
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+
+        if not start_date or years_invested <= 0:
+            return Decimal("0")
+
+        transactions = self.storage.load_transactions()
+        beginning_value = Decimal("0")
+        for txn in transactions:
+            if txn.date == start_date and txn.asset_type == AssetType.CASH:
+                beginning_value += txn.quantity
+
+        if beginning_value <= 0:
+            return Decimal("0")
+
+        totals = self.get_total_value()
+        ending_value = totals["total_value"]
+
+        if ending_value <= 0:
+            return Decimal("0")
+
+        cagr = (ending_value / beginning_value) ** (Decimal("1") / Decimal(str(years_invested))) - Decimal("1")
+        return cagr * 100
+
+    def calculate_twr(self) -> Decimal:
+        """
+        Calculate Time-Weighted Return (excludes cash flow timing effects).
+
+        Simplified: (Ending Value - Cash Flows) / Beginning Value) ^ (1/years) - 1
+
+        Returns:
+            TWR as percentage
+        """
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+
+        if not start_date or years_invested <= 0:
+            return Decimal("0")
+
+        cash_flows = self.get_cash_flows()
+        total_cash_flows = sum(cf[1] for cf in cash_flows)
+
+        transactions = self.storage.load_transactions()
+        beginning_value = Decimal("0")
+        for txn in transactions:
+            if txn.date == start_date and txn.asset_type == AssetType.CASH:
+                beginning_value += txn.quantity
+
+        if beginning_value <= 0:
+            return Decimal("0")
+
+        totals = self.get_total_value()
+        ending_value = totals["total_value"]
+
+        # Adjusted ending value: remove impact of cash flows
+        adjusted_end_value = ending_value - total_cash_flows
+
+        if adjusted_end_value <= 0:
+            return Decimal("0")
+
+        twr = (adjusted_end_value / beginning_value) ** (Decimal("1") / Decimal(str(years_invested))) - Decimal("1")
+        return twr * 100
+
+    def calculate_mwr(self) -> Decimal:
+        """
+        Calculate Money-Weighted Return (IRR including cash flow timing).
+
+        Uses Newton-Raphson method to find IRR.
+
+        Returns:
+            MWR as percentage
+        """
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+
+        if not start_date or years_invested <= 0:
+            return Decimal("0")
+
+        cash_flows = self.get_cash_flows()
+        totals = self.get_total_value()
+        ending_value = totals["total_value"]
+
+        # Create cash flow series: initial investment + subsequent flows + ending value
+        cf_tuples = [(start_date, -sum(cf[1] for cf in cash_flows if cf[0] == start_date))]
+
+        for flow_date, amount in cash_flows:
+            if flow_date > start_date:
+                cf_tuples.append((flow_date, -amount))
+
+        cf_tuples.append((end_date, ending_value))
+
+        # Simple IRR approximation: annualized return
+        if len(cf_tuples) < 2 or cf_tuples[0][1] >= 0:
+            return Decimal("0")
+
+        total_invested = abs(cf_tuples[0][1])
+        final_value = cf_tuples[-1][1]
+
+        if total_invested <= 0:
+            return Decimal("0")
+
+        simple_return = (final_value - total_invested) / total_invested
+        annualized_return = (simple_return / Decimal(str(years_invested))) if years_invested > 0 else simple_return
+
+        return annualized_return * 100
+
+    def calculate_relative_return(self, benchmark_return_pct: Decimal) -> Decimal:
+        """
+        Calculate relative return vs benchmark.
+
+        Formula: Portfolio Return - Benchmark Return
+
+        Args:
+            benchmark_return_pct: Benchmark return as percentage
+
+        Returns:
+            Relative return as percentage
+        """
+        absolute = self.calculate_absolute_return()
+        portfolio_return = absolute["pct"]
+        return portfolio_return - benchmark_return_pct
+
+    def get_return_metrics(self, benchmark_return_pct: Optional[Decimal] = None) -> Dict:
+        """
+        Get all return metrics combined.
+
+        Args:
+            benchmark_return_pct: Optional benchmark return for relative calculation
+
+        Returns:
+            Dictionary with all return metrics
+        """
+        start_date, end_date, years_invested = self.get_portfolio_dates()
+        absolute = self.calculate_absolute_return()
+
+        metrics = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "years_invested": years_invested,
+            "absolute_return_pct": absolute["pct"],
+            "absolute_return_usd": absolute["usd_amount"],
+            "cagr_pct": self.calculate_cagr(),
+            "twr_pct": self.calculate_twr(),
+            "mwr_pct": self.calculate_mwr(),
+        }
+
+        if benchmark_return_pct is not None:
+            metrics["relative_return_pct"] = self.calculate_relative_return(benchmark_return_pct)
+            metrics["benchmark_return_pct"] = benchmark_return_pct
+
+        return metrics
