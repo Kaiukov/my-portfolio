@@ -16,7 +16,7 @@ from src.models import AssetType
 class PriceCache:
     """TTL-based price cache stored in JSON."""
 
-    def __init__(self, cache_file: str = "data/cache/prices.json", ttl_hours: int = 24):
+    def __init__(self, cache_file: str = "data/cache/prices.json", ttl_hours: float = 0.25):
         self.cache_file = Path(cache_file)
         self.ttl_seconds = ttl_hours * 3600
         self._ensure_directory()
@@ -125,7 +125,7 @@ class PriceFetcher:
         from_currency: str,
         to_currency: str = "USD"
     ) -> Optional[Decimal]:
-        """Get exchange rate between two currencies."""
+        """Get exchange rate between two currencies using yfinance."""
         if from_currency == to_currency:
             return Decimal("1")
 
@@ -136,16 +136,22 @@ class PriceFetcher:
             if cached:
                 return Decimal(cached)
 
-            # Try Frankfurter API (free, no key required)
-            import urllib.request
-            import json
+            # Use yfinance for currency pairs (XXX=X format)
+            # This returns 1 USD = X currency units, so we need to invert
+            ticker = yfinance.Ticker(f"{from_currency}=X")
+            data = ticker.history(period="1d")
 
-            url = f"https://api.frankfurter.app/latest?from={from_currency}&to={to_currency}"
-            with urllib.request.urlopen(url, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                rate = Decimal(str(data["rates"].get(to_currency, 1)))
-                self.cache.set(cache_key, str(rate))
-                return rate
+            if data.empty:
+                return None
+
+            # Invert the rate: yfinance gives USD->currency, we need currency->USD
+            inverse_rate = Decimal(str(data["Close"].iloc[-1]))
+            if inverse_rate == 0:
+                return None
+
+            rate = Decimal("1") / inverse_rate
+            self.cache.set(cache_key, str(rate))
+            return rate
         except Exception:
             return None
 
