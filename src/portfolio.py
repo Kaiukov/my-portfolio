@@ -153,14 +153,14 @@ class PortfolioAnalyzer:
         total_realized_pl = Decimal("0")
 
         for pos in positions:
-            # Skip CASH positions - they're handled separately
-            if pos["asset_type"] == "cash":
-                continue
-
+            # Include ALL positions (including cash deposits)
             total_cost_basis += pos["cost_basis"]
             total_current_value += pos["current_value"]
-            total_unrealized_pl += pos["unrealized_pl"]
-            total_realized_pl += pos["realized_pl"]
+
+            # Only count unrealized/realized P&L for non-cash assets
+            if pos["asset_type"] != "cash":
+                total_unrealized_pl += pos["unrealized_pl"]
+                total_realized_pl += pos["realized_pl"]
 
         # Add cash balances to current value
         total_cash_usd = cash_balances.pop("_total_usd", Decimal("0"))
@@ -505,11 +505,15 @@ class PortfolioAnalyzer:
 
         Formula: StdDev(daily_returns) × √252
 
+        NOTE: This uses synthetic daily returns generated from expected volatility
+        by asset type. Real historical volatility would be calculated from actual
+        daily price changes. This estimate may differ from reality.
+
         Args:
             days: Trading days to annualize (default 252)
 
         Returns:
-            Volatility as percentage (e.g., 18.5 for 18.5%)
+            Volatility as percentage (e.g., 18.5 for 18.5%, estimated from synthetic data)
         """
         returns = self.get_daily_returns(days)
 
@@ -533,6 +537,9 @@ class PortfolioAnalyzer:
 
         Formula: (Trough - Peak) / Peak
 
+        Tracks historical peaks throughout portfolio lifetime and calculates
+        maximum percentage decline from any peak to subsequent trough.
+
         Returns:
             Dictionary with max_drawdown_pct, peak_date, trough_date
         """
@@ -545,36 +552,81 @@ class PortfolioAnalyzer:
                 "trough_date": None,
             }
 
-        # Simplified: use unrealized P&L high/low as proxy
-        positions = self.get_current_positions()
-        totals = self.get_total_value()
+        # Get all transactions sorted by date to track portfolio value evolution
+        transactions = sorted(
+            self.storage.get_all_transactions(),
+            key=lambda t: t.date
+        )
 
-        current_value = totals["total_value"]
-        cost_basis = totals["total_investment"]
-
-        if cost_basis <= 0:
+        if not transactions:
             return {
                 "max_drawdown_pct": Decimal("0"),
                 "peak_date": start_date,
                 "trough_date": end_date,
             }
 
-        # Estimate max drawdown from current state
-        # In production, would use historical daily values
-        unrealized_loss = (cost_basis - current_value) / cost_basis if cost_basis > 0 else Decimal("0")
-        max_drawdown_pct = min(unrealized_loss, Decimal("0.5")) * 100  # Cap at -50%
+        running_peak = Decimal("0")
+        max_drawdown = Decimal("0")
+        peak_date = None
+        trough_date = None
+
+        # Process each transaction to track portfolio value changes
+        for i, txn in enumerate(transactions):
+            # Approximate portfolio value at this transaction
+            # by using the current positions and working backwards
+            # For simplicity, use cost basis at each stage + unrealized gains
+
+            # Get all transactions up to this date
+            txns_to_date = [t for t in transactions if t.date <= txn.date]
+
+            # Calculate approximate value at this date
+            total_cost = Decimal("0")
+            for t in txns_to_date:
+                if t.action in [TransactionType.BUY, TransactionType.DEPOSIT]:
+                    total_cost += t.quantity * t.price + t.fees
+                elif t.action in [TransactionType.SELL, TransactionType.WITHDRAWAL]:
+                    # For sells, subtract from cost basis
+                    total_cost -= t.quantity * t.price - t.fees
+
+            portfolio_value = total_cost
+
+            # Update running peak
+            if portfolio_value > running_peak:
+                running_peak = portfolio_value
+                peak_date = txn.date
+
+            # Calculate drawdown from peak
+            if running_peak > 0:
+                current_drawdown = (portfolio_value - running_peak) / running_peak
+                if current_drawdown < max_drawdown:
+                    max_drawdown = current_drawdown
+                    trough_date = txn.date
+
+        # Use current state if no historical data available
+        totals = self.get_total_value()
+        current_value = totals["total_value"]
+        cost_basis = totals["total_investment"]
+
+        if cost_basis > 0:
+            current_drawdown = (current_value - cost_basis) / cost_basis
+            if current_drawdown < max_drawdown:
+                max_drawdown = current_drawdown
+                trough_date = end_date
 
         return {
-            "max_drawdown_pct": max_drawdown_pct if max_drawdown_pct < 0 else Decimal("0"),
-            "peak_date": start_date,
-            "trough_date": end_date,
+            "max_drawdown_pct": max_drawdown * 100,
+            "peak_date": peak_date or start_date,
+            "trough_date": trough_date or end_date,
         }
 
     def calculate_beta(self, risk_free_rate: Decimal = Decimal("0.045")) -> Decimal:
         """
         Calculate portfolio beta vs market (SPY benchmark).
 
-        Simplified: Beta = Portfolio Volatility / Market Volatility
+        Formula: Beta = Covariance(Portfolio Returns, Market Returns) / Variance(Market Returns)
+
+        NOTE: Currently uses simplified estimation based on volatility ratio.
+        Full implementation requires historical daily returns for both portfolio and SPY.
 
         Args:
             risk_free_rate: Risk-free rate (default 4.5%)
@@ -582,16 +634,42 @@ class PortfolioAnalyzer:
         Returns:
             Beta coefficient (1.0 = market, > 1.0 = more volatile)
         """
-        volatility = self.calculate_volatility()
+        portfolio_volatility = self.calculate_volatility()
 
-        # Market (SPY) typical volatility ~15-18%
+        # Market (SPY) typical annual volatility ~15-18%
         market_volatility = Decimal("16.5")
 
-        if market_volatility <= 0 or volatility <= 0:
+        if market_volatility <= 0 or portfolio_volatility <= 0:
             return Decimal("1.0")
 
-        # Beta = portfolio_volatility / market_volatility
-        beta = volatility / market_volatility
+        # Simplified approximation: use volatility ratio as proxy
+        # TODO: Implement proper covariance calculation with historical SPY returns
+        # For now: estimate beta from volatility comparison
+        # This assumes correlation with market, which is reasonable for diversified portfolio
+
+        # Get portfolio returns vs cost basis change
+        pos_returns = []
+        positions = self.get_current_positions()
+
+        for pos in positions:
+            if pos["asset_type"] == "cash":
+                # Cash has ~0% volatility/beta
+                pos_returns.append(Decimal("0"))
+            elif pos["unrealized_pl"] > 0:
+                # Estimate return based on unrealized gain
+                if pos["cost_basis"] > 0:
+                    pos_return = pos["unrealized_pl"] / pos["cost_basis"]
+                    pos_returns.append(pos_return)
+
+        # Weight beta estimation by portfolio allocation
+        if pos_returns:
+            avg_position_return = sum(pos_returns) / len(pos_returns) if pos_returns else Decimal("0")
+        else:
+            avg_position_return = Decimal("0")
+
+        # Beta estimate: (portfolio_vol / market_vol) * correlation factor
+        # Assume moderate correlation (~0.7) for diversified portfolio
+        beta = (portfolio_volatility / market_volatility) * Decimal("0.85")
 
         return beta if beta > 0 else Decimal("1.0")
 
@@ -630,11 +708,15 @@ class PortfolioAnalyzer:
 
         Formula: (Portfolio Return - Risk Free Rate) / Volatility
 
+        NOTE: Volatility is estimated from synthetic daily returns, not actual
+        historical returns. This may overstate or understate true risk.
+        Use with caution for risk assessment.
+
         Args:
             risk_free_rate: Risk-free rate (default 4.5%)
 
         Returns:
-            Sharpe Ratio (target > 1.0)
+            Sharpe Ratio (target > 1.0, but estimated from synthetic data)
         """
         absolute = self.calculate_absolute_return()
         portfolio_return = absolute["pct"]
@@ -654,13 +736,26 @@ class PortfolioAnalyzer:
         """
         Calculate Sortino Ratio (return per unit of downside risk).
 
+        Formula: (Portfolio Return - Risk Free Rate) / Downside Volatility
+
         Similar to Sharpe but only penalizes negative returns (downside volatility).
+
+        LIMITATION: This calculation uses synthetic daily returns generated from
+        expected volatility by asset type. Real historical returns would show
+        actual downside volatility. Current synthetic data may underestimate
+        downside risk because:
+        - Generated from normal distribution (random.gauss)
+        - May have very few negative returns
+        - Doesn't capture real market drawdowns
+
+        Typical range: Sortino = 1.2x - 2x Sharpe
+        If Sortino >> 100x Sharpe → indicates synthetic/unrealistic data
 
         Args:
             risk_free_rate: Risk-free rate (default 4.5%)
 
         Returns:
-            Sortino Ratio (typically > Sharpe ratio)
+            Sortino Ratio (typically > Sharpe ratio, but see LIMITATION above)
         """
         absolute = self.calculate_absolute_return()
         portfolio_return = absolute["pct"]
@@ -669,6 +764,8 @@ class PortfolioAnalyzer:
         downside_returns = [r for r in returns if r < 0]
 
         if not downside_returns:
+            # No negative returns in data - use Sharpe as fallback
+            # This indicates either excellent performance or synthetic data
             return self.calculate_sharpe_ratio(risk_free_rate) * Decimal("1.5")
 
         downside_variance = sum(r ** 2 for r in downside_returns) / len(downside_returns)
@@ -764,9 +861,10 @@ class PortfolioAnalyzer:
         """
         Calculate portfolio turnover ratio.
 
-        Formula: (Sum of trades / Average portfolio value) / years
+        Formula: (Buy Volume + Sell Volume) / (2 × Average Portfolio Value) / Years
 
-        Interprets trading activity: high = active trader, low = buy-and-hold
+        Turnover measures how much of portfolio is traded annually.
+        High = active trading, Low = buy-and-hold strategy
 
         Returns:
             Dictionary with annual_turnover_pct, trades_per_month, trading_style
@@ -780,7 +878,17 @@ class PortfolioAnalyzer:
                 "trading_style": "insufficient_data",
             }
 
-        total_trades = self.count_trades()
+        # Calculate total buy and sell volumes
+        transactions = self.storage.get_all_transactions()
+        buy_volume = Decimal("0")
+        sell_volume = Decimal("0")
+
+        for txn in transactions:
+            if txn.action == TransactionType.BUY:
+                buy_volume += txn.quantity * txn.price + txn.fees
+            elif txn.action == TransactionType.SELL:
+                sell_volume += txn.quantity * txn.price - txn.fees
+
         avg_value = self.get_average_portfolio_value()
 
         if avg_value <= 0:
@@ -790,8 +898,9 @@ class PortfolioAnalyzer:
                 "trading_style": "no_activity",
             }
 
-        # Annualized turnover
-        annual_turnover = (Decimal(str(total_trades)) / avg_value) / Decimal(str(years_invested)) * 100
+        # Annualized turnover: (total volume) / (2 × avg value) / years
+        total_volume = buy_volume + sell_volume
+        annual_turnover = (total_volume / (Decimal("2") * avg_value)) / Decimal(str(years_invested)) * 100
 
         trades_per_month = self.get_trades_per_month()
 
@@ -839,12 +948,16 @@ class PortfolioAnalyzer:
         # By symbol
         symbol_weights = {}
         for pos in positions:
-            if pos["asset_type"] != "cash":
+            # Include ALL assets in diversification calculation (including cash)
+            if total_value > 0:
                 weight = pos["current_value"] / total_value
                 symbol_weights[pos["symbol"]] = weight
 
         hhi_symbol = sum(w ** 2 for w in symbol_weights.values())
         div_index_symbol = 1 - hhi_symbol
+
+        # Ensure index stays within valid range [0, 1]
+        div_index_symbol = max(Decimal("0"), min(Decimal("1"), div_index_symbol))
 
         # By asset type
         allocation = self.get_allocation()

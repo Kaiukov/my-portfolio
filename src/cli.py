@@ -14,6 +14,7 @@ from src.storage import TransactionStorage
 from src.prices import PriceFetcher
 from src.portfolio import PortfolioAnalyzer
 from src.importer import InteractiveBrokersImporter, SimplifiedPortfolioImporter
+from src.metrics_validator import MetricsValidator
 
 app = typer.Typer(help="Portfolio tracking with FIFO cost basis")
 console = Console()
@@ -662,6 +663,35 @@ def performance(
 
     console.print(summary_table)
     console.print()
+
+    # METRICS VALIDATION
+    validator = MetricsValidator()
+    all_metrics = {
+        **return_metrics,
+        **risk_metrics,
+        **structural_metrics,
+        "total_investment": float(totals["total_investment"]),
+        "total_cash": float(totals["total_cash"]),
+        "total_value": float(totals["total_value"]),
+        "allocation": alloc,
+    }
+    warnings = validator.validate_all(all_metrics)
+
+    if warnings:
+        console.print()
+        console.print("[bold]" + "="*80 + "[/bold]")
+        console.print("[bold]⚠️  METRICS CONSISTENCY WARNINGS[/bold]")
+        console.print("[bold]" + "="*80 + "[/bold]")
+
+        for warning in warnings:
+            severity_emoji = {
+                "critical": "🔴",
+                "warning": "🟡",
+                "info": "🔵"
+            }
+            console.print()
+            console.print(f"{severity_emoji[warning.severity]} [bold]{warning.message}[/bold]")
+            console.print(f"   {warning.explanation}")
 
 
 @app.command()
