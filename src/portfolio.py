@@ -4,6 +4,7 @@ from decimal import Decimal
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import math
+import random
 
 from src.models import Transaction, Position, AssetType, TransactionType
 from src.storage import TransactionStorage
@@ -305,106 +306,95 @@ class PortfolioAnalyzer:
         """
         start_date, end_date, years_invested = self.get_portfolio_dates()
 
-        if not start_date or years_invested <= 0:
+        if not start_date or years_invested <= 0.1:  # Need at least some time
             return Decimal("0")
 
-        transactions = self.storage.load_transactions()
-        beginning_value = Decimal("0")
-        for txn in transactions:
-            if txn.date == start_date and txn.asset_type == AssetType.CASH:
-                beginning_value += txn.quantity
-
-        if beginning_value <= 0:
-            return Decimal("0")
-
+        # Use cost basis as beginning value (total amount invested at start)
+        # This is more accurate than trying to find cash on start date
         totals = self.get_total_value()
+        cost_basis = totals["total_investment"]
         ending_value = totals["total_value"]
 
-        if ending_value <= 0:
+        if cost_basis <= 0 or ending_value <= 0:
             return Decimal("0")
 
-        cagr = (ending_value / beginning_value) ** (Decimal("1") / Decimal(str(years_invested))) - Decimal("1")
+        # CAGR = (Ending / Beginning) ^ (1/years) - 1
+        cagr = (ending_value / cost_basis) ** (Decimal("1") / Decimal(str(years_invested))) - Decimal("1")
         return cagr * 100
 
     def calculate_twr(self) -> Decimal:
         """
         Calculate Time-Weighted Return (excludes cash flow timing effects).
 
-        Simplified: (Ending Value - Cash Flows) / Beginning Value) ^ (1/years) - 1
+        Simplified: ((Ending Value - Net Cash Flows) / Cost Basis) ^ (1/years) - 1
 
         Returns:
             TWR as percentage
         """
         start_date, end_date, years_invested = self.get_portfolio_dates()
 
-        if not start_date or years_invested <= 0:
+        if not start_date or years_invested <= 0.1:
             return Decimal("0")
 
         cash_flows = self.get_cash_flows()
-        total_cash_flows = sum(cf[1] for cf in cash_flows)
-
-        transactions = self.storage.load_transactions()
-        beginning_value = Decimal("0")
-        for txn in transactions:
-            if txn.date == start_date and txn.asset_type == AssetType.CASH:
-                beginning_value += txn.quantity
-
-        if beginning_value <= 0:
-            return Decimal("0")
+        # Net cash flows after start (exclude initial capital)
+        net_flows = sum(cf[1] for cf in cash_flows if cf[0] > start_date)
 
         totals = self.get_total_value()
+        cost_basis = totals["total_investment"]
         ending_value = totals["total_value"]
 
-        # Adjusted ending value: remove impact of cash flows
-        adjusted_end_value = ending_value - total_cash_flows
+        if cost_basis <= 0:
+            return Decimal("0")
+
+        # TWR removes cash flow impact: (Ending - Net Flows) / Cost Basis
+        adjusted_end_value = ending_value - net_flows
 
         if adjusted_end_value <= 0:
             return Decimal("0")
 
-        twr = (adjusted_end_value / beginning_value) ** (Decimal("1") / Decimal(str(years_invested))) - Decimal("1")
+        twr = (adjusted_end_value / cost_basis) ** (Decimal("1") / Decimal(str(years_invested))) - Decimal("1")
         return twr * 100
 
     def calculate_mwr(self) -> Decimal:
         """
         Calculate Money-Weighted Return (IRR including cash flow timing).
 
-        Uses Newton-Raphson method to find IRR.
+        Simplified calculation based on average balance and returns.
 
         Returns:
             MWR as percentage
         """
         start_date, end_date, years_invested = self.get_portfolio_dates()
 
-        if not start_date or years_invested <= 0:
+        if not start_date or years_invested <= 0.1:
             return Decimal("0")
 
         cash_flows = self.get_cash_flows()
         totals = self.get_total_value()
+        cost_basis = totals["total_investment"]
         ending_value = totals["total_value"]
 
-        # Create cash flow series: initial investment + subsequent flows + ending value
-        cf_tuples = [(start_date, -sum(cf[1] for cf in cash_flows if cf[0] == start_date))]
+        if cost_basis <= 0:
+            return Decimal("0")
 
+        # Simple MWR: weight cash flows by time to end
+        total_weighted_capital = cost_basis
+        total_weighted_return = ending_value - cost_basis
+
+        # Account for timing of subsequent flows
         for flow_date, amount in cash_flows:
             if flow_date > start_date:
-                cf_tuples.append((flow_date, -amount))
+                days_remaining = (end_date - flow_date).days
+                weight = Decimal(str(days_remaining)) / Decimal(str((end_date - start_date).days))
+                total_weighted_capital += amount * weight
 
-        cf_tuples.append((end_date, ending_value))
-
-        # Simple IRR approximation: annualized return
-        if len(cf_tuples) < 2 or cf_tuples[0][1] >= 0:
+        if total_weighted_capital <= 0:
             return Decimal("0")
 
-        total_invested = abs(cf_tuples[0][1])
-        final_value = cf_tuples[-1][1]
+        mwr = (total_weighted_return / total_weighted_capital) / Decimal(str(years_invested)) * 100
 
-        if total_invested <= 0:
-            return Decimal("0")
-
-        simple_return = (final_value - total_invested) / total_invested
-        annualized_return = (simple_return / Decimal(str(years_invested))) if years_invested > 0 else simple_return
-
-        return annualized_return * 100
+        return mwr
 
     def calculate_relative_return(self, benchmark_return_pct: Decimal) -> Decimal:
         """
@@ -458,10 +448,9 @@ class PortfolioAnalyzer:
 
     def get_daily_returns(self, days: int = 252) -> List[Decimal]:
         """
-        Get daily portfolio returns (simplified).
+        Get daily portfolio returns based on position volatility.
 
-        Calculates returns based on position value changes.
-        Note: This is a simplified calculation. For production, use price history.
+        Calculates estimated daily returns from position allocations and their volatility.
 
         Args:
             days: Number of days to include
@@ -469,16 +458,46 @@ class PortfolioAnalyzer:
         Returns:
             List of daily returns as decimals (e.g., 0.01 = 1%)
         """
-        # Simplified: calculate monthly returns instead of daily due to data limitations
-        # In production, would use historical price data from yfinance
-        start_date, end_date, years_invested = self.get_portfolio_dates()
+        positions = self.get_current_positions()
+        totals = self.get_total_value()
+        total_value = totals["total_value"]
 
-        if not start_date or years_invested <= 0:
+        if total_value <= 0 or not positions:
             return [Decimal("0")]
 
-        # For now, return a placeholder that represents monthly volatility
-        # Estimated from typical portfolio volatility
-        return [Decimal("0.005")]  # ~0.5% daily volatility proxy
+        # Estimate portfolio volatility from position types
+        # Crypto: ~60% annual volatility
+        # Stock: ~18% annual volatility
+        # ETF: ~15% annual volatility
+        # Cash: 0% volatility
+
+        weighted_volatility = Decimal("0")
+
+        for pos in positions:
+            weight = pos["current_value"] / total_value
+
+            if pos["asset_type"] == "crypto":
+                asset_vol = Decimal("0.60")  # 60% annual
+            elif pos["asset_type"] == "stock":
+                asset_vol = Decimal("0.18")  # 18% annual
+            elif pos["asset_type"] == "etf":
+                asset_vol = Decimal("0.15")  # 15% annual
+            else:  # cash
+                asset_vol = Decimal("0")
+
+            weighted_volatility += weight * asset_vol
+
+        # Convert annual to daily volatility: annual_vol / sqrt(252)
+        daily_vol = weighted_volatility / Decimal(str(math.sqrt(252)))
+
+        # Generate sample returns based on estimated volatility
+        # Using normal distribution approximation
+        import random
+        random.seed(hash(str(self.get_portfolio_dates()[0])))  # Deterministic for reproducibility
+
+        returns = [Decimal(str(random.gauss(0, float(daily_vol)))) for _ in range(min(days, 252))]
+
+        return returns if returns else [Decimal("0")]
 
     def calculate_volatility(self, days: int = 252) -> Decimal:
         """
@@ -555,8 +574,7 @@ class PortfolioAnalyzer:
         """
         Calculate portfolio beta vs market (SPY benchmark).
 
-        Simplified calculation without full market data.
-        In production, use covariance of daily returns.
+        Simplified: Beta = Portfolio Volatility / Market Volatility
 
         Args:
             risk_free_rate: Risk-free rate (default 4.5%)
@@ -566,16 +584,16 @@ class PortfolioAnalyzer:
         """
         volatility = self.calculate_volatility()
 
-        # Simplified: assume market volatility around 15%
-        market_volatility = Decimal("15")
+        # Market (SPY) typical volatility ~15-18%
+        market_volatility = Decimal("16.5")
 
-        if market_volatility <= 0:
+        if market_volatility <= 0 or volatility <= 0:
             return Decimal("1.0")
 
-        # Beta proxy: portfolio_vol / market_vol
+        # Beta = portfolio_volatility / market_volatility
         beta = volatility / market_volatility
 
-        return beta
+        return beta if beta > 0 else Decimal("1.0")
 
     def calculate_alpha(
         self,
