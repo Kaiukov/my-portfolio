@@ -43,7 +43,6 @@ Thumbs.db
 *.csv
 !portfolio.csv
 !yahoo_portfolio_comparison.csv
-!portfolio_transactions.csv
 reports/
 portfolio_reports/
 ukr_news/
