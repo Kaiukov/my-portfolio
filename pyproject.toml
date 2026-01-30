@@ -15,6 +15,10 @@ dependencies = [
     "typer>=0.21.1",
     "yfinance>=1.0",
     "python-binance>=1.0.20",
+    "quantstats>=0.0.81",
+    "pandas>=3.0.0",
+    "numpy>=2.4.1",
+    "duckdb>=1.0.0",
 ]
 
 [project.optional-dependencies]
