@@ -263,6 +263,109 @@ def recalculate(force, from_date, db):
 
 
 @cli.command()
+@click.option('--type', type=click.Choice(['assets', 'cash', 'all']), default='all', help='Allocation type: assets only, cash only, or both')
+@click.option('--export', default=None, help='Export to CSV file (e.g., allocation.csv)')
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def allocation(type, export, db):
+    """Show portfolio allocation breakdown."""
+    service = PortfolioService(db)
+
+    try:
+        data = service.get_allocation(allocation_type=type)
+        positions = data['positions']
+        summary = data['summary']
+        total_value = data['total_value']
+
+        if not positions:
+            click.echo("No positions found")
+            service.close()
+            return
+
+        # Export to CSV if requested
+        if export:
+            try:
+                with open(export, 'w', newline='') as csvfile:
+                    fieldnames = ['Symbol', 'Type', 'Value', 'Percentage']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+
+                    for pos in positions:
+                        writer.writerow({
+                            'Symbol': pos['symbol'],
+                            'Type': pos['type'],
+                            'Value': f"{pos['value']:.2f}",
+                            'Percentage': f"{pos['percentage']:.2f}",
+                        })
+
+                    # Add summary rows
+                    for s in summary:
+                        writer.writerow({
+                            'Symbol': s['symbol'],
+                            'Type': s['type'],
+                            'Value': f"{s['value']:.2f}",
+                            'Percentage': f"{s['percentage']:.2f}",
+                        })
+
+                click.echo(f"✓ Exported allocation to {export}")
+            except Exception as e:
+                click.echo(f"Error exporting CSV: {str(e)}", err=True)
+            finally:
+                service.close()
+            return
+
+        # Display table
+        click.echo("\n" + "=" * 120)
+        click.echo(f"PORTFOLIO ALLOCATION - {type.upper()}")
+        click.echo("=" * 120 + "\n")
+
+        # Table header
+        header = (
+            f"{'Symbol':<20} "
+            f"{'Type':<10} "
+            f"{'Value':>15} "
+            f"{'Percentage':>15}"
+        )
+        click.echo(header)
+        click.echo("-" * 120)
+
+        # Table rows
+        for pos in positions:
+            symbol = pos['symbol']
+            pos_type = pos['type']
+            value = format_currency(pos['value'], 2)
+            percentage = f"{pos['percentage']:.2f}%"
+
+            click.echo(
+                f"{symbol:<20} "
+                f"{pos_type:<10} "
+                f"{value:>15} "
+                f"{percentage:>15}"
+            )
+
+        # Summary section
+        click.echo("\n" + "-" * 120)
+        for s in summary:
+            symbol = s['symbol']
+            s_type = s['type']
+            value = format_currency(s['value'], 2)
+            percentage = f"{s['percentage']:.2f}%"
+
+            click.echo(
+                f"{symbol:<20} "
+                f"{s_type:<10} "
+                f"{value:>15} "
+                f"{percentage:>15}"
+            )
+
+        click.echo("\n" + "=" * 120)
+
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
+
+
+@cli.command()
 @click.option('--filter', type=click.Choice(['open', 'all']), default='all', help='Filter positions (open=held, all=including closed)')
 @click.option('--export', default=None, help='Export to CSV file (e.g., portfolio.csv)')
 @click.option('--db', default='portfolio.db', help='Path to database file')

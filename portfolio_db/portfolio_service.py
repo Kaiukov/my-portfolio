@@ -662,6 +662,104 @@ class PortfolioService:
         result.sort(key=lambda x: x['market_value'], reverse=True)
         return result
 
+    def get_allocation(self, allocation_type='all'):
+        """
+        Get portfolio allocation breakdown.
+
+        Args:
+            allocation_type: 'assets' (stocks/crypto only), 'cash' (cash only), or 'all' (both)
+
+        Returns:
+            List of allocation dicts with symbol, value, percentage
+        """
+        positions = self.get_position_summary(include_closed=False)
+
+        # Separate assets and cash
+        assets = [p for p in positions if not p['symbol'].startswith('CASH')]
+        cash = [p for p in positions if p['symbol'].startswith('CASH')]
+
+        # Calculate totals
+        total_assets_value = sum(p['market_value'] for p in assets)
+        total_cash_value = sum(p['market_value'] for p in cash)
+        total_portfolio_value = total_assets_value + total_cash_value
+
+        result = []
+
+        if allocation_type in ['assets', 'all']:
+            # Add assets allocation
+            for pos in assets:
+                if allocation_type == 'all':
+                    pct = (pos['market_value'] / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
+                else:  # assets only
+                    pct = (pos['market_value'] / total_assets_value * 100) if total_assets_value > 0 else 0
+
+                result.append({
+                    'symbol': pos['symbol'],
+                    'type': 'asset',
+                    'value': pos['market_value'],
+                    'percentage': pct,
+                })
+
+        if allocation_type in ['cash', 'all']:
+            # Add cash allocation
+            for pos in cash:
+                if allocation_type == 'all':
+                    pct = (pos['market_value'] / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
+                else:  # cash only
+                    pct = (pos['market_value'] / total_cash_value * 100) if total_cash_value > 0 else 0
+
+                result.append({
+                    'symbol': pos['symbol'],
+                    'type': 'cash',
+                    'value': pos['market_value'],
+                    'percentage': pct,
+                })
+
+        # Sort by value descending
+        result.sort(key=lambda x: x['value'], reverse=True)
+
+        # Add summary totals
+        summary = []
+        if allocation_type in ['assets', 'all']:
+            if allocation_type == 'all':
+                assets_pct = (total_assets_value / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
+            else:
+                assets_pct = 100.0 if total_assets_value > 0 else 0
+
+            summary.append({
+                'symbol': 'TOTAL ASSETS',
+                'type': 'summary',
+                'value': total_assets_value,
+                'percentage': assets_pct,
+            })
+
+        if allocation_type in ['cash', 'all']:
+            if allocation_type == 'all':
+                cash_pct = (total_cash_value / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
+            else:
+                cash_pct = 100.0 if total_cash_value > 0 else 0
+
+            summary.append({
+                'symbol': 'TOTAL CASH',
+                'type': 'summary',
+                'value': total_cash_value,
+                'percentage': cash_pct,
+            })
+
+        if allocation_type == 'all':
+            summary.append({
+                'symbol': 'TOTAL PORTFOLIO',
+                'type': 'summary',
+                'value': total_portfolio_value,
+                'percentage': 100.0,
+            })
+
+        return {
+            'positions': result,
+            'summary': summary,
+            'total_value': total_portfolio_value,
+        }
+
     def close(self):
         """Close database connection."""
         self.db.close()
