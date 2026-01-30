@@ -22,6 +22,9 @@ class PortfolioDatabase:
             CREATE SEQUENCE IF NOT EXISTS seq_transaction_id START 1 INCREMENT 1
         """)
 
+        # Migrate existing daily_returns table if needed
+        self._migrate_daily_returns_schema()
+
         # Create transactions table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
@@ -49,12 +52,20 @@ class PortfolioDatabase:
             )
         """)
 
-        # Create daily returns table
+        # Create index on ticker for faster lookups
+        self.con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prices_ticker ON prices (ticker)
+        """)
+
+        # Create daily returns table with separated return metrics
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS daily_returns (
                 date DATE PRIMARY KEY,
                 portfolio_value DOUBLE NOT NULL,
-                portfolio_daily_return DOUBLE
+                portfolio_daily_return DOUBLE,
+                investment_return DOUBLE,
+                cash_flow_impact DOUBLE,
+                adjusted_base DOUBLE
             )
         """)
 
@@ -65,6 +76,17 @@ class PortfolioDatabase:
                 refresh_date DATE NOT NULL,
                 refresh_type VARCHAR NOT NULL,
                 rows_affected INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create recalculation cache table
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS recalc_cache (
+                cache_key VARCHAR PRIMARY KEY,
+                last_calc_date DATE NOT NULL,
+                transaction_count INTEGER NOT NULL,
+                prices_hash VARCHAR,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -114,6 +136,46 @@ class PortfolioDatabase:
         result = self.con.execute("SELECT COUNT(*) FROM transactions").fetchone()
         return result[0] if result else 0
 
+    def get_unique_assets(self):
+        """Get all unique assets from transactions."""
+        result = self.con.execute("SELECT DISTINCT asset FROM transactions ORDER BY asset").fetchall()
+        return [row[0] for row in result]
+
+    def get_unique_currencies(self):
+        """Get all unique currencies from transactions."""
+        result = self.con.execute("SELECT DISTINCT currency FROM transactions WHERE currency IS NOT NULL ORDER BY currency").fetchall()
+        return [row[0] for row in result if row[0] is not None]
+
+    def _migrate_daily_returns_schema(self):
+        """Migrate daily_returns table to include new columns if needed."""
+        # Check if table exists
+        table_exists = self.con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='daily_returns'"
+        ).fetchone()
+
+        if not table_exists:
+            return  # Table doesn't exist yet, will be created by normal schema
+
+        # Check which columns exist
+        columns = self.con.execute("PRAGMA table_info(daily_returns)").fetchall()
+        column_names = {col[1] for col in columns}
+
+        # Add missing columns
+        missing_cols = {
+            'investment_return': 'DOUBLE',
+            'cash_flow_impact': 'DOUBLE',
+            'adjusted_base': 'DOUBLE'
+        }
+
+        for col_name, col_type in missing_cols.items():
+            if col_name not in column_names:
+                try:
+                    self.con.execute(f"ALTER TABLE daily_returns ADD COLUMN {col_name} {col_type}")
+                except Exception:
+                    pass  # Column might already exist
+
+        self.con.commit()
+
     def clear_transactions(self):
         """Clear all transactions."""
         self.con.execute("DELETE FROM transactions")
@@ -138,21 +200,25 @@ class PortfolioDatabase:
         )
         self.con.commit()
 
-    def insert_daily_return(self, date_obj, portfolio_value: float, daily_return: float):
-        """Insert daily return record."""
+    def insert_daily_return(self, date_obj, portfolio_value: float, daily_return: float,
+                           investment_return: float = None, cash_flow_impact: float = None,
+                           adjusted_base: float = None):
+        """Insert daily return record with separated return metrics."""
         self.con.execute(
             """
-            INSERT OR REPLACE INTO daily_returns (date, portfolio_value, portfolio_daily_return)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO daily_returns
+            (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            [date_obj, portfolio_value, daily_return],
+            [date_obj, portfolio_value, daily_return, investment_return, cash_flow_impact, adjusted_base],
         )
         self.con.commit()
 
     def get_daily_returns(self):
-        """Get all daily returns."""
+        """Get all daily returns with separated metrics."""
         return self.con.execute(
-            "SELECT date, portfolio_value, portfolio_daily_return FROM daily_returns ORDER BY date"
+            """SELECT date, portfolio_value, portfolio_daily_return, investment_return,
+                      cash_flow_impact, adjusted_base FROM daily_returns ORDER BY date"""
         ).fetchall()
 
     def clear_daily_returns(self):
@@ -166,6 +232,20 @@ class PortfolioDatabase:
             "SELECT MIN(date), MAX(date) FROM transactions"
         ).fetchone()
         return result if result else (None, None)
+
+    def get_first_transaction_date(self):
+        """Get the date of the first transaction."""
+        result = self.con.execute(
+            "SELECT MIN(date) FROM transactions"
+        ).fetchone()
+        return result[0] if result and result[0] else None
+
+    def get_last_transaction_date(self):
+        """Get the date of the last transaction."""
+        result = self.con.execute(
+            "SELECT MAX(date) FROM transactions"
+        ).fetchone()
+        return result[0] if result and result[0] else None
 
     def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, exchange='', data_source='') -> tuple:
         """
@@ -208,9 +288,10 @@ class PortfolioDatabase:
         return result[0] if result and result[0] else None
 
     def get_daily_returns_from_date(self, start_date):
-        """Get daily returns from specific date onwards."""
+        """Get daily returns from specific date onwards with separated metrics."""
         return self.con.execute(
-            "SELECT date, portfolio_value, portfolio_daily_return FROM daily_returns WHERE date >= ? ORDER BY date",
+            """SELECT date, portfolio_value, portfolio_daily_return, investment_return,
+                      cash_flow_impact, adjusted_base FROM daily_returns WHERE date >= ? ORDER BY date""",
             [start_date],
         ).fetchall()
 
@@ -233,6 +314,61 @@ class PortfolioDatabase:
             [date.today(), refresh_type, rows_affected],
         )
         self.con.commit()
+
+    def get_cache(self, cache_key: str):
+        """Get cache entry if exists."""
+        result = self.con.execute(
+            "SELECT cache_key, last_calc_date, transaction_count FROM recalc_cache WHERE cache_key = ?",
+            [cache_key],
+        ).fetchone()
+        return result
+
+    def set_cache(self, cache_key: str, last_calc_date, transaction_count: int, prices_hash: str = None):
+        """Store cache entry."""
+        self.con.execute(
+            """
+            INSERT OR REPLACE INTO recalc_cache (cache_key, last_calc_date, transaction_count, prices_hash)
+            VALUES (?, ?, ?, ?)
+            """,
+            [cache_key, last_calc_date, transaction_count, prices_hash],
+        )
+        self.con.commit()
+
+    def clear_cache(self):
+        """Clear all cache entries."""
+        self.con.execute("DELETE FROM recalc_cache")
+        self.con.commit()
+
+    def get_prices_table_info(self):
+        """Get information about prices table structure and statistics."""
+        # Get table schema
+        schema_result = self.con.execute(
+            "PRAGMA table_info(prices)"
+        ).fetchall()
+
+        # Get record count
+        count_result = self.con.execute(
+            "SELECT COUNT(*) FROM prices"
+        ).fetchone()
+
+        # Get date range
+        date_range_result = self.con.execute(
+            "SELECT MIN(date), MAX(date) FROM prices"
+        ).fetchone()
+
+        return {
+            'schema': schema_result,
+            'total_records': count_result[0] if count_result else 0,
+            'min_date': date_range_result[0] if date_range_result and date_range_result[0] else None,
+            'max_date': date_range_result[1] if date_range_result and date_range_result[1] else None,
+        }
+
+    def get_prices_by_ticker_count(self):
+        """Get count of prices per ticker for storage analysis."""
+        result = self.con.execute(
+            "SELECT ticker, COUNT(*) as record_count FROM prices GROUP BY ticker ORDER BY record_count DESC"
+        ).fetchall()
+        return result
 
     def close(self):
         """Close database connection."""

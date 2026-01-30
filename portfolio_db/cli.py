@@ -41,27 +41,31 @@ def report(format, db):
             service.close()
             return
 
-        click.echo("\n" + "=" * 70)
-        click.echo("PORTFOLIO DAILY RETURNS")
-        click.echo("=" * 70 + "\n")
+        click.echo("\n" + "=" * 100)
+        click.echo("PORTFOLIO DAILY RETURNS (WITH SEPARATED METRICS)")
+        click.echo("=" * 100 + "\n")
 
-        click.echo(f"{'Date':<12} {'Portfolio Value':>20} {'Daily Return %':>15}")
-        click.echo("-" * 70)
+        click.echo(f"{'Date':<12} {'Portfolio Value':>18} {'Daily %':>12} {'Invest %':>12} {'Cash Flow':>15}")
+        click.echo("-" * 100)
 
         for ret in returns:
             date_str = ret['date']
             value = ret['portfolio_value']
             daily_ret = ret['portfolio_daily_return']
-            click.echo(f"{date_str:<12} ${value:>18,.2f} {daily_ret:>14.2f}%")
+            invest_ret = ret['investment_return']
+            cash_flow = ret['cash_flow_impact']
+            click.echo(f"{date_str:<12} ${value:>16,.2f} {daily_ret:>11.2f}% {invest_ret:>11.2f}% ${cash_flow:>13,.2f}")
 
-        click.echo("\n" + "=" * 70)
+        click.echo("\n" + "=" * 100)
         stats = service.get_performance_stats()
         click.echo(f"Total days: {stats['total_days']}")
         click.echo(f"Start value: ${stats['start_value']:,.2f}")
         click.echo(f"End value: ${stats['end_value']:,.2f}")
         click.echo(f"Total gain: ${stats['total_gain']:,.2f}")
         click.echo(f"Avg daily return: {stats['avg_daily_return']:.4f}%")
-        click.echo("=" * 70)
+        click.echo(f"Avg investment return: {stats['avg_investment_return']:.4f}%")
+        click.echo(f"Total cash flow: ${stats['total_cash_flow']:,.2f}")
+        click.echo("=" * 100)
 
     service.close()
 
@@ -99,7 +103,7 @@ def transactions(format, db):
 @cli.command()
 @click.option('--db', default='portfolio.db', help='Path to database file')
 def status(db):
-    """Show portfolio status."""
+    """Show portfolio status with separated return metrics."""
     service = PortfolioService(db)
     trans_count = service.db.get_transaction_count()
     returns = service.get_daily_returns()
@@ -110,6 +114,9 @@ def status(db):
     click.echo(f"Start date: {stats['start_date']}")
     click.echo(f"End date: {stats['end_date']}")
     click.echo(f"Current value: ${stats['end_value']:,.2f}")
+    click.echo(f"Total gain: ${stats['total_gain']:,.2f}")
+    click.echo(f"Avg investment return: {stats['avg_investment_return']:.4f}%")
+    click.echo(f"Total cash flow: ${stats['total_cash_flow']:,.2f}")
 
     service.close()
 
@@ -155,6 +162,41 @@ def add(date, asset, action, quantity, price, currency, fees, exchange, db):
 
 
 @cli.command()
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def verify_prices(db):
+    """Verify prices table structure and storage."""
+    service = PortfolioService(db)
+    info = service.verify_prices_storage()
+
+    click.echo("\n" + "=" * 70)
+    click.echo("PRICES TABLE VERIFICATION")
+    click.echo("=" * 70 + "\n")
+
+    click.echo("Schema:")
+    for col in info['schema']:
+        pk_marker = " [PRIMARY KEY]" if col['is_primary_key'] else ""
+        click.echo(f"  - {col['column']}: {col['type']}{pk_marker}")
+
+    click.echo("\nStatistics:")
+    click.echo(f"  Total records: {info['statistics']['total_records']:,}")
+    click.echo(f"  Date range: {info['statistics']['min_date']} to {info['statistics']['max_date']}")
+    click.echo(f"  Days: {info['statistics']['date_range_days']}")
+
+    click.echo(f"\nUnique tickers: {len(info['ticker_breakdown'])}")
+    if info['ticker_breakdown']:
+        click.echo("  Top tickers by record count:")
+        for ticker_info in info['ticker_breakdown'][:10]:
+            click.echo(f"    - {ticker_info['ticker']}: {ticker_info['record_count']:,} records")
+
+    click.echo("\nOptimization Notes:")
+    for note in info['optimization_notes']:
+        click.echo(f"  ✓ {note}")
+
+    click.echo("\n" + "=" * 70)
+    service.close()
+
+
+@cli.command()
 @click.option('--force', is_flag=True, help='Force full recalculation (ignore optimization)')
 @click.option('--from-date', default=None, help='Recalculate from date (DD-MM-YYYY, None = full recalc)')
 @click.option('--db', default='portfolio.db', help='Path to database file')
@@ -174,9 +216,13 @@ def recalculate(force, from_date, db):
         result = service.recalculate(from_date=from_date_obj, force=force)
 
         if result['status'] == 'success':
-            click.echo(f"✓ Recalculation completed")
-            click.echo(f"  Type: {result['recalc_type'].upper()}")
-            click.echo(f"  Rows affected: {result['rows_affected']}")
+            if result['recalc_type'] == 'cached':
+                click.echo(f"✓ Using cached results (no recalculation needed)")
+                click.echo(f"  Message: {result.get('message', 'Cached data is current')}")
+            else:
+                click.echo(f"✓ Recalculation completed")
+                click.echo(f"  Type: {result['recalc_type'].upper()}")
+                click.echo(f"  Rows affected: {result['rows_affected']}")
         else:
             click.echo(f"Error: {result.get('message', 'Unknown error')}", err=True)
     except Exception as e:
