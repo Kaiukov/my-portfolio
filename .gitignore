@@ -28,6 +28,7 @@ env/
 
 # Data and cache
 data/cache/
+.portfolio_cache/
 
 
 # OS
