@@ -497,6 +497,153 @@ class PortfolioService:
             ]
         }
 
+    def get_position_summary(self, include_closed=True):
+        """
+        Get position-level summary with gains/losses.
+
+        Args:
+            include_closed: Include closed positions (shares = 0)
+
+        Returns:
+            List of position dicts with all required metrics
+        """
+        transactions = self.db.get_transactions()
+        if not transactions:
+            return []
+
+        # Get latest daily return data
+        daily_returns = self.get_daily_returns()
+        latest_date = daily_returns[-1]['date'] if daily_returns else None
+        latest_portfolio_value = daily_returns[-1]['portfolio_value'] if daily_returns else 0
+
+        # Get latest prices - fetch all assets
+        assets = self.db.get_unique_assets()
+        min_date = transactions[0][1]
+        max_date = date.today()
+
+        discovered = self.discover_assets_and_currencies()
+        all_symbols = list(discovered['assets'])
+        all_symbols.extend(discovered['fx_currencies'])
+
+        # Fetch prices from database first, then supplement with fresh prices
+        prices_dict = {}
+
+        # Try to fetch fresh prices
+        try:
+            prices_dict = self.price_service.fetch_all_prices(all_symbols, min_date, max_date)
+        except Exception:
+            pass
+
+        # Build position data by asset
+        positions = {}
+        for trans in transactions:
+            asset = trans[2]
+            action = trans[3].upper()
+            quantity = trans[4]
+            price = trans[6]
+            date_obj = trans[1]
+
+            if asset not in positions:
+                positions[asset] = {
+                    'symbol': asset,
+                    'shares': 0,
+                    'buy_quantity': 0,
+                    'buy_cost': 0.0,
+                    'sell_quantity': 0,
+                    'sell_proceeds': 0.0,
+                    'dividend_income': 0.0,
+                    'first_buy_date': date_obj,
+                    'last_price_from_trans': None,
+                }
+
+            if action == 'BUY':
+                positions[asset]['shares'] += quantity
+                positions[asset]['buy_quantity'] += quantity
+                if price:
+                    positions[asset]['buy_cost'] += quantity * price
+                    positions[asset]['last_price_from_trans'] = price
+                positions[asset]['first_buy_date'] = min(positions[asset]['first_buy_date'], date_obj)
+            elif action == 'SELL':
+                positions[asset]['shares'] -= quantity
+                positions[asset]['sell_quantity'] += quantity
+                if price:
+                    positions[asset]['sell_proceeds'] += quantity * price
+                    positions[asset]['last_price_from_trans'] = price
+            elif action == 'DEPOSIT' and asset.startswith('CASH'):
+                positions[asset]['shares'] += quantity
+
+        # Calculate summary metrics for each position
+        result = []
+        for asset, pos_data in positions.items():
+            shares = pos_data['shares']
+
+            # Skip if closed and not including closed positions
+            if shares == 0 and not include_closed:
+                continue
+
+            # Get latest price - try multiple sources
+            last_price = None
+            if asset.startswith('CASH'):
+                last_price = 1.0  # Cash is always $1
+            else:
+                # Try price_dict first
+                price_series = prices_dict.get(asset)
+                if price_series is not None:
+                    try:
+                        import pandas as pd
+                        last_price = float(price_series.iloc[-1] if hasattr(price_series, 'iloc') else price_series.iloc[-1])
+                    except:
+                        pass
+
+                # Fallback to transaction price
+                if last_price is None:
+                    last_price = pos_data['last_price_from_trans']
+
+            # Calculate metrics
+            avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
+            total_cost = pos_data['buy_cost']
+            market_value = (shares * last_price) if last_price and shares > 0 else 0
+
+            # Unrealized gains
+            unrealized_gain_value = market_value - total_cost if shares > 0 else 0
+            unrealized_gain_pct = (unrealized_gain_value / total_cost * 100) if total_cost > 0 and shares > 0 else 0
+
+            # Realized gains (from sold positions)
+            realized_gain_value = pos_data['sell_proceeds'] - (pos_data['sell_quantity'] * avg_cost_per_share) if pos_data['sell_quantity'] > 0 else 0
+            realized_gain_pct = (realized_gain_value / (pos_data['sell_quantity'] * avg_cost_per_share) * 100) if pos_data['sell_quantity'] > 0 and avg_cost_per_share > 0 else 0
+
+            # Daily gains (from latest return data)
+            daily_gain_pct = 0.0
+            daily_gain_value = 0.0
+            if daily_returns and shares > 0 and latest_portfolio_value > 0:
+                latest_daily_return = daily_returns[-1]['portfolio_daily_return']
+                # Approximate daily gain as percentage of portfolio
+                daily_gain_pct = latest_daily_return
+                daily_gain_value = market_value * (latest_daily_return / 100)
+
+            status = 'OPEN' if shares > 0 else 'CLOSED'
+
+            result.append({
+                'symbol': asset,
+                'status': status,
+                'shares': shares,
+                'last_price': last_price,
+                'avg_cost_per_share': avg_cost_per_share,
+                'total_cost': total_cost,
+                'market_value': market_value,
+                'dividend_income': pos_data['dividend_income'],
+                'day_gain_pct': daily_gain_pct,
+                'day_gain_value': daily_gain_value,
+                'total_gain_pct': unrealized_gain_pct,
+                'total_gain_value': unrealized_gain_value,
+                'realized_gain_value': realized_gain_value,
+                'realized_gain_pct': realized_gain_pct,
+            })
+
+        # Sort by market value descending
+        result.sort(key=lambda x: x['market_value'], reverse=True)
+        return result
+
     def close(self):
         """Close database connection."""
         self.db.close()

@@ -6,6 +6,36 @@ from datetime import datetime
 from portfolio_db.portfolio_service import PortfolioService
 
 
+def format_currency(value, decimals=2):
+    """Format value as currency."""
+    if value is None or value == 0:
+        return "$0.00"
+    return f"${value:,.{decimals}f}"
+
+
+def format_percent_colored(value):
+    """Format value as percentage with color."""
+    if value > 0:
+        return click.style(f"+{value:.2f}%", fg='green')
+    elif value < 0:
+        return click.style(f"{value:.2f}%", fg='red')
+    else:
+        return f"{value:.2f}%"
+
+
+def format_number(value):
+    """Format number with appropriate precision."""
+    if value == 0 or value is None:
+        return "0"
+    if abs(value) < 0.01:
+        return f"{value:.6f}"
+    if abs(value) < 1:
+        return f"{value:.4f}"
+    if abs(value) < 100:
+        return f"{value:.2f}"
+    return f"{value:,.2f}"
+
+
 @click.group()
 def cli():
     """Portfolio tracking with DuckDB."""
@@ -225,6 +255,88 @@ def recalculate(force, from_date, db):
                 click.echo(f"  Rows affected: {result['rows_affected']}")
         else:
             click.echo(f"Error: {result.get('message', 'Unknown error')}", err=True)
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
+
+
+@cli.command()
+@click.option('--filter', type=click.Choice(['open', 'all']), default='all', help='Filter positions (open=held, all=including closed)')
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def summary(filter, db):
+    """Show portfolio position summary with gains/losses."""
+    service = PortfolioService(db)
+
+    try:
+        include_closed = (filter == 'all')
+        positions = service.get_position_summary(include_closed=include_closed)
+
+        if not positions:
+            click.echo("No positions found")
+            service.close()
+            return
+
+        click.echo("\n" + "=" * 220)
+        click.echo("PORTFOLIO POSITION SUMMARY")
+        click.echo("=" * 220 + "\n")
+
+        # Compact table header
+        header = (
+            f"{'Symbol':<10} "
+            f"{'Status':<6} "
+            f"{'Shares':>11} "
+            f"{'Price':>11} "
+            f"{'AC/Sh':>10} "
+            f"{'Cost':>12} "
+            f"{'Market Val':>12} "
+            f"{'Div Inc':>11} "
+            f"{'Day %':>8} "
+            f"{'Day $':>11} "
+            f"{'Total %':>8} "
+            f"{'Total $':>11} "
+            f"{'Real Gain $':>12} "
+            f"{'Real %':>8}"
+        )
+        click.echo(header)
+        click.echo("-" * 220)
+
+        # Table rows
+        for pos in positions:
+            symbol = pos['symbol']
+            status = pos['status']
+            shares = format_number(pos['shares'])
+            last_price = format_currency(pos['last_price'], 2) if pos['last_price'] else "$0"
+            avg_cost = format_currency(pos['avg_cost_per_share'], 2)
+            total_cost = format_currency(pos['total_cost'], 0)
+            market_value = format_currency(pos['market_value'], 0)
+            dividend_income = format_currency(pos['dividend_income'], 0)
+            day_gain_pct = format_percent_colored(pos['day_gain_pct'])
+            day_gain_value = format_currency(pos['day_gain_value'], 0)
+            total_gain_pct = format_percent_colored(pos['total_gain_pct'])
+            total_gain_value = format_currency(pos['total_gain_value'], 0)
+            realized_gain_value = format_currency(pos['realized_gain_value'], 0)
+            realized_gain_pct = format_percent_colored(pos['realized_gain_pct'])
+
+            click.echo(
+                f"{symbol:<10} "
+                f"{status:<6} "
+                f"{shares:>11} "
+                f"{last_price:>11} "
+                f"{avg_cost:>10} "
+                f"{total_cost:>12} "
+                f"{market_value:>12} "
+                f"{dividend_income:>11} "
+                f"{day_gain_pct:>8} "
+                f"{day_gain_value:>11} "
+                f"{total_gain_pct:>8} "
+                f"{total_gain_value:>11} "
+                f"{realized_gain_value:>12} "
+                f"{realized_gain_pct:>8}"
+            )
+
+        click.echo("\n" + "=" * 220)
+
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
     finally:
