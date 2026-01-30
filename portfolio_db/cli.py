@@ -285,7 +285,7 @@ def summary(filter, export, db):
                 with open(export, 'w', newline='') as csvfile:
                     fieldnames = [
                         'Symbol', 'Status', 'Shares', 'Last Price', 'AC/Share',
-                        'Total Cost', 'Market Value', 'Div Income',
+                        'Total Cost', 'Market Value',
                         'Day Gain %', 'Day Gain $', 'Total Gain %', 'Total Gain $',
                         'Realized Gain $', 'Realized Gain %'
                     ]
@@ -301,7 +301,6 @@ def summary(filter, export, db):
                             'AC/Share': f"{pos['avg_cost_per_share']:.2f}",
                             'Total Cost': f"{pos['total_cost']:.2f}",
                             'Market Value': f"{pos['market_value']:.2f}",
-                            'Div Income': f"{pos['dividend_income']:.2f}",
                             'Day Gain %': f"{pos['day_gain_pct']:.2f}",
                             'Day Gain $': f"{pos['day_gain_value']:.2f}",
                             'Total Gain %': f"{pos['total_gain_pct']:.2f}",
@@ -318,9 +317,9 @@ def summary(filter, export, db):
             return
 
         # Display table
-        click.echo("\n" + "=" * 220)
+        click.echo("\n" + "=" * 200)
         click.echo("PORTFOLIO POSITION SUMMARY")
-        click.echo("=" * 220 + "\n")
+        click.echo("=" * 200 + "\n")
 
         # Compact table header
         header = (
@@ -331,7 +330,6 @@ def summary(filter, export, db):
             f"{'AC/Sh':>10} "
             f"{'Cost':>12} "
             f"{'Market Val':>12} "
-            f"{'Div Inc':>11} "
             f"{'Day %':>8} "
             f"{'Day $':>11} "
             f"{'Total %':>8} "
@@ -340,7 +338,7 @@ def summary(filter, export, db):
             f"{'Real %':>8}"
         )
         click.echo(header)
-        click.echo("-" * 220)
+        click.echo("-" * 200)
 
         # Table rows
         for pos in positions:
@@ -351,7 +349,6 @@ def summary(filter, export, db):
             avg_cost = format_currency(pos['avg_cost_per_share'], 2)
             total_cost = format_currency(pos['total_cost'], 0)
             market_value = format_currency(pos['market_value'], 0)
-            dividend_income = format_currency(pos['dividend_income'], 0)
             day_gain_pct = format_percent_colored(pos['day_gain_pct'])
             day_gain_value = format_currency(pos['day_gain_value'], 0)
             total_gain_pct = format_percent_colored(pos['total_gain_pct'])
@@ -367,7 +364,6 @@ def summary(filter, export, db):
                 f"{avg_cost:>10} "
                 f"{total_cost:>12} "
                 f"{market_value:>12} "
-                f"{dividend_income:>11} "
                 f"{day_gain_pct:>8} "
                 f"{day_gain_value:>11} "
                 f"{total_gain_pct:>8} "
@@ -376,7 +372,7 @@ def summary(filter, export, db):
                 f"{realized_gain_pct:>8}"
             )
 
-        click.echo("\n" + "=" * 220)
+        click.echo("\n" + "=" * 200)
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)

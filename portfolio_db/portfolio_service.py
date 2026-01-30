@@ -613,14 +613,31 @@ class PortfolioService:
             realized_gain_value = pos_data['sell_proceeds'] - (pos_data['sell_quantity'] * avg_cost_per_share) if pos_data['sell_quantity'] > 0 else 0
             realized_gain_pct = (realized_gain_value / (pos_data['sell_quantity'] * avg_cost_per_share) * 100) if pos_data['sell_quantity'] > 0 and avg_cost_per_share > 0 else 0
 
-            # Daily gains (from latest return data)
+            # Daily gains (calculate from price changes for this position)
             daily_gain_pct = 0.0
             daily_gain_value = 0.0
-            if daily_returns and shares > 0 and latest_portfolio_value > 0:
-                latest_daily_return = daily_returns[-1]['portfolio_daily_return']
-                # Approximate daily gain as percentage of portfolio
-                daily_gain_pct = latest_daily_return
-                daily_gain_value = market_value * (latest_daily_return / 100)
+
+            if shares > 0 and last_price and not asset.startswith('CASH'):
+                # Get price series to calculate daily change
+                price_series = prices_dict.get(asset)
+                if price_series is not None and len(price_series) > 1:
+                    try:
+                        import pandas as pd
+                        # Extract price values from the DataFrame/Series
+                        if isinstance(price_series, pd.DataFrame):
+                            # DataFrame case: extract column for this asset
+                            today_price = float(price_series.iloc[-1][asset])
+                            yesterday_price = float(price_series.iloc[-2][asset])
+                        else:
+                            # Series case
+                            today_price = float(price_series.iloc[-1])
+                            yesterday_price = float(price_series.iloc[-2])
+
+                        if yesterday_price > 0:
+                            daily_gain_pct = ((today_price - yesterday_price) / yesterday_price) * 100
+                            daily_gain_value = shares * (today_price - yesterday_price)
+                    except:
+                        pass
 
             status = 'OPEN' if shares > 0 else 'CLOSED'
 
