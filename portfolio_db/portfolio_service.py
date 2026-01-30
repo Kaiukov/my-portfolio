@@ -601,10 +601,11 @@ class PortfolioService:
 
             # Calculate metrics
             avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
-            total_cost = pos_data['buy_cost']
+            # Total cost of CURRENT shares (not all shares ever bought)
+            total_cost = (shares * avg_cost_per_share) if shares > 0 else 0
             market_value = (shares * last_price) if last_price and shares > 0 else 0
 
-            # Unrealized gains
+            # Unrealized gains (only for current holding)
             unrealized_gain_value = market_value - total_cost if shares > 0 else 0
             unrealized_gain_pct = (unrealized_gain_value / total_cost * 100) if total_cost > 0 and shares > 0 else 0
 
