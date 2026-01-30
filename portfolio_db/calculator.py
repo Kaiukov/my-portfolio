@@ -90,7 +90,15 @@ class DailyReturnCalculator:
             price = float(price)
 
             if asset.startswith('CASH'):
-                asset_value = quantity
+                # Convert non-USD cash to USD using FX rates
+                if asset == 'CASH EUR':
+                    fx_rate = self._get_fx_rate('EURUSD=X', date)
+                    asset_value = quantity * fx_rate
+                elif asset == 'CASH GBP':
+                    fx_rate = self._get_fx_rate('GBPUSD=X', date)
+                    asset_value = quantity * fx_rate
+                else:  # CASH USD
+                    asset_value = quantity
             elif asset.endswith('.L'):
                 fx_rate = self._get_fx_rate('GBPUSD=X', date)
                 asset_value = quantity * price * fx_rate
