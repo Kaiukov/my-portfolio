@@ -577,6 +577,10 @@ class PortfolioService:
         for asset, pos_data in positions.items():
             shares = pos_data['shares']
 
+            # Round to 0 if very small (rounding errors from floating point math)
+            if abs(shares) < 0.01:
+                shares = 0
+
             # Skip if closed and not including closed positions
             if shares == 0 and not include_closed:
                 continue
@@ -678,9 +682,62 @@ class PortfolioService:
         assets = [p for p in positions if not p['symbol'].startswith('CASH')]
         cash = [p for p in positions if p['symbol'].startswith('CASH')]
 
-        # Calculate totals
+        # Fetch FX rates for cash conversion
+        transactions = self.db.get_transactions()
+        min_date = transactions[0][1] if transactions else date.today()
+        max_date = date.today()
+
+        fx_prices = {}
+        try:
+            fx_dict = self.price_service.fetch_all_prices(
+                ['EURUSD=X', 'GBPUSD=X'], min_date, max_date
+            )
+            # Extract latest FX rates
+            for fx_pair in ['EURUSD=X', 'GBPUSD=X']:
+                if fx_pair in fx_dict:
+                    ps = fx_dict[fx_pair]
+                    try:
+                        import pandas as pd
+                        if isinstance(ps, pd.DataFrame):
+                            fx_prices[fx_pair] = float(ps.iloc[-1][fx_pair])
+                        else:
+                            fx_prices[fx_pair] = float(ps.iloc[-1])
+                    except:
+                        pass
+        except:
+            pass
+
+        # Default FX rates if fetching fails
+        if 'EURUSD=X' not in fx_prices:
+            fx_prices['EURUSD=X'] = 1.196
+        if 'GBPUSD=X' not in fx_prices:
+            fx_prices['GBPUSD=X'] = 1.3769
+
+        # Convert cash to USD
+        cash_in_usd = []
+        for pos in cash:
+            symbol = pos['symbol']
+            value = pos['market_value']
+
+            # Convert to USD if not already USD
+            if symbol == 'CASH EUR':
+                value_usd = value * fx_prices['EURUSD=X']
+            elif symbol == 'CASH GBP':
+                value_usd = value * fx_prices['GBPUSD=X']
+            else:
+                value_usd = value  # Already USD
+
+            cash_in_usd.append({
+                **pos,
+                'value_usd': value_usd,
+                'fx_rate': fx_prices.get('EURUSD=X') if symbol == 'CASH EUR' else (
+                    fx_prices.get('GBPUSD=X') if symbol == 'CASH GBP' else 1.0
+                ),
+            })
+
+        # Calculate totals using USD-converted values
         total_assets_value = sum(p['market_value'] for p in assets)
-        total_cash_value = sum(p['market_value'] for p in cash)
+        total_cash_value = sum(p['value_usd'] for p in cash_in_usd)
         total_portfolio_value = total_assets_value + total_cash_value
 
         result = []
@@ -701,18 +758,20 @@ class PortfolioService:
                 })
 
         if allocation_type in ['cash', 'all']:
-            # Add cash allocation
-            for pos in cash:
+            # Add cash allocation (converted to USD)
+            for pos in cash_in_usd:
                 if allocation_type == 'all':
-                    pct = (pos['market_value'] / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
+                    pct = (pos['value_usd'] / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
                 else:  # cash only
-                    pct = (pos['market_value'] / total_cash_value * 100) if total_cash_value > 0 else 0
+                    pct = (pos['value_usd'] / total_cash_value * 100) if total_cash_value > 0 else 0
 
                 result.append({
                     'symbol': pos['symbol'],
                     'type': 'cash',
-                    'value': pos['market_value'],
+                    'value': pos['value_usd'],
                     'percentage': pct,
+                    'original_currency_value': pos['market_value'],
+                    'fx_rate': pos['fx_rate'],
                 })
 
         # Sort by value descending
