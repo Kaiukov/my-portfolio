@@ -34,6 +34,10 @@ data/cache/
 .DS_Store
 Thumbs.db
 
+# Images
+*.jpg
+*.png
+
 # Project specific
 *.csv
 !portfolio.csv
