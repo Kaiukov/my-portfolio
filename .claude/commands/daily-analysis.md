@@ -12,9 +12,8 @@ argument-hint: [path-to-news-report]
 - [ ] Используй "bash tree ."
 - [ ] Используй Example/Sample.md n Example/Template.md как образец репорта
 - [ ] Загрузи SKILL: "portfolio-cli"
-- [ ] Запустить "bash uv run python -m src.cli summary --json"
-- [ ] Запустить "bash uv run python -m src.cli cash --json"
-- [ ] Запустить "bash uv run python -m src.cli allocation --json"
+- [ ] Запустить "bash uv run python -m src.cli summary"
+- [ ] Запустить "bash uv run python -m src.cli cash"
 - [ ] Проанализировать и написать репорт, используй MCP: sequentialthinking для анализа
 - [ ] Сохранить репорт в папку "reports/"
 - [ ] Формат репорта .html, паттерн названия: {yyyy-MM-dd}-{Остроумное_название_на_русском}.html (Не используй CSS), Напиши в терминале путь куда ты сохранил репорт прим.: Репорт сохранён: "PATH" 
