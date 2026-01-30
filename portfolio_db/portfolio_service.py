@@ -1,7 +1,7 @@
 """High-level portfolio service API."""
 
 import json
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 from portfolio_db.database import PortfolioDatabase
@@ -50,9 +50,14 @@ class PortfolioService:
         for trans in transactions:
             assets.add(trans[2])  # asset at index 2
 
-        # Fetch prices for calculation
+        # Fetch prices for calculation - extend through today
         min_date = transactions[0][1]
         max_date = transactions[-1][1]
+        today = date.today()
+
+        # Extend to today if last transaction is before today
+        if max_date < today:
+            max_date = today
 
         prices_dict = self.price_service.fetch_all_prices(
             list(assets), min_date, max_date
@@ -148,6 +153,157 @@ class PortfolioService:
             'end_value': returns_with_values[-1]['portfolio_value'],
             'total_gain': returns_with_values[-1]['portfolio_value'] - returns_with_values[0]['portfolio_value'],
             'avg_daily_return': sum(r['portfolio_daily_return'] for r in returns_with_values) / len(returns_with_values),
+        }
+
+    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, exchange: str = '', data_source: str = '') -> dict:
+        """
+        Add transaction and auto-trigger smart recalculation.
+
+        Args:
+            date_obj: Transaction date (date object or string DD-MM-YYYY)
+            asset: Asset symbol
+            action: BUY, SELL, or DEPOSIT
+            quantity: Transaction quantity
+            price: Asset price (optional, will be detected for unknown assets)
+            asset_type: Asset type (optional, will be detected if not provided)
+            currency: Currency code (default USD)
+            fees: Transaction fees (optional)
+            exchange: Exchange name (optional)
+            data_source: Data source (optional)
+
+        Returns:
+            {"status": "success", "recalc_type": "partial|full", "from_date": ..., "transaction_id": ...}
+        """
+        # Parse date if string
+        if isinstance(date_obj, str):
+            date_obj = datetime.strptime(date_obj, '%d-%m-%Y').date()
+
+        # Get last date BEFORE adding transaction
+        last_date_before = self.db.get_last_transaction_date()
+
+        # Detect asset_type if not provided
+        if not asset_type:
+            asset_type = self.price_service.detect_asset_type(asset)
+
+        # Add transaction to database
+        trans_id, is_old = self.db.add_transaction(
+            date_obj, asset, action, quantity,
+            asset_type=asset_type, price=price,
+            currency=currency, fees=fees,
+            exchange=exchange, data_source=data_source
+        )
+
+        # Determine recalculation scope based on date relative to previous last date
+        if last_date_before is None:
+            # First transaction ever
+            is_full_recalc = True
+            from_date = date_obj
+        elif date_obj < last_date_before:
+            # Old transaction - need full recalc from this date
+            is_full_recalc = True
+            from_date = date_obj
+        else:
+            # Recent transaction - partial recalc from this date
+            is_full_recalc = False
+            from_date = date_obj
+
+        # Perform recalculation
+        self.recalculate(from_date=from_date, force=False)
+
+        recalc_type = 'full' if is_full_recalc else 'partial'
+        return {
+            'status': 'success',
+            'recalc_type': recalc_type,
+            'from_date': str(from_date),
+            'transaction_id': trans_id
+        }
+
+    def _detect_recalc_scope(self, new_trans_date) -> tuple:
+        """
+        Determine recalculation scope based on transaction date.
+        Returns: (from_date, is_full_recalc)
+        """
+        last_date = self.db.get_last_transaction_date()
+
+        if last_date is None:
+            # First transaction ever
+            return (new_trans_date, True)
+
+        if new_trans_date < last_date:
+            # Old transaction - need full recalc from this date
+            return (new_trans_date, True)
+        else:
+            # Recent transaction - partial recalc from this date
+            return (new_trans_date, False)
+
+    def recalculate(self, from_date=None, force=False):
+        """
+        Smart recalculation with optional date range.
+
+        Args:
+            from_date: Start date for recalc (None = full recalc from beginning)
+            force: If True, ignore optimization and recalc everything
+
+        Returns:
+            {"status": "success", "recalc_type": "partial|full", "rows_affected": ...}
+        """
+        transactions = self.db.get_transactions()
+        if not transactions:
+            return {'status': 'error', 'message': 'No transactions found'}
+
+        # Determine recalc scope
+        if force or from_date is None:
+            # Full recalculation
+            min_date = transactions[0][1]
+            is_full_recalc = True
+            self.db.clear_daily_returns()
+        else:
+            # Partial recalculation - delete from this date onwards
+            is_full_recalc = False
+            self.db.delete_daily_returns_from_date(from_date)
+            min_date = from_date
+
+        # Get unique assets
+        assets = set()
+        for trans in transactions:
+            assets.add(trans[2])  # asset at index 2
+
+        # Get date range - always extend to today
+        min_trans_date = transactions[0][1]
+        max_trans_date = transactions[-1][1]
+        max_date = date.today()
+
+        # Fetch prices for needed date range
+        prices_dict = self.price_service.fetch_all_prices(
+            list(assets), min_date, max_date
+        )
+
+        # Calculate returns using calculator
+        calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_trans_date)
+        results = calculator.calculate_all_returns()
+
+        # Filter results if partial recalc
+        if not is_full_recalc and from_date:
+            results = [r for r in results if r['date'] >= from_date]
+
+        # Store results
+        rows_affected = 0
+        for result in results:
+            self.db.insert_daily_return(
+                result['date'],
+                result['portfolio_value'],
+                result['portfolio_daily_return']
+            )
+            rows_affected += 1
+
+        # Log refresh event
+        recalc_type = 'full' if is_full_recalc else 'partial'
+        self.db.log_refresh(recalc_type, rows_affected)
+
+        return {
+            'status': 'success',
+            'recalc_type': recalc_type,
+            'rows_affected': rows_affected
         }
 
     def close(self):

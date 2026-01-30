@@ -2,6 +2,7 @@
 
 import json
 import click
+from datetime import datetime
 from portfolio_db.portfolio_service import PortfolioService
 
 
@@ -111,6 +112,77 @@ def status(db):
     click.echo(f"Current value: ${stats['end_value']:,.2f}")
 
     service.close()
+
+
+@cli.command()
+@click.option('--date', required=True, help='Transaction date (DD-MM-YYYY)')
+@click.option('--asset', required=True, help='Asset symbol')
+@click.option('--action', required=True, type=click.Choice(['BUY', 'SELL', 'DEPOSIT'], case_sensitive=False), help='Transaction action')
+@click.option('--quantity', required=True, type=float, help='Transaction quantity')
+@click.option('--price', type=float, default=None, help='Asset price (optional)')
+@click.option('--currency', default='USD', help='Currency code (default USD)')
+@click.option('--fees', type=float, default=None, help='Transaction fees (optional)')
+@click.option('--exchange', default='', help='Exchange name (optional)')
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def add(date, asset, action, quantity, price, currency, fees, exchange, db):
+    """Add transaction and auto-recalculate returns."""
+    try:
+        # Parse and validate date
+        date_obj = datetime.strptime(date, '%d-%m-%Y').date()
+    except ValueError:
+        click.echo(f"Error: Invalid date format. Use DD-MM-YYYY", err=True)
+        return
+
+    service = PortfolioService(db)
+    try:
+        result = service.add_transaction(
+            date_obj=date_obj,
+            asset=asset,
+            action=action.upper(),
+            quantity=quantity,
+            price=price,
+            currency=currency,
+            fees=fees,
+            exchange=exchange
+        )
+
+        click.echo(f"✓ Transaction added (ID: {result['transaction_id']})")
+        click.echo(f"✓ {result['recalc_type'].upper()} recalculation triggered from {result['from_date']}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
+
+
+@cli.command()
+@click.option('--force', is_flag=True, help='Force full recalculation (ignore optimization)')
+@click.option('--from-date', default=None, help='Recalculate from date (DD-MM-YYYY, None = full recalc)')
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def recalculate(force, from_date, db):
+    """Recalculate portfolio returns."""
+    from_date_obj = None
+
+    if from_date:
+        try:
+            from_date_obj = datetime.strptime(from_date, '%d-%m-%Y').date()
+        except ValueError:
+            click.echo(f"Error: Invalid date format. Use DD-MM-YYYY", err=True)
+            return
+
+    service = PortfolioService(db)
+    try:
+        result = service.recalculate(from_date=from_date_obj, force=force)
+
+        if result['status'] == 'success':
+            click.echo(f"✓ Recalculation completed")
+            click.echo(f"  Type: {result['recalc_type'].upper()}")
+            click.echo(f"  Rows affected: {result['rows_affected']}")
+        else:
+            click.echo(f"Error: {result.get('message', 'Unknown error')}", err=True)
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
 
 
 if __name__ == '__main__':

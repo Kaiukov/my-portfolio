@@ -94,6 +94,11 @@ class DailyReturnCalculator:
         if not min_date or not max_date:
             return []
 
+        # Extend max_date to today
+        today = datetime.now().date()
+        if max_date < today:
+            max_date = today
+
         # Create date range
         date_range = pd.date_range(start=min_date, end=max_date, freq='D')
 

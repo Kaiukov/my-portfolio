@@ -167,6 +167,73 @@ class PortfolioDatabase:
         ).fetchone()
         return result if result else (None, None)
 
+    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, exchange='', data_source='') -> tuple:
+        """
+        Add single transaction and return (transaction_id, is_old_transaction).
+        is_old_transaction = True if transaction date < last existing transaction date.
+        """
+        # Get last transaction date before insert
+        last_date_result = self.con.execute(
+            "SELECT MAX(date) FROM transactions"
+        ).fetchone()
+        last_date = last_date_result[0] if last_date_result and last_date_result[0] else None
+
+        # Determine if this is an old transaction
+        is_old = last_date is not None and date < last_date
+
+        # Insert transaction
+        self.con.execute(
+            """
+            INSERT INTO transactions
+            (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source],
+        )
+        self.con.commit()
+
+        # Get the ID of the inserted transaction
+        result = self.con.execute(
+            "SELECT MAX(id) FROM transactions"
+        ).fetchone()
+        trans_id = result[0] if result else None
+
+        return (trans_id, is_old)
+
+    def get_last_transaction_date(self):
+        """Get date of most recent transaction."""
+        result = self.con.execute(
+            "SELECT MAX(date) FROM transactions"
+        ).fetchone()
+        return result[0] if result and result[0] else None
+
+    def get_daily_returns_from_date(self, start_date):
+        """Get daily returns from specific date onwards."""
+        return self.con.execute(
+            "SELECT date, portfolio_value, portfolio_daily_return FROM daily_returns WHERE date >= ? ORDER BY date",
+            [start_date],
+        ).fetchall()
+
+    def delete_daily_returns_from_date(self, start_date):
+        """Delete daily returns from specific date onwards."""
+        self.con.execute(
+            "DELETE FROM daily_returns WHERE date >= ?",
+            [start_date],
+        )
+        self.con.commit()
+
+    def log_refresh(self, refresh_type: str, rows_affected: int):
+        """Log recalculation event to refresh_log table."""
+        from datetime import date
+        self.con.execute(
+            """
+            INSERT INTO refresh_log (refresh_date, refresh_type, rows_affected)
+            VALUES (?, ?, ?)
+            """,
+            [date.today(), refresh_type, rows_affected],
+        )
+        self.con.commit()
+
     def close(self):
         """Close database connection."""
         self.con.close()
