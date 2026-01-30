@@ -1,6 +1,7 @@
 """CLI interface for portfolio_db."""
 
 import json
+import csv
 import click
 from datetime import datetime
 from portfolio_db.portfolio_service import PortfolioService
@@ -263,8 +264,9 @@ def recalculate(force, from_date, db):
 
 @cli.command()
 @click.option('--filter', type=click.Choice(['open', 'all']), default='all', help='Filter positions (open=held, all=including closed)')
+@click.option('--export', default=None, help='Export to CSV file (e.g., portfolio.csv)')
 @click.option('--db', default='portfolio.db', help='Path to database file')
-def summary(filter, db):
+def summary(filter, export, db):
     """Show portfolio position summary with gains/losses."""
     service = PortfolioService(db)
 
@@ -277,6 +279,45 @@ def summary(filter, db):
             service.close()
             return
 
+        # Export to CSV if requested
+        if export:
+            try:
+                with open(export, 'w', newline='') as csvfile:
+                    fieldnames = [
+                        'Symbol', 'Status', 'Shares', 'Last Price', 'AC/Share',
+                        'Total Cost', 'Market Value', 'Div Income',
+                        'Day Gain %', 'Day Gain $', 'Total Gain %', 'Total Gain $',
+                        'Realized Gain $', 'Realized Gain %'
+                    ]
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+
+                    for pos in positions:
+                        writer.writerow({
+                            'Symbol': pos['symbol'],
+                            'Status': pos['status'],
+                            'Shares': f"{pos['shares']:.6f}".rstrip('0').rstrip('.'),
+                            'Last Price': f"{pos['last_price']:.2f}" if pos['last_price'] else "0",
+                            'AC/Share': f"{pos['avg_cost_per_share']:.2f}",
+                            'Total Cost': f"{pos['total_cost']:.2f}",
+                            'Market Value': f"{pos['market_value']:.2f}",
+                            'Div Income': f"{pos['dividend_income']:.2f}",
+                            'Day Gain %': f"{pos['day_gain_pct']:.2f}",
+                            'Day Gain $': f"{pos['day_gain_value']:.2f}",
+                            'Total Gain %': f"{pos['total_gain_pct']:.2f}",
+                            'Total Gain $': f"{pos['total_gain_value']:.2f}",
+                            'Realized Gain $': f"{pos['realized_gain_value']:.2f}",
+                            'Realized Gain %': f"{pos['realized_gain_pct']:.2f}",
+                        })
+
+                click.echo(f"✓ Exported {len(positions)} positions to {export}")
+            except Exception as e:
+                click.echo(f"Error exporting CSV: {str(e)}", err=True)
+            finally:
+                service.close()
+            return
+
+        # Display table
         click.echo("\n" + "=" * 220)
         click.echo("PORTFOLIO POSITION SUMMARY")
         click.echo("=" * 220 + "\n")
