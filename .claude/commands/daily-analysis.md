@@ -8,6 +8,7 @@ argument-hint: [path-to-news-report]
 
 ## Задачи
 - [ ] прочитай новостную сводку за последние 24 часа: "$ARGUMENTS" 
+- [ ] Не надо пересказавать новости просто дай мне анализ. Дай ссылку на источник новости.
 - [ ] Используй "bash tree ."
 - [ ] Используй Example/Sample.md n Example/Template.md как образец репорта
 - [ ] Загрузи SKILL: "portfolio-cli"
