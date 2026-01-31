@@ -507,6 +507,34 @@ def delete(id, confirm, db):
 
 
 @cli.command()
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def performance(db):
+    """Show performance metrics including standard deviation."""
+    service = PortfolioService(db)
+    stats = service.get_performance_stats()
+
+    click.echo("\n" + "=" * 80)
+    click.echo("PORTFOLIO PERFORMANCE METRICS")
+    click.echo("=" * 80 + "\n")
+
+    click.echo(f"{'Period:':<30} {stats['start_date']} to {stats['end_date']}")
+    click.echo(f"{'Total days:':<30} {stats['total_days']}")
+    click.echo("-" * 80)
+
+    click.echo(f"{'Start Value:':<30} ${stats['start_value']:,.2f}")
+    click.echo(f"{'End Value:':<30} ${stats['end_value']:,.2f}")
+    click.echo(f"{'Total Gain:':<30} ${stats['total_gain']:,.2f}")
+    click.echo("-" * 80)
+
+    click.echo(f"{'Avg Daily Return:':<30} {stats['avg_daily_return']:.4f}%")
+    click.echo(f"{'Standard Deviation:':<30} {stats['std_dev']:.4f}%")
+    click.echo(f"{'Historical Volatility (ann):':<30} {stats['hist_volatility']:.4f}%")
+
+    click.echo("\n" + "=" * 80)
+    service.close()
+
+
+@cli.command()
 @click.option('--filter', type=click.Choice(['open', 'all']), default='all', help='Filter positions (open=held, all=including closed)')
 @click.option('--export', default=None, help='Export to CSV file (e.g., portfolio.csv)')
 @click.option('--db', default='portfolio.db', help='Path to database file')

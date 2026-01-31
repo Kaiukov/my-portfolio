@@ -129,6 +129,7 @@ class PortfolioService:
 
     def get_performance_stats(self) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
+        import math
         returns = self.get_daily_returns()
 
         if not returns:
@@ -142,6 +143,8 @@ class PortfolioService:
                 'avg_daily_return': 0.0,
                 'avg_investment_return': 0.0,
                 'total_cash_flow': 0.0,
+                'std_dev': 0.0,
+                'hist_volatility': 0.0,
             }
 
         # Filter out zero values
@@ -158,9 +161,16 @@ class PortfolioService:
                 'avg_daily_return': 0.0,
                 'avg_investment_return': 0.0,
                 'total_cash_flow': 0.0,
+                'std_dev': 0.0,
+                'hist_volatility': 0.0,
             }
 
         total_cash_flow = sum(r['cash_flow_impact'] for r in returns_with_values)
+        daily_returns = [r['portfolio_daily_return'] for r in returns_with_values]
+        avg = sum(daily_returns) / len(daily_returns)
+        variance = sum((r - avg) ** 2 for r in daily_returns) / len(daily_returns)
+        std_dev = math.sqrt(variance)
+        hist_volatility = std_dev * math.sqrt(252)
 
         return {
             'total_days': len(returns_with_values),
@@ -169,9 +179,11 @@ class PortfolioService:
             'start_value': returns_with_values[0]['portfolio_value'],
             'end_value': returns_with_values[-1]['portfolio_value'],
             'total_gain': returns_with_values[-1]['portfolio_value'] - returns_with_values[0]['portfolio_value'],
-            'avg_daily_return': sum(r['portfolio_daily_return'] for r in returns_with_values) / len(returns_with_values),
+            'avg_daily_return': avg,
             'avg_investment_return': sum(r['investment_return'] for r in returns_with_values) / len(returns_with_values),
             'total_cash_flow': total_cash_flow,
+            'std_dev': std_dev,
+            'hist_volatility': hist_volatility,
         }
 
     def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, exchange: str = '', data_source: str = '') -> dict:
