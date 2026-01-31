@@ -18,20 +18,27 @@ def get_analyzer(csv_file):
 
 def format_position(pos, fetcher):
     """Format position for JSON output."""
-    usd_value = pos["current_value"]
-    usd_cost_basis = pos["cost_basis"]
+    # For CASH positions, cost_basis and current_value are already in USD
+    # (because they use FX rate as the price)
+    # For other assets, we need to convert to USD if currency != USD
 
-    if pos["currency"] != "USD":
-        rate = fetcher.get_exchange_rate(pos["currency"], "USD")
-        if rate:
-            usd_value = pos["current_value"] * rate
-            usd_cost_basis = pos["cost_basis"] * rate
-
-    # CASH positions always have 0 P&L
-    if pos["symbol"].startswith("CASH"):
+    if pos["symbol"].startswith("CASH-"):
+        # CASH positions: cost_basis already includes FX conversion to USD
+        usd_value = pos["current_value"]
+        usd_cost_basis = pos["cost_basis"]
         unrealized_pl = 0.0
         unrealized_pl_pct = 0.0
     else:
+        # Asset positions: convert to USD if needed
+        usd_value = pos["current_value"]
+        usd_cost_basis = pos["cost_basis"]
+
+        if pos["currency"] != "USD":
+            rate = fetcher.get_exchange_rate(pos["currency"], "USD")
+            if rate:
+                usd_value = pos["current_value"] * rate
+                usd_cost_basis = pos["cost_basis"] * rate
+
         unrealized_pl = float(pos["unrealized_pl"])
         unrealized_pl_pct = float(pos["unrealized_pl_pct"])
 
@@ -94,7 +101,7 @@ def cash(csv):
     fetcher = PriceFetcher()
     positions = analyzer.get_current_positions()
 
-    cash_positions = [pos for pos in positions if pos["symbol"].startswith("CASH")]
+    cash_positions = [pos for pos in positions if pos["symbol"].startswith("CASH-")]
     cash_data = [format_position(pos, fetcher) for pos in cash_positions]
 
     total_usd = sum(float(pos["value_usd"]) for pos in cash_data)

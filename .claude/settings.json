@@ -1,0 +1,15 @@
+{
+    "hooks": {
+        "SessionStart": [
+            {
+                "matcher": "startup",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'Load the financial-report-format skill'"
+                    }
+                ]
+            }
+        ]
+    }
+}
