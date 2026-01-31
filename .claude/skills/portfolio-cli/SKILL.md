@@ -1,195 +1,129 @@
 ---
 name: portfolio-cli
-description: This skill should be used when the user asks to "add transaction", "add dividend", "deposit cash", "check portfolio", "show summary", "import transactions", "list trades", "export portfolio", or mentions portfolio tracking, P&L calculation, position management, or cash deposits.
-version: 0.1.0
+description: This skill should be used when the user asks to "add transaction", "check portfolio", "show summary", "migrate transactions", "list trades", "calculate returns", or mentions DuckDB portfolio tracking, P&L calculation, or position management.
+version: 0.2.0
 ---
 
-# Portfolio CLI Skill
+# Portfolio DuckDB CLI Skill
 
 ## Purpose
 
-Execute portfolio transactions and analyze holdings using FIFO cost basis tracking. Provides commands for adding trades, viewing positions, calculating P&L, and managing cash across multiple currencies.
+Manage portfolio transactions and analyze performance using DuckDB. Provides commands for adding trades, viewing positions with real-time gains/losses, and calculating daily returns with separated investment vs cash flow metrics.
 
 ## Commands
 
 ### Add Transaction
 ```bash
-uv run python -m src.cli add SYMBOL QUANTITY --price PRICE --asset-type TYPE --action ACTION [options]
+uv run python -m portfolio_db.cli add --date DD-MM-YYYY --asset SYMBOL --action ACTION --quantity QTY [options]
 ```
 
-**Asset Types:** crypto, stock, etf, cash
-**Actions:** buy, sell, deposit, withdrawal
+**Actions:** BUY, SELL, DEPOSIT
 **Options:**
-- `--currency` - USD, EUR, GBP (default: USD)
-- `--fees` - Transaction fees (default: 0)
-- `--date` - YYYY-MM-DD format (default: today)
-- `--exchange` - Broker name (Binance, Paysera, etc.)
+- `--price` - Asset price in transaction currency
+- `--currency` - Currency code (default: USD)
+- `--fees` - Transaction fees
+- `--exchange` - Exchange or broker name
+- `--db` - Path to DuckDB file (default: portfolio.db)
 
 **Examples:**
 ```bash
 # Buy stock
-uv run python -m src.cli add AAPL 10 --price 150 --asset-type stock --action buy
+uv run python -m portfolio_db.cli add --date 31-01-2026 --asset AAPL --action BUY --quantity 10 --price 150
 
 # Sell crypto
-uv run python -m src.cli add BTC-USD 0.5 --price 95000 --asset-type crypto --action sell --fees 5
+uv run python -m portfolio_db.cli add --date 31-01-2026 --asset BTC-USD --action SELL --quantity 0.5 --price 95000
 
-# Deposit cash
-uv run python -m src.cli add CASH 1000 --price 1 --asset-type cash --action deposit --currency USD
+# Deposit cash (USD)
+uv run python -m portfolio_db.cli add --date 31-01-2026 --asset USD --action DEPOSIT --quantity 1000
 
-# Historical transaction
-uv run python -m src.cli add ETH-USD 2 --price 3500 --asset-type crypto --action buy --date 2025-06-15
+# Deposit cash (EUR)
+uv run python -m portfolio_db.cli add --date 31-01-2026 --asset EURUSD=X --action DEPOSIT --quantity 500
 ```
 
-### Add Dividend
+### View Portfolio Summary
 ```bash
-uv run python -m src.cli dividend AMOUNT --currency CURRENCY [--symbol SYMBOL] [--date DATE]
+uv run python -m portfolio_db.cli summary [--filter open|all] [--export FILE]
 ```
 
-**Parameters:**
-- `AMOUNT` - Dividend amount (required)
-- `--currency` - Currency code (USD, EUR, GBP, etc., default: USD)
-- `--symbol` - Asset symbol dividend came from (optional, for reference)
-- `--date` - YYYY-MM-DD format (default: today)
+**Options:**
+- `--filter` - `open` (held positions) or `all` (includes closed) (default: all)
+- `--export` - Path to save as CSV (e.g., summary.csv)
 
-**Behavior:** Deposits dividend to appropriate currency cash position. Creates CASH DEPOSIT transaction automatically.
-
-**Examples:**
+### Asset Allocation
 ```bash
-# Add USD dividend
-uv run python -m src.cli dividend 100 --currency USD
-
-# Add EUR dividend from AAPL
-uv run python -m src.cli dividend 50 --currency EUR --symbol AAPL
-
-# Add GBP dividend from Unilever
-uv run python -m src.cli dividend 25 --currency GBP --symbol UNILEVER
-
-# Historical dividend
-uv run python -m src.cli dividend 75.50 --currency USD --symbol MSFT --date 2025-01-10
+uv run python -m portfolio_db.cli allocation [--type assets|cash|all] [--export FILE]
 ```
 
-**Result:** Dividend recorded as CASH DEPOSIT. Balance for `CASH-{CURRENCY}` increases automatically (e.g., dividend 100 USD → CASH-USD +100).
+**Options:**
+- `--type` - `assets`, `cash`, or `all` (default: all)
+- `--export` - Path to save as CSV
 
-### View Portfolio
+### Daily Performance Report
 ```bash
-# Portfolio summary with P&L (table format)
-uv run python -m src.cli summary
-
-# Portfolio summary as JSON (LLM-ready)
-uv run python -m src.cli summary --json
-
-# Cash balances by currency
-uv run python -m src.cli cash
-
-# Cash balances as JSON (LLM-ready)
-uv run python -m src.cli cash --json
-
-# Asset allocation
-uv run python -m src.cli allocation
-
-# Asset allocation as JSON (LLM-ready)
-uv run python -m src.cli allocation --json
-
-# All transactions (filterable)
-uv run python -m src.cli list
-uv run python -m src.cli list --symbol BTC-USD
-uv run python -m src.cli list --type crypto
+uv run python -m portfolio_db.cli report [--format table|json]
 ```
 
-**JSON Output (--json flag):**
-All view commands support `--json` for LLM-ready structured output:
-- `summary --json` - Positions array + totals object
-- `cash --json` - Balances array + total_usd
-- `allocation --json` - Allocation array + total_value_usd
+**Formats:** `table` for humans, `json` for structured processing. Includes Portfolio Value, Daily %, Investment %, and Cash Flow impact.
 
-### Import CSV
+### List Transactions
 ```bash
-uv run python -m src.cli import-csv /path/to/file.csv [--clear-first] [--format FORMAT]
+uv run python -m portfolio_db.cli transactions [--format table|json]
 ```
 
-**Formats:** auto (default), simplified, ib (Interactive Brokers)
-
+### Portfolio Status
 ```bash
-# Auto-detect & import
-uv run python -m src.cli import-csv portfolio.csv
-
-# Clear existing & import
-uv run python -m src.cli import-csv portfolio.csv --clear-first
-
-# Specific format
-uv run python -m src.cli import-csv portfolio.csv --format simplified
+uv run python -m portfolio_db.cli status
 ```
+Quick overview of transaction count, current value, total gain, and average investment return.
 
-### Export Portfolio
+### Recalculate Returns
 ```bash
-uv run python -m src.cli export --format FORMAT [--output FILE]
+uv run python -m portfolio_db.cli recalculate [--force] [--from-date DD-MM-YYYY]
 ```
+Forces recalculation of daily returns from a specific date or the beginning of history.
 
-**Formats:** json, csv
-
+### Migrate from CSV
 ```bash
-# Export as JSON
-uv run python -m src.cli export --format json --output my_portfolio.json
-
-# Export as CSV
-uv run python -m src.cli export --format csv --output my_portfolio.csv
+uv run python -m portfolio_db.cli migrate [--csv PATH] [--db PATH]
 ```
+Migrates legacy semicolon-separated CSV transactions to the DuckDB database.
+
+### Verify Prices
+```bash
+uv run python -m portfolio_db.cli verify-prices
+```
+Verifies the schema and statistics of the cached price data in DuckDB.
 
 ## Portfolio Features
 
-**FIFO Cost Basis:** Oldest lots sold first for accurate capital gains tracking
-**Multi-Currency:** Automatic USD conversion with live exchange rates
-**Auto Cash Tracking:** Buying/selling automatically adjusts cash balances
-**Real-Time P&L:** Current holdings valued at live market prices
-
-**Calculations:**
-- **Unrealized P&L** = Current Value - Cost Basis (open positions)
-- **Realized P&L** = Locked gains/losses from sold positions
-- **Total P&L** = Unrealized + Realized
+**DuckDB Backend:** High-performance analytical storage for transactions and prices.
+**Separated Metrics:** Distinguishes between gains from market movement ("Investment %") and changes from deposits/withdrawals ("Cash Flow").
+**Auto-Recalculation:** Adding a transaction automatically triggers a smart partial or full recalculation of historical returns.
+**Multi-Currency Support:** Handles USD, EUR, GBP, and UAH using Yahoo Finance FX pairs (e.g., EURUSD=X).
+**Real-Time Valuation:** Uses `yfinance` to fetch latest prices for stocks, ETFs, and crypto.
 
 ## Data Storage
 
-Transactions stored in `/data/transactions.json` with full history and FIFO lot tracking.
+- **Database:** `portfolio.db` (DuckDB)
+- **Tables:** `transactions`, `prices`, `daily_returns`, `recalc_cache`, `refresh_log`.
 
 ## Common Workflows
 
-**Add multiple trades quickly:**
+**Check performance after adding trades:**
 ```bash
-uv run python -m src.cli add BTC-USD 0.1 --price 45000 --asset-type crypto --action buy --date 2025-01-15
-uv run python -m src.cli add ETH-USD 2 --price 3000 --asset-type crypto --action buy --date 2025-01-16
-uv run python -m src.cli add BTC-USD 0.05 --price 50000 --asset-type crypto --action sell --date 2025-01-20
+uv run python -m portfolio_db.cli add --date 31-01-2026 --asset BTC-USD --action BUY --quantity 0.1 --price 102000
+uv run python -m portfolio_db.cli status
+uv run python -m portfolio_db.cli summary
 ```
 
-**Manage multi-currency cash:**
+**Analyze cash vs investments:**
 ```bash
-uv run python -m src.cli add CASH 500 --price 1 --asset-type cash --action deposit --currency EUR
-uv run python -m src.cli add CASH 1000 --price 1 --asset-type cash --action deposit --currency USD
-uv run python -m src.cli dividend 100 --currency USD
-uv run python -m src.cli dividend 50 --currency EUR --symbol AAPL
-uv run python -m src.cli cash
+uv run python -m portfolio_db.cli allocation --type all
+uv run python -m portfolio_db.cli report --format table
 ```
 
-**Import & analyze:**
+**Export data for external analysis:**
 ```bash
-uv run python -m src.cli import-csv transactions.csv --clear-first
-uv run python -m src.cli summary
-uv run python -m src.cli allocation
-```
-
-**Get portfolio data as JSON (LLM-ready):**
-```bash
-# Output JSON summary
-uv run python -m src.cli summary --json
-
-# Output cash balances as JSON
-uv run python -m src.cli cash --json
-
-# Output allocation as JSON
-uv run python -m src.cli allocation --json
-
-# Save JSON to file
-uv run python -m src.cli summary --json > portfolio_summary.json
-
-# Export transactions (alternative JSON export)
-uv run python -m src.cli export --format json --output transactions.json
+uv run python -m portfolio_db.cli summary --export my_positions.csv
+uv run python -m portfolio_db.cli report --format json > daily_history.json
 ```

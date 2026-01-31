@@ -916,6 +916,41 @@ class PortfolioService:
             'total_value': total_portfolio_value,
         }
 
+    def delete_transaction(self, transaction_id: int) -> dict:
+        """Delete transaction and auto-recalculate returns."""
+        # Get transaction before deletion
+        trans = self.db.con.execute(
+            "SELECT id, date, asset, action, quantity FROM transactions WHERE id = ?",
+            [transaction_id]
+        ).fetchone()
+
+        if not trans:
+            raise ValueError(f"Transaction ID {transaction_id} not found")
+
+        trans_date = trans[1]
+
+        # Delete transaction
+        self.db.delete_transaction_by_id(transaction_id)
+
+        # Delete daily returns from that date onwards
+        self.db.delete_daily_returns_from_date(trans_date)
+
+        # Recalculate from that date
+        recalc_result = self.recalculate(from_date=trans_date)
+
+        return {
+            'transaction_id': trans[0],
+            'deleted_transaction': {
+                'date': str(trans[1]),
+                'asset': trans[2],
+                'action': trans[3],
+                'quantity': trans[4]
+            },
+            'recalc_type': recalc_result['recalc_type'],
+            'from_date': str(trans_date),
+            'rows_affected': recalc_result.get('rows_affected', 0)
+        }
+
     def close(self):
         """Close database connection."""
         self.db.close()

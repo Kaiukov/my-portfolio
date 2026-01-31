@@ -366,6 +366,54 @@ def allocation(type, export, db):
 
 
 @cli.command()
+@click.option('--id', required=True, type=int, help='Transaction ID to delete')
+@click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def delete(id, confirm, db):
+    """Delete transaction by ID and auto-recalculate returns."""
+    service = PortfolioService(db)
+
+    try:
+        # Get transaction to confirm
+        trans = service.db.con.execute(
+            "SELECT id, date, asset, action, quantity, price FROM transactions WHERE id = ?",
+            [id]
+        ).fetchone()
+
+        if not trans:
+            click.echo(f"Error: Transaction ID {id} not found", err=True)
+            service.close()
+            return
+
+        # Show transaction details
+        click.echo(f"\nTransaction to delete (ID: {trans[0]}):")
+        click.echo(f"  Date:     {trans[1]}")
+        click.echo(f"  Asset:    {trans[2]}")
+        click.echo(f"  Action:   {trans[3]}")
+        click.echo(f"  Quantity: {trans[4]}")
+        click.echo(f"  Price:    {trans[5]}")
+
+        # Ask for confirmation
+        if not confirm:
+            if not click.confirm("\nAre you sure you want to delete this transaction?"):
+                click.echo("Cancelled")
+                service.close()
+                return
+
+        # Delete and recalculate
+        result = service.delete_transaction(id)
+
+        click.echo(f"\n✓ Transaction deleted (ID: {result['transaction_id']})")
+        click.echo(f"✓ {result['recalc_type'].upper()} recalculation triggered from {result['from_date']}")
+        click.echo(f"✓ {result['rows_affected']} daily returns recalculated")
+
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
+
+
+@cli.command()
 @click.option('--filter', type=click.Choice(['open', 'all']), default='all', help='Filter positions (open=held, all=including closed)')
 @click.option('--export', default=None, help='Export to CSV file (e.g., portfolio.csv)')
 @click.option('--db', default='portfolio.db', help='Path to database file')

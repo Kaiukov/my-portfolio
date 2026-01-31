@@ -409,6 +409,25 @@ class PortfolioDatabase:
         ).fetchall()
         return result
 
+    def delete_transaction_by_id(self, transaction_id: int) -> bool:
+        """Delete a transaction by ID."""
+        # Check if transaction exists
+        result = self.con.execute(
+            "SELECT id FROM transactions WHERE id = ?",
+            [transaction_id]
+        ).fetchone()
+
+        if not result:
+            raise ValueError(f"Transaction ID {transaction_id} not found")
+
+        # Delete the transaction
+        self.con.execute(
+            "DELETE FROM transactions WHERE id = ?",
+            [transaction_id]
+        )
+        self.con.commit()
+        return True
+
     def close(self):
         """Close database connection."""
         self.con.close()

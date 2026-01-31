@@ -48,3 +48,5 @@ portfolio_reports/
 ukr_news/
 .db
 portfolio.db
+srcNOUSE
+duckdb
