@@ -352,26 +352,26 @@ class PortfolioService:
         }
 
     def evaluate_metric(self, metric_name: str, value: float) -> str:
-        """Evaluate metric and return assessment comment."""
+        """Evaluate metric and return assessment comment (no emojis for JSON)."""
         assessments = {
-            'avg_daily_return': lambda v: '✅ Excellent' if v > 0.2 else ('⚠️ Below avg' if v > 0 else '❌ Negative'),
-            'avg_monthly_return': lambda v: '✅ Excellent' if v > 5 else ('⚠️ Below avg' if v > 0 else '❌ Negative'),
-            'cagr': lambda v: '✅ Excellent' if v > 20 else ('⚠️ Good' if v > 10 else ('⚠️ Moderate' if v > 0 else '❌ Negative')),
-            'total_return_pct': lambda v: '✅ Excellent' if v > 50 else ('⚠️ Good' if v > 20 else ('⚠️ Moderate' if v > 0 else '❌ Negative')),
-            'std_dev': lambda v: '✅ Low' if v < 2 else ('⚠️ Moderate' if v < 4 else '❌ High'),
-            'hist_volatility': lambda v: '✅ Low' if v < 20 else ('⚠️ Moderate' if v < 40 else '❌ High'),
-            'beta': lambda v: '✅ Low corr' if abs(v) < 0.5 else ('⚠️ Moderate' if abs(v) < 1 else '❌ High'),
-            'sharpe_ratio': lambda v: '✅ Excellent' if v > 2 else ('⚠️ Good' if v > 1 else ('⚠️ Poor' if v > 0 else '❌ Bad')),
-            'sortino_ratio': lambda v: '✅ Excellent' if v > 3 else ('⚠️ Good' if v > 1.5 else ('⚠️ Poor' if v > 0 else '❌ Bad')),
-            'var_95': lambda v: '✅ Low risk' if v > -3 else ('⚠️ Moderate' if v > -5 else '❌ High risk'),
-            'var_99': lambda v: '✅ Low risk' if v > -5 else ('⚠️ Moderate' if v > -8 else '❌ High risk'),
-            'cvar_95': lambda v: '✅ Low risk' if v > -4 else ('⚠️ Moderate' if v > -7 else '❌ High risk'),
-            'cvar_99': lambda v: '✅ Low risk' if v > -6 else ('⚠️ Moderate' if v > -10 else '❌ High risk'),
-            'max_drawdown': lambda v: '✅ Excellent' if v < 10 else ('⚠️ Normal' if v < 25 else '❌ High'),
-            'avg_drawdown': lambda v: '✅ Low' if v < 4 else ('⚠️ Normal' if v < 8 else '❌ High'),
-            'avg_drawdown_duration': lambda v: '✅ Fast' if v < 10 else ('⚠️ Normal' if v < 30 else '❌ Slow'),
-            'hhi': lambda v: '✅ Diversified' if v < 0.15 else ('⚠️ Moderate' if v < 0.25 else '❌ Concentrated'),
-            'weighted_avg_exposure': lambda v: '✅ Low' if v < 0.1 else ('⚠️ Moderate' if v < 0.2 else '❌ High'),
+            'avg_daily_return': lambda v: 'Excellent' if v > 0.2 else ('Below avg' if v > 0 else 'Negative'),
+            'avg_monthly_return': lambda v: 'Excellent' if v > 5 else ('Below avg' if v > 0 else 'Negative'),
+            'cagr': lambda v: 'Excellent' if v > 20 else ('Good' if v > 10 else ('Moderate' if v > 0 else 'Negative')),
+            'total_return_pct': lambda v: 'Excellent' if v > 50 else ('Good' if v > 20 else ('Moderate' if v > 0 else 'Negative')),
+            'std_dev': lambda v: 'Low' if v < 2 else ('Moderate' if v < 4 else 'High'),
+            'hist_volatility': lambda v: 'Low' if v < 20 else ('Moderate' if v < 40 else 'High'),
+            'beta': lambda v: 'Low corr' if abs(v) < 0.5 else ('Moderate' if abs(v) < 1 else 'High'),
+            'sharpe_ratio': lambda v: 'Excellent' if v > 2 else ('Good' if v > 1 else ('Poor' if v > 0 else 'Bad')),
+            'sortino_ratio': lambda v: 'Excellent' if v > 3 else ('Good' if v > 1.5 else ('Poor' if v > 0 else 'Bad')),
+            'var_95': lambda v: 'Low risk' if v > -3 else ('Moderate' if v > -5 else 'High risk'),
+            'var_99': lambda v: 'Low risk' if v > -5 else ('Moderate' if v > -8 else 'High risk'),
+            'cvar_95': lambda v: 'Low risk' if v > -4 else ('Moderate' if v > -7 else 'High risk'),
+            'cvar_99': lambda v: 'Low risk' if v > -6 else ('Moderate' if v > -10 else 'High risk'),
+            'max_drawdown': lambda v: 'Excellent' if v < 10 else ('Normal' if v < 25 else 'High'),
+            'avg_drawdown': lambda v: 'Low' if v < 4 else ('Normal' if v < 8 else 'High'),
+            'avg_drawdown_duration': lambda v: 'Fast' if v < 10 else ('Normal' if v < 30 else 'Slow'),
+            'hhi': lambda v: 'Diversified' if v < 0.15 else ('Moderate' if v < 0.25 else 'Concentrated'),
+            'weighted_avg_exposure': lambda v: 'Low' if v < 0.1 else ('Moderate' if v < 0.2 else 'High'),
         }
         return assessments.get(metric_name, lambda v: '')(value)
 
