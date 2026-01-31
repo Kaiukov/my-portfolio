@@ -550,13 +550,24 @@ class PortfolioService:
         except Exception:
             pass
 
-        # Build position data by asset
+        # Build position data by asset with auto-deduction logic
         positions = {}
+        from portfolio_db.calculator import get_asset_type
+
+        # Helper to determine which cash currency to use
+        def get_cash_currency(asset_type):
+            if asset_type == 'stock_gbp':
+                return 'GBPUSD=X'  # GBP cash
+            elif asset_type == 'stock_eur':
+                return 'EURUSD=X'  # EUR cash
+            else:
+                return 'USD'  # USD for US stocks, crypto, etc.
+
+        # First pass: Initialize all positions including cash
         for trans in transactions:
             asset = trans[2]
             action = trans[3].upper()
             quantity = trans[4]
-            price = trans[6]
             date_obj = trans[1]
 
             if asset not in positions:
@@ -572,6 +583,39 @@ class PortfolioService:
                     'last_price_from_trans': None,
                 }
 
+            # Process based on action
+            if action == 'DEPOSIT':
+                # Add cash deposits first
+                positions[asset]['shares'] += quantity
+
+        # Second pass: Process BUY/SELL with auto-deduction
+        for trans in transactions:
+            asset = trans[2]
+            action = trans[3].upper()
+            quantity = trans[4]
+            asset_type_val = trans[5]
+            price = trans[6]
+            currency = trans[7]
+            fees = trans[8]
+            date_obj = trans[1]
+
+            if asset not in positions:
+                positions[asset] = {
+                    'symbol': asset,
+                    'shares': 0,
+                    'buy_quantity': 0,
+                    'buy_cost': 0.0,
+                    'sell_quantity': 0,
+                    'sell_proceeds': 0.0,
+                    'dividend_income': 0.0,
+                    'first_buy_date': date_obj,
+                    'last_price_from_trans': None,
+                }
+
+            # Determine asset type for cash handling
+            asset_type = get_asset_type(asset)
+            is_cash_asset = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
+
             if action == 'BUY':
                 positions[asset]['shares'] += quantity
                 positions[asset]['buy_quantity'] += quantity
@@ -579,18 +623,63 @@ class PortfolioService:
                     positions[asset]['buy_cost'] += quantity * price
                     positions[asset]['last_price_from_trans'] = price
                 positions[asset]['first_buy_date'] = min(positions[asset]['first_buy_date'], date_obj)
+
+                # Auto-deduct cash for BUY (not for cash assets)
+                if not is_cash_asset and price:
+                    cash_currency = get_cash_currency(asset_type)
+                    cash_cost = quantity * price
+                    # Also add fees to the deduction
+                    if fees:
+                        cash_cost += fees
+
+                    # Ensure cash position exists
+                    if cash_currency not in positions:
+                        positions[cash_currency] = {
+                            'symbol': cash_currency,
+                            'shares': 0,
+                            'buy_quantity': 0,
+                            'buy_cost': 0.0,
+                            'sell_quantity': 0,
+                            'sell_proceeds': 0.0,
+                            'dividend_income': 0.0,
+                            'first_buy_date': date_obj,
+                            'last_price_from_trans': None,
+                        }
+                    positions[cash_currency]['shares'] -= cash_cost
+
             elif action == 'SELL':
                 positions[asset]['shares'] -= quantity
                 positions[asset]['sell_quantity'] += quantity
                 if price:
                     positions[asset]['sell_proceeds'] += quantity * price
                     positions[asset]['last_price_from_trans'] = price
+
+                # Auto-add cash for SELL (not for cash assets)
+                if not is_cash_asset and price:
+                    cash_currency = get_cash_currency(asset_type)
+                    cash_proceeds = quantity * price
+                    # Subtract fees from proceeds
+                    if fees:
+                        cash_proceeds -= fees
+
+                    # Ensure cash position exists
+                    if cash_currency not in positions:
+                        positions[cash_currency] = {
+                            'symbol': cash_currency,
+                            'shares': 0,
+                            'buy_quantity': 0,
+                            'buy_cost': 0.0,
+                            'sell_quantity': 0,
+                            'sell_proceeds': 0.0,
+                            'dividend_income': 0.0,
+                            'first_buy_date': date_obj,
+                            'last_price_from_trans': None,
+                        }
+                    positions[cash_currency]['shares'] += cash_proceeds
+
             elif action == 'DEPOSIT':
-                # Handle both new format (USD, EURUSD=X) and old format (CASH USD, CASH EUR)
-                from portfolio_db.calculator import get_asset_type
-                asset_type = get_asset_type(asset)
-                if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
-                    positions[asset]['shares'] += quantity
+                # Already processed in first pass
+                pass
 
         # Calculate summary metrics for each position
         result = []
@@ -685,7 +774,8 @@ class PortfolioService:
             avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
             # Total cost of CURRENT shares (not all shares ever bought)
             total_cost = (shares * avg_cost_per_share) if shares > 0 else 0
-            market_value = (shares * last_price) if last_price and shares > 0 else 0
+            # Market value: handle both positive and negative (deficit) cash
+            market_value = (shares * last_price) if last_price else 0
 
             # Unrealized gains (only for current holding)
             unrealized_gain_value = market_value - total_cost if shares > 0 else 0
