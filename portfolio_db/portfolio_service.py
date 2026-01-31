@@ -151,6 +151,7 @@ class PortfolioService:
             'hist_volatility': 0.0,
             'beta': 0.0,
             'sharpe_ratio': 0.0,
+            'sortino_ratio': 0.0,
             'var_95': 0.0,
             'var_99': 0.0,
             'cvar_95': 0.0,
@@ -279,6 +280,18 @@ class PortfolioService:
         rf_annual = 0.02  # 2% annual risk-free rate
         sharpe_ratio = ((cagr_decimal - rf_annual) / (hist_volatility/100)) if hist_volatility > 0 else 0.0
 
+        # Sortino Ratio (annualized) - only downside risk
+        # Sortino = (Rp - Rf) / σd where σd = standard deviation of downside
+        rf_daily_pct = (rf_annual / 252) * 100  # Daily risk-free in %
+        target_return_daily_pct = rf_daily_pct  # Target = risk-free rate
+        downside_diffs = [r - target_return_daily_pct for r in daily_returns if r < target_return_daily_pct]
+        # Downside deviation: standard deviation of downside returns only
+        downside_deviation_daily = math.sqrt(sum(d**2 for d in downside_diffs) / len(downside_diffs)) if downside_diffs else 0.0
+        # Daily Sortino, then annualize
+        excess_return_daily = avg - rf_daily_pct  # avg is already in %
+        sortino_daily = excess_return_daily / downside_deviation_daily if downside_deviation_daily > 0 else 0.0
+        sortino_ratio = sortino_daily * math.sqrt(252)  # Annualize
+
         # Monthly return (simplified: from daily returns)
         # Better: compound daily returns to get monthly
         monthly_returns = []
@@ -328,6 +341,7 @@ class PortfolioService:
             'hist_volatility': hist_volatility,
             'beta': beta,
             'sharpe_ratio': sharpe_ratio,
+            'sortino_ratio': sortino_ratio,
             'var_95': var_95,
             'var_99': var_99,
             'cvar_95': cvar_95,
@@ -348,6 +362,7 @@ class PortfolioService:
             'hist_volatility': lambda v: '✅ Low' if v < 20 else ('⚠️ Moderate' if v < 40 else '❌ High'),
             'beta': lambda v: '✅ Low corr' if abs(v) < 0.5 else ('⚠️ Moderate' if abs(v) < 1 else '❌ High'),
             'sharpe_ratio': lambda v: '✅ Excellent' if v > 2 else ('⚠️ Good' if v > 1 else ('⚠️ Poor' if v > 0 else '❌ Bad')),
+            'sortino_ratio': lambda v: '✅ Excellent' if v > 3 else ('⚠️ Good' if v > 1.5 else ('⚠️ Poor' if v > 0 else '❌ Bad')),
             'var_95': lambda v: '✅ Low risk' if v > -3 else ('⚠️ Moderate' if v > -5 else '❌ High risk'),
             'var_99': lambda v: '✅ Low risk' if v > -5 else ('⚠️ Moderate' if v > -8 else '❌ High risk'),
             'cvar_95': lambda v: '✅ Low risk' if v > -4 else ('⚠️ Moderate' if v > -7 else '❌ High risk'),

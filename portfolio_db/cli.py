@@ -541,6 +541,7 @@ def performance(db):
     click.echo(f"{'Standard Deviation:':<30} {stats['std_dev']:>10.4f}%   {eval_metric('std_dev', stats['std_dev'])}")
     click.echo(f"{'Historical Volatility (ann):':<30} {stats['hist_volatility']:>10.4f}%   {eval_metric('hist_volatility', stats['hist_volatility'])}")
     click.echo(f"{'Sharpe Ratio:':<30} {stats['sharpe_ratio']:>10.4f}   {eval_metric('sharpe_ratio', stats['sharpe_ratio'])}")
+    click.echo(f"{'Sortino Ratio:':<30} {stats['sortino_ratio']:>10.4f}   {eval_metric('sortino_ratio', stats['sortino_ratio'])}")
     click.echo(f"{'Beta (β) vs SPY:':<30} {stats['beta']:>10.4f}   {eval_metric('beta', stats['beta'])}")
     click.echo("-" * 80)
     click.echo(f"{'VaR 95% (daily):':<30} {stats['var_95']:>10.4f}%   {eval_metric('var_95', stats['var_95'])}")
