@@ -25,6 +25,9 @@ class PortfolioDatabase:
         # Migrate existing daily_returns table if needed
         self._migrate_daily_returns_schema()
 
+        # Migrate CASH format to Yahoo format
+        self._migrate_cash_format()
+
         # Create transactions table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
@@ -175,6 +178,42 @@ class PortfolioDatabase:
                     pass  # Column might already exist
 
         self.con.commit()
+
+    def _migrate_cash_format(self):
+        """Migrate CASH format to Yahoo Finance format."""
+        try:
+            # Check if transactions table exists
+            table_exists = self.con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
+            ).fetchone()
+
+            if not table_exists:
+                return  # Table doesn't exist yet
+
+            # Migrate CASH USD -> USD
+            self.con.execute("""
+                UPDATE transactions SET asset = 'USD' WHERE asset = 'CASH USD'
+            """)
+
+            # Migrate CASH EUR -> EURUSD=X
+            self.con.execute("""
+                UPDATE transactions SET asset = 'EURUSD=X' WHERE asset = 'CASH EUR'
+            """)
+
+            # Migrate CASH GBP -> GBPUSD=X
+            self.con.execute("""
+                UPDATE transactions SET asset = 'GBPUSD=X' WHERE asset = 'CASH GBP'
+            """)
+
+            # Migrate CASH UAH -> UAHUSD=X
+            self.con.execute("""
+                UPDATE transactions SET asset = 'UAHUSD=X' WHERE asset = 'CASH UAH'
+            """)
+
+            self.con.commit()
+        except Exception:
+            # Ignore errors - schema might not exist yet
+            pass
 
     def clear_transactions(self):
         """Clear all transactions."""
