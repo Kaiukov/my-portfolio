@@ -7,6 +7,31 @@ from typing import Dict, List, Tuple
 import yfinance as yf
 
 
+def get_asset_type(ticker: str) -> str:
+    """Determine asset type by ticker symbol.
+
+    Returns:
+        - 'cash_base': USD (rate = 1.0)
+        - 'cash_fx': EURUSD=X, GBPUSD=X, etc (FX pairs)
+        - 'crypto': Bitcoin, Ethereum (ends with -USD)
+        - 'stock_gbp': London stocks (ends with .L)
+        - 'stock_eur': German stocks (ends with .DE)
+        - 'stock_usd': US stocks and default
+    """
+    if ticker == 'USD':
+        return 'cash_base'
+    elif ticker.endswith('USD=X'):
+        return 'cash_fx'
+    elif ticker.endswith('-USD'):
+        return 'crypto'
+    elif ticker.endswith('.L'):
+        return 'stock_gbp'
+    elif ticker.endswith('.DE'):
+        return 'stock_eur'
+    else:
+        return 'stock_usd'
+
+
 class DailyReturnCalculator:
     """Calculate daily portfolio returns with separated return metrics."""
 
@@ -70,27 +95,36 @@ class DailyReturnCalculator:
             if quantity == 0:
                 continue
 
-            if asset not in self.prices_dict:
-                continue
+            asset_type = get_asset_type(asset)
 
-            price_series = self.prices_dict[asset]
+            # For cash assets, we don't need prices_dict
+            if asset_type == 'cash_base':
+                # USD: direct value
+                asset_value = quantity
+            elif asset_type == 'cash_fx':
+                # EURUSD=X, GBPUSD=X: need FX rate from prices
+                if asset in self.prices_dict:
+                    price_series = self.prices_dict[asset]
+                    try:
+                        price_value = price_series.asof(date)
+                        if isinstance(price_value, pd.Series):
+                            price = price_value.iloc[0] if len(price_value) > 0 else None
+                        else:
+                            price = price_value
+                    except Exception:
+                        price = None
 
-            try:
-                price_value = price_series.asof(date)
-                if isinstance(price_value, pd.Series):
-                    price = price_value.iloc[0] if len(price_value) > 0 else None
+                    if price is not None and not (isinstance(price, float) and np.isnan(price)):
+                        asset_value = quantity * float(price)
+                    else:
+                        # Fallback: use old-style CASH format lookup
+                        fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                        fx_rate = self._get_fx_rate(fx_ticker, date)
+                        asset_value = quantity * fx_rate
                 else:
-                    price = price_value
-            except Exception:
-                price = None
-
-            if price is None or (isinstance(price, float) and np.isnan(price)):
-                continue
-
-            price = float(price)
-
-            if asset.startswith('CASH'):
-                # Convert non-USD cash to USD using FX rates
+                    asset_value = 0.0
+            elif asset.startswith('CASH'):
+                # Backwards compatibility: old CASH format (CASH EUR, CASH GBP, CASH USD)
                 if asset == 'CASH EUR':
                     fx_rate = self._get_fx_rate('EURUSD=X', date)
                     asset_value = quantity * fx_rate
@@ -99,21 +133,43 @@ class DailyReturnCalculator:
                     asset_value = quantity * fx_rate
                 else:  # CASH USD
                     asset_value = quantity
-            elif asset.endswith('.L'):
-                fx_rate = self._get_fx_rate('GBPUSD=X', date)
-                asset_value = quantity * price * fx_rate
-            elif asset.endswith('.DE'):
-                fx_rate = self._get_fx_rate('EURUSD=X', date)
-                asset_value = quantity * price * fx_rate
             else:
-                asset_value = quantity * price
+                # Regular assets: stocks, crypto, etc
+                if asset not in self.prices_dict:
+                    continue
+
+                price_series = self.prices_dict[asset]
+
+                try:
+                    price_value = price_series.asof(date)
+                    if isinstance(price_value, pd.Series):
+                        price = price_value.iloc[0] if len(price_value) > 0 else None
+                    else:
+                        price = price_value
+                except Exception:
+                    price = None
+
+                if price is None or (isinstance(price, float) and np.isnan(price)):
+                    continue
+
+                price = float(price)
+
+                if asset_type == 'stock_gbp':
+                    fx_rate = self._get_fx_rate('GBPUSD=X', date)
+                    asset_value = quantity * price * fx_rate
+                elif asset_type == 'stock_eur':
+                    fx_rate = self._get_fx_rate('EURUSD=X', date)
+                    asset_value = quantity * price * fx_rate
+                else:
+                    # US stocks, crypto: price already in USD
+                    asset_value = quantity * price
 
             total_value += float(asset_value)
 
         return total_value
 
     def _get_daily_cash_flow(self, holdings_by_date: Dict, date_obj, trans_by_asset: Dict) -> float:
-        """Calculate net cash flow (deposits - withdrawals) for a specific date."""
+        """Calculate net cash flow (deposits - withdrawals) for a specific date in USD."""
         cash_flow = 0.0
 
         for asset, trans_list in trans_by_asset.items():
@@ -122,10 +178,79 @@ class DailyReturnCalculator:
                     action = trans['action']
                     quantity = trans['quantity']
 
-                    if action == 'DEPOSIT' or (asset.startswith('CASH') and action == 'BUY'):
-                        cash_flow += quantity
-                    elif action == 'SELL' and asset.startswith('CASH'):
-                        cash_flow -= quantity
+                    # Determine if this is a cash-related transaction
+                    asset_type = get_asset_type(asset)
+                    is_cash = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
+
+                    if action == 'DEPOSIT' and is_cash:
+                        # Convert to USD if needed
+                        if asset_type == 'cash_fx':
+                            # Get FX rate for this date
+                            if asset in self.prices_dict:
+                                price_series = self.prices_dict[asset]
+                                try:
+                                    fx_rate = price_series.asof(pd.Timestamp(date_obj))
+                                    if isinstance(fx_rate, pd.Series):
+                                        fx_rate = fx_rate.iloc[0] if len(fx_rate) > 0 else None
+                                    if fx_rate is not None and not (isinstance(fx_rate, float) and np.isnan(fx_rate)):
+                                        cash_flow += quantity * float(fx_rate)
+                                    else:
+                                        # Fallback
+                                        fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                                        fx_rate = self._get_fx_rate(fx_ticker, date_obj)
+                                        cash_flow += quantity * fx_rate
+                                except Exception:
+                                    # Fallback
+                                    fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                                    fx_rate = self._get_fx_rate(fx_ticker, date_obj)
+                                    cash_flow += quantity * fx_rate
+                            else:
+                                # Fallback
+                                fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                                fx_rate = self._get_fx_rate(fx_ticker, date_obj)
+                                cash_flow += quantity * fx_rate
+                        elif asset == 'CASH EUR':
+                            # Backwards compatibility
+                            fx_rate = self._get_fx_rate('EURUSD=X', date_obj)
+                            cash_flow += quantity * fx_rate
+                        elif asset == 'CASH GBP':
+                            # Backwards compatibility
+                            fx_rate = self._get_fx_rate('GBPUSD=X', date_obj)
+                            cash_flow += quantity * fx_rate
+                        else:
+                            # USD or new format
+                            cash_flow += quantity
+                    elif action == 'SELL' and is_cash:
+                        # Similar conversion for withdrawals
+                        if asset_type == 'cash_fx':
+                            if asset in self.prices_dict:
+                                price_series = self.prices_dict[asset]
+                                try:
+                                    fx_rate = price_series.asof(pd.Timestamp(date_obj))
+                                    if isinstance(fx_rate, pd.Series):
+                                        fx_rate = fx_rate.iloc[0] if len(fx_rate) > 0 else None
+                                    if fx_rate is not None and not (isinstance(fx_rate, float) and np.isnan(fx_rate)):
+                                        cash_flow -= quantity * float(fx_rate)
+                                    else:
+                                        fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                                        fx_rate = self._get_fx_rate(fx_ticker, date_obj)
+                                        cash_flow -= quantity * fx_rate
+                                except Exception:
+                                    fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                                    fx_rate = self._get_fx_rate(fx_ticker, date_obj)
+                                    cash_flow -= quantity * fx_rate
+                            else:
+                                fx_ticker = 'EURUSD=X' if 'EUR' in asset else 'GBPUSD=X'
+                                fx_rate = self._get_fx_rate(fx_ticker, date_obj)
+                                cash_flow -= quantity * fx_rate
+                        elif asset == 'CASH EUR':
+                            fx_rate = self._get_fx_rate('EURUSD=X', date_obj)
+                            cash_flow -= quantity * fx_rate
+                        elif asset == 'CASH GBP':
+                            fx_rate = self._get_fx_rate('GBPUSD=X', date_obj)
+                            cash_flow -= quantity * fx_rate
+                        else:
+                            cash_flow -= quantity
 
         return cash_flow
 
@@ -214,15 +339,15 @@ class DailyReturnCalculator:
                 else:
                     portfolio_daily_return = 0.0
 
-                # Update adjusted base with cash flow
-                adjusted_base += cash_flow_impact
-
                 # Investment return (excluding cash flow impact)
                 value_change = portfolio_value - prev_value - cash_flow_impact
                 if adjusted_base > 0:
                     investment_return = (value_change / adjusted_base) * 100
                 else:
                     investment_return = 0.0
+
+                # Update adjusted base with cash flow (AFTER investment return calculation)
+                adjusted_base += cash_flow_impact
 
             results.append({
                 'date': date_obj,
