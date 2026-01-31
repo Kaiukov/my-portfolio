@@ -368,18 +368,37 @@ def allocation(type, export, db):
 @cli.command()
 @click.option('--db', default='portfolio.db', help='Path to database file')
 def cash(db):
-    """Show actual cash balances with breakdown."""
+    """Show actual cash balances with breakdown (converted to USD)."""
     service = PortfolioService(db)
 
     try:
         cash_balances = service.get_actual_cash_balances()
 
-        click.echo("\n" + "=" * 90)
-        click.echo("ACTUAL CASH BALANCES")
-        click.echo("=" * 90 + "\n")
+        # Fetch FX rates from yfinance
+        fx_rates = {'EURUSD=X': 1.0, 'GBPUSD=X': 1.0}
+        try:
+            import yfinance as yf
+            from datetime import date, timedelta
 
-        click.echo(f"{'Currency':<15} {'Balance':>18} {'Deposits':>18} {'Spent on BUY':>18} {'Received from SELL':>20}")
-        click.echo("-" * 90)
+            end_date = date.today()
+            start_date = end_date - timedelta(days=7)
+
+            for ticker in ['EURUSD=X', 'GBPUSD=X']:
+                try:
+                    data = yf.Ticker(ticker).history(start=start_date, end=end_date)
+                    if not data.empty:
+                        fx_rates[ticker] = float(data['Close'].iloc[-1])
+                except:
+                    pass
+        except:
+            pass
+
+        click.echo("\n" + "=" * 110)
+        click.echo("ACTUAL CASH BALANCES (USD EQUIVALENT)")
+        click.echo("=" * 110 + "\n")
+
+        click.echo(f"{'Currency':<15} {'Balance (USD equiv)':>20} {'Deposits':>18} {'Spent on BUY':>18} {'Received from SELL':>20}")
+        click.echo("-" * 110)
 
         total_balance_usd = 0.0
         for currency, data in cash_balances.items():
@@ -392,25 +411,49 @@ def cash(db):
             if balance == 0 and deposits == 0 and spent == 0 and received == 0:
                 continue
 
-            balance_str = format_currency(balance)
-            deposits_str = format_currency(deposits)
-            spent_str = format_currency(spent)
-            received_str = format_currency(received)
+            # Convert to USD for FX pairs
+            if currency == 'EURUSD=X':
+                fx_rate = fx_rates['EURUSD=X']
+                balance_usd = balance * fx_rate
+                deposits_usd = deposits * fx_rate
+                spent_usd = spent * fx_rate
+                received_usd = received * fx_rate
+                currency_display = f"EUR (rate: {fx_rate:.4f})"
+            elif currency == 'GBPUSD=X':
+                fx_rate = fx_rates['GBPUSD=X']
+                balance_usd = balance * fx_rate
+                deposits_usd = deposits * fx_rate
+                spent_usd = spent * fx_rate
+                received_usd = received * fx_rate
+                currency_display = f"GBP (rate: {fx_rate:.4f})"
+            else:
+                balance_usd = balance
+                deposits_usd = deposits
+                spent_usd = spent
+                received_usd = received
+                currency_display = currency
+
+            balance_str = format_currency(balance_usd)
+            deposits_str = format_currency(deposits_usd)
+            spent_str = format_currency(spent_usd)
+            received_str = format_currency(received_usd)
 
             click.echo(
-                f"{currency:<15} {balance_str:>18} {deposits_str:>18} "
+                f"{currency_display:<15} {balance_str:>20} {deposits_str:>18} "
                 f"{spent_str:>18} {received_str:>20}"
             )
 
-            # Add to total (all balances are in USD equivalent)
-            total_balance_usd += balance
+            # Add to total (all in USD)
+            total_balance_usd += balance_usd
 
-        click.echo("-" * 90)
-        click.echo(f"{'TOTAL CASH (USD)':<15} {format_currency(total_balance_usd):>18}")
-        click.echo("\n" + "=" * 90)
+        click.echo("-" * 110)
+        click.echo(f"{'TOTAL CASH (USD)':<15} {format_currency(total_balance_usd):>20}")
+        click.echo("\n" + "=" * 110)
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
+        import traceback
+        traceback.print_exc()
     finally:
         service.close()
 
