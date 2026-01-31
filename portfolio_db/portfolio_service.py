@@ -610,21 +610,76 @@ class PortfolioService:
             from portfolio_db.calculator import get_asset_type
             asset_type = get_asset_type(asset)
 
-            if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
-                last_price = 1.0  # Cash is always $1
+            # Helper to extract FX rate from price series
+            def extract_fx_rate(fx_series):
+                if fx_series is None:
+                    return 1.0
+                try:
+                    val = fx_series.iloc[-1]
+                    if hasattr(val, 'iloc'):
+                        return float(val.iloc[0])
+                    elif hasattr(val, 'values'):
+                        return float(val.values[0] if len(val.values) > 0 else val)
+                    else:
+                        return float(val)
+                except:
+                    return 1.0
+
+            if asset_type == 'cash_base' or asset == 'CASH USD':
+                last_price = 1.0  # USD is always $1
+            elif asset_type == 'cash_fx':
+                # FX pairs: get actual FX rate from prices
+                price_series = prices_dict.get(asset)
+                if price_series is not None:
+                    try:
+                        import pandas as pd
+                        val = price_series.iloc[-1]
+                        # Handle Series (multi-column DataFrame) vs scalar
+                        if hasattr(val, 'iloc'):
+                            last_price = float(val.iloc[0])
+                        elif hasattr(val, 'values'):
+                            last_price = float(val.values[0] if len(val.values) > 0 else val)
+                        else:
+                            last_price = float(val)
+                    except:
+                        last_price = 1.0  # Fallback
+                else:
+                    last_price = 1.0  # Fallback
+            elif asset.startswith('CASH'):
+                # Old format: CASH EUR, CASH GBP - get FX rate
+                if asset == 'CASH EUR':
+                    last_price = extract_fx_rate(prices_dict.get('EURUSD=X'))
+                elif asset == 'CASH GBP':
+                    last_price = extract_fx_rate(prices_dict.get('GBPUSD=X'))
+                else:
+                    last_price = 1.0  # CASH USD
             else:
                 # Try price_dict first
                 price_series = prices_dict.get(asset)
                 if price_series is not None:
                     try:
                         import pandas as pd
-                        last_price = float(price_series.iloc[-1] if hasattr(price_series, 'iloc') else price_series.iloc[-1])
+                        val = price_series.iloc[-1]
+                        if hasattr(val, 'iloc'):
+                            last_price = float(val.iloc[0])
+                        elif hasattr(val, 'values'):
+                            last_price = float(val.values[0] if len(val.values) > 0 else val)
+                        else:
+                            last_price = float(val)
                     except:
                         pass
 
                 # Fallback to transaction price
                 if last_price is None:
                     last_price = pos_data['last_price_from_trans']
+
+                # Apply FX conversion for non-USD stocks
+                if last_price and asset_type == 'stock_gbp':
+                    gbp_rate = extract_fx_rate(prices_dict.get('GBPUSD=X'))
+                    last_price = last_price * gbp_rate
+                elif last_price and asset_type == 'stock_eur':
+                    eur_rate = extract_fx_rate(prices_dict.get('EURUSD=X'))
+                    last_price = last_price * eur_rate
 
             # Calculate metrics
             avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
