@@ -269,6 +269,7 @@ class DailyReturnCalculator:
             asset = trans[2]
             action = trans[3]
             quantity = trans[4]
+            price = trans[6] if len(trans) > 6 else None  # price field
 
             if min_date is None or date_obj < min_date:
                 min_date = date_obj
@@ -280,7 +281,8 @@ class DailyReturnCalculator:
             trans_by_asset[asset].append({
                 'date': date_obj,
                 'action': action.upper(),
-                'quantity': quantity
+                'quantity': quantity,
+                'price': price
             })
 
         if not min_date or not max_date:
@@ -295,20 +297,57 @@ class DailyReturnCalculator:
         # Initialize holdings
         holdings = {date: {} for date in date_range}
 
-        # Process transactions
+        # Process transactions with auto cash deduction for BUY/SELL
         for asset, trans_list in trans_by_asset.items():
             for trans in trans_list:
                 trans_date = trans['date']
                 action = trans['action']
                 quantity = trans['quantity']
+                price = trans.get('price')
+
+                # Determine asset type for cash handling
+                asset_type = get_asset_type(asset)
+                is_cash_asset = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
+
+                # Determine which cash currency to use based on asset type
+                def get_cash_currency(asset_type):
+                    if asset_type == 'stock_gbp':
+                        return 'GBPUSD=X'  # GBP cash
+                    elif asset_type == 'stock_eur':
+                        return 'EURUSD=X'  # EUR cash
+                    else:
+                        return 'USD'  # USD for US stocks, crypto, etc.
 
                 for date in date_range:
                     if date >= pd.Timestamp(trans_date):
+                        # Initialize asset holding if needed
                         if asset not in holdings[date]:
                             holdings[date][asset] = 0
+
                         if action in ['BUY', 'DEPOSIT']:
                             holdings[date][asset] += quantity
+
+                            # Auto-deduct cash for BUY (not DEPOSIT, not cash assets)
+                            if action == 'BUY' and not is_cash_asset and price:
+                                cash_currency = get_cash_currency(asset_type)
+                                cash_cost = quantity * price
+                                if cash_currency not in holdings[date]:
+                                    holdings[date][cash_currency] = 0
+                                holdings[date][cash_currency] -= cash_cost
+
                         elif action == 'SELL':
+                            holdings[date][asset] -= quantity
+
+                            # Auto-add cash for SELL (not cash assets)
+                            if not is_cash_asset and price:
+                                cash_currency = get_cash_currency(asset_type)
+                                cash_proceeds = quantity * price
+                                if cash_currency not in holdings[date]:
+                                    holdings[date][cash_currency] = 0
+                                holdings[date][cash_currency] += cash_proceeds
+
+                        elif action == 'WITHDRAW':
+                            # WITHDRAW reduces cash holdings but doesn't affect investment
                             holdings[date][asset] -= quantity
 
         # Calculate values and returns
