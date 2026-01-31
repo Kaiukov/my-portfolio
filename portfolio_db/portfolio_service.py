@@ -399,34 +399,50 @@ class PortfolioService:
         Returns:
             dict: Contains 'assets' and 'fx_currencies' lists
         """
+        from portfolio_db.calculator import get_asset_type
+
         # Get unique assets from database
         assets = set(self.db.get_unique_assets())
 
         # Get unique currencies from transactions
         currencies = set(self.db.get_unique_currencies())
 
-        # Determine required FX pairs based on currencies
+        # Determine required FX pairs
         fx_currencies = set()
+
+        # Based on explicit currencies field
         for currency in currencies:
-            if currency != 'USD':  # Assuming USD is base currency
+            if currency and currency != 'USD':  # Assuming USD is base currency
                 if currency == 'EUR':
                     fx_currencies.add('EURUSD=X')
                 elif currency == 'GBP':
                     fx_currencies.add('GBPUSD=X')
                 elif currency == 'UAH':
-                    fx_currencies.add('USDUAH=X')  # Example: if assets are in UAH
-                # Add more currency mappings as needed
+                    fx_currencies.add('UAHUSD=X')
 
-        # Also check for assets that end with country codes which may need FX
+        # Check assets using get_asset_type for unified classification
         for asset in assets:
-            if asset.endswith('.L'):  # London-listed stocks
+            asset_type = get_asset_type(asset)
+
+            # FX currencies that are needed
+            if asset_type == 'cash_fx':
+                # Asset itself is FX (e.g., EURUSD=X, GBPUSD=X)
+                fx_currencies.add(asset)
+            elif asset_type == 'stock_gbp':
+                # Stocks in GBP need GBPUSD rate
                 fx_currencies.add('GBPUSD=X')
-            elif asset.endswith('.DE'):  # German-listed stocks
+            elif asset_type == 'stock_eur':
+                # Stocks in EUR need EURUSD rate
                 fx_currencies.add('EURUSD=X')
-            elif asset.startswith('CASH EUR'):
-                fx_currencies.add('EURUSD=X')
-            elif asset.startswith('CASH GBP'):
-                fx_currencies.add('GBPUSD=X')
+
+            # Backwards compatibility: old CASH format
+            if asset.startswith('CASH'):
+                if asset == 'CASH EUR':
+                    fx_currencies.add('EURUSD=X')
+                elif asset == 'CASH GBP':
+                    fx_currencies.add('GBPUSD=X')
+                elif asset == 'CASH UAH':
+                    fx_currencies.add('UAHUSD=X')
 
         return {
             'assets': list(assets),
@@ -569,8 +585,12 @@ class PortfolioService:
                 if price:
                     positions[asset]['sell_proceeds'] += quantity * price
                     positions[asset]['last_price_from_trans'] = price
-            elif action == 'DEPOSIT' and asset.startswith('CASH'):
-                positions[asset]['shares'] += quantity
+            elif action == 'DEPOSIT':
+                # Handle both new format (USD, EURUSD=X) and old format (CASH USD, CASH EUR)
+                from portfolio_db.calculator import get_asset_type
+                asset_type = get_asset_type(asset)
+                if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
+                    positions[asset]['shares'] += quantity
 
         # Calculate summary metrics for each position
         result = []
@@ -587,7 +607,10 @@ class PortfolioService:
 
             # Get latest price - try multiple sources
             last_price = None
-            if asset.startswith('CASH'):
+            from portfolio_db.calculator import get_asset_type
+            asset_type = get_asset_type(asset)
+
+            if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
                 last_price = 1.0  # Cash is always $1
             else:
                 # Try price_dict first
@@ -676,11 +699,19 @@ class PortfolioService:
         Returns:
             List of allocation dicts with symbol, value, percentage
         """
+        from portfolio_db.calculator import get_asset_type
+
         positions = self.get_position_summary(include_closed=False)
 
         # Separate assets and cash
-        assets = [p for p in positions if not p['symbol'].startswith('CASH')]
-        cash = [p for p in positions if p['symbol'].startswith('CASH')]
+        assets = []
+        cash = []
+        for p in positions:
+            asset_type = get_asset_type(p['symbol'])
+            if asset_type in ('cash_base', 'cash_fx') or p['symbol'].startswith('CASH'):
+                cash.append(p)
+            else:
+                assets.append(p)
 
         # Fetch FX rates for cash conversion
         transactions = self.db.get_transactions()
@@ -718,21 +749,32 @@ class PortfolioService:
         for pos in cash:
             symbol = pos['symbol']
             value = pos['market_value']
+            asset_type = get_asset_type(symbol)
 
             # Convert to USD if not already USD
-            if symbol == 'CASH EUR':
+            if symbol == 'EURUSD=X':
                 value_usd = value * fx_prices['EURUSD=X']
-            elif symbol == 'CASH GBP':
+                fx_rate = fx_prices['EURUSD=X']
+            elif symbol == 'GBPUSD=X':
                 value_usd = value * fx_prices['GBPUSD=X']
+                fx_rate = fx_prices['GBPUSD=X']
+            elif symbol == 'CASH EUR':
+                # Backwards compatibility
+                value_usd = value * fx_prices['EURUSD=X']
+                fx_rate = fx_prices['EURUSD=X']
+            elif symbol == 'CASH GBP':
+                # Backwards compatibility
+                value_usd = value * fx_prices['GBPUSD=X']
+                fx_rate = fx_prices['GBPUSD=X']
             else:
-                value_usd = value  # Already USD
+                # USD or CASH USD
+                value_usd = value
+                fx_rate = 1.0
 
             cash_in_usd.append({
                 **pos,
                 'value_usd': value_usd,
-                'fx_rate': fx_prices.get('EURUSD=X') if symbol == 'CASH EUR' else (
-                    fx_prices.get('GBPUSD=X') if symbol == 'CASH GBP' else 1.0
-                ),
+                'fx_rate': fx_rate,
             })
 
         # Calculate totals using USD-converted values
