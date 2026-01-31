@@ -512,6 +512,7 @@ def performance(db):
     """Show performance metrics including standard deviation."""
     service = PortfolioService(db)
     stats = service.get_performance_stats()
+    concentration = service.get_concentration_metrics()
 
     click.echo("\n" + "=" * 80)
     click.echo("PORTFOLIO PERFORMANCE METRICS")
@@ -524,11 +525,39 @@ def performance(db):
     click.echo(f"{'Start Value:':<30} ${stats['start_value']:,.2f}")
     click.echo(f"{'End Value:':<30} ${stats['end_value']:,.2f}")
     click.echo(f"{'Total Gain:':<30} ${stats['total_gain']:,.2f}")
+    click.echo(f"{'Cash Flow (deposits):':<30} ${stats['total_cash_flow']:,.2f}")
+    click.echo(f"{'Net Gain (excl. deposits):':<30} ${stats['net_gain']:,.2f}")
     click.echo("-" * 80)
 
-    click.echo(f"{'Avg Daily Return:':<30} {stats['avg_daily_return']:.4f}%")
-    click.echo(f"{'Standard Deviation:':<30} {stats['std_dev']:.4f}%")
-    click.echo(f"{'Historical Volatility (ann):':<30} {stats['hist_volatility']:.4f}%")
+    # Helper for metric evaluation
+    def eval_metric(name, value):
+        return service.evaluate_metric(name, value)
+
+    click.echo(f"{'Total Return:':<30} {stats['total_return_pct']:>10.2f}%   {eval_metric('total_return_pct', stats['total_return_pct'])}")
+    click.echo(f"{'CAGR (annual):':<30} {stats['cagr']:>10.2f}%   {eval_metric('cagr', stats['cagr'])}")
+    click.echo(f"{'Avg Daily Return:':<30} {stats['avg_daily_return']:>10.4f}%   {eval_metric('avg_daily_return', stats['avg_daily_return'])}")
+    click.echo(f"{'Avg Monthly Return:':<30} {stats['avg_monthly_return']:>10.2f}%   {eval_metric('avg_monthly_return', stats['avg_monthly_return'])}")
+    click.echo("-" * 80)
+    click.echo(f"{'Standard Deviation:':<30} {stats['std_dev']:>10.4f}%   {eval_metric('std_dev', stats['std_dev'])}")
+    click.echo(f"{'Historical Volatility (ann):':<30} {stats['hist_volatility']:>10.4f}%   {eval_metric('hist_volatility', stats['hist_volatility'])}")
+    click.echo(f"{'Sharpe Ratio:':<30} {stats['sharpe_ratio']:>10.4f}   {eval_metric('sharpe_ratio', stats['sharpe_ratio'])}")
+    click.echo(f"{'Beta (β) vs SPY:':<30} {stats['beta']:>10.4f}   {eval_metric('beta', stats['beta'])}")
+    click.echo("-" * 80)
+    click.echo(f"{'VaR 95% (daily):':<30} {stats['var_95']:>10.4f}%   {eval_metric('var_95', stats['var_95'])}")
+    click.echo(f"{'VaR 99% (daily):':<30} {stats['var_99']:>10.4f}%   {eval_metric('var_99', stats['var_99'])}")
+    click.echo(f"{'CVaR 95% (daily):':<30} {stats['cvar_95']:>10.4f}%   {eval_metric('cvar_95', stats['cvar_95'])}")
+    click.echo(f"{'CVaR 99% (daily):':<30} {stats['cvar_99']:>10.4f}%   {eval_metric('cvar_99', stats['cvar_99'])}")
+    click.echo(f"{'Max Drawdown:':<30} {stats['max_drawdown']:>10.4f}%   {eval_metric('max_drawdown', stats['max_drawdown'])}")
+    click.echo(f"{'Avg Drawdown:':<30} {stats['avg_drawdown']:>10.4f}%   {eval_metric('avg_drawdown', stats['avg_drawdown'])}")
+    click.echo(f"{'Avg Drawdown Duration:':<30} {stats['avg_drawdown_duration']:>10.1f} days   {eval_metric('avg_drawdown_duration', stats['avg_drawdown_duration'])}")
+
+    click.echo("\n" + "=" * 80)
+    click.echo("CONCENTRATION")
+    click.echo("=" * 80 + "\n")
+
+    click.echo(f"{'HHI (Herfindahl Index):':<30} {concentration['hhi']:>10.4f}   {eval_metric('hhi', concentration['hhi'])}")
+    click.echo(f"{'Weighted Avg Exposure:':<30} {concentration['weighted_avg_exposure']:>10.4f}   {eval_metric('weighted_avg_exposure', concentration['weighted_avg_exposure'])}")
+    click.echo(f"{'Number of Positions:':<30} {concentration['num_positions']:>10}")
 
     click.echo("\n" + "=" * 80)
     service.close()

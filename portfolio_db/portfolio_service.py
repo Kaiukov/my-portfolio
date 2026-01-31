@@ -130,60 +130,261 @@ class PortfolioService:
     def get_performance_stats(self) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         import math
+        from datetime import datetime
         returns = self.get_daily_returns()
 
+        empty_stats = {
+            'total_days': 0,
+            'start_date': None,
+            'end_date': None,
+            'start_value': 0.0,
+            'end_value': 0.0,
+            'total_gain': 0.0,
+            'net_gain': 0.0,
+            'total_cash_flow': 0.0,
+            'total_return_pct': 0.0,
+            'avg_daily_return': 0.0,
+            'avg_monthly_return': 0.0,
+            'cagr': 0.0,
+            'avg_investment_return': 0.0,
+            'std_dev': 0.0,
+            'hist_volatility': 0.0,
+            'beta': 0.0,
+            'sharpe_ratio': 0.0,
+            'var_95': 0.0,
+            'var_99': 0.0,
+            'cvar_95': 0.0,
+            'cvar_99': 0.0,
+            'max_drawdown': 0.0,
+            'avg_drawdown': 0.0,
+            'avg_drawdown_duration': 0.0,
+        }
+
         if not returns:
-            return {
-                'total_days': 0,
-                'start_date': None,
-                'end_date': None,
-                'start_value': 0.0,
-                'end_value': 0.0,
-                'total_gain': 0.0,
-                'avg_daily_return': 0.0,
-                'avg_investment_return': 0.0,
-                'total_cash_flow': 0.0,
-                'std_dev': 0.0,
-                'hist_volatility': 0.0,
-            }
+            return empty_stats.copy()
 
         # Filter out zero values
         returns_with_values = [r for r in returns if r['portfolio_value'] > 0]
 
         if not returns_with_values:
-            return {
-                'total_days': 0,
-                'start_date': None,
-                'end_date': None,
-                'start_value': 0.0,
-                'end_value': 0.0,
-                'total_gain': 0.0,
-                'avg_daily_return': 0.0,
-                'avg_investment_return': 0.0,
-                'total_cash_flow': 0.0,
-                'std_dev': 0.0,
-                'hist_volatility': 0.0,
-            }
+            return empty_stats.copy()
 
-        total_cash_flow = sum(r['cash_flow_impact'] for r in returns_with_values)
+        # Calculate portfolio stats
         daily_returns = [r['portfolio_daily_return'] for r in returns_with_values]
         avg = sum(daily_returns) / len(daily_returns)
         variance = sum((r - avg) ** 2 for r in daily_returns) / len(daily_returns)
         std_dev = math.sqrt(variance)
         hist_volatility = std_dev * math.sqrt(252)
 
+        # Calculate VaR and CVaR (percentiles and tail risk)
+        import numpy as np
+        var_95 = np.percentile(daily_returns, 5)
+        var_99 = np.percentile(daily_returns, 1)
+        cvar_95 = np.mean([r for r in daily_returns if r <= var_95])
+        cvar_99 = np.mean([r for r in daily_returns if r <= var_99])
+
+        # Calculate Max Drawdown, Average Drawdown, and Drawdown Duration stats
+        max_value = returns_with_values[0]['portfolio_value']
+        max_drawdown = 0.0
+        drawdowns = []
+        drawdown_start = None
+        drawdown_durations = []
+
+        for i, r in enumerate(returns_with_values):
+            value = r['portfolio_value']
+            if value > max_value:
+                max_value = value
+                # Drawdown ended, calculate duration
+                if drawdown_start is not None:
+                    duration = i - drawdown_start
+                    drawdown_durations.append(duration)
+                    drawdown_start = None
+            drawdown = (max_value - value) / max_value * 100 if max_value > 0 else 0
+            if drawdown > 0:
+                drawdowns.append(drawdown)
+                if drawdown_start is None:
+                    drawdown_start = i
+            max_drawdown = max(max_drawdown, drawdown)
+
+        # If still in drawdown at end
+        if drawdown_start is not None:
+            drawdown_durations.append(len(returns_with_values) - drawdown_start)
+
+        avg_drawdown = sum(drawdowns) / len(drawdowns) if drawdowns else 0.0
+        avg_drawdown_duration = sum(drawdown_durations) / len(drawdown_durations) if drawdown_durations else 0.0
+
+        # Calculate Beta against SPY
+        beta = 0.0
+        try:
+            min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
+            max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
+
+            spy_prices = self.price_service.fetch_all_prices(['SPY'], min_date, max_date)
+            if spy_prices and 'SPY' in spy_prices and len(spy_prices['SPY']) > 1:
+                import pandas as pd
+                spy_series = spy_prices['SPY']
+                if isinstance(spy_series, pd.DataFrame):
+                    spy_series = spy_series.iloc[:, 0]
+
+                # Calculate SPY daily returns
+                spy_returns = []
+                for i in range(1, len(spy_series)):
+                    prev_val = float(spy_series.iloc[i-1])
+                    curr_val = float(spy_series.iloc[i])
+                    if prev_val > 0:
+                        spy_returns.append((curr_val - prev_val) / prev_val * 100)
+
+                # Align and calculate Beta
+                n = min(len(spy_returns), len(daily_returns))
+                if n > 1:
+                    spy_returns = spy_returns[-n:]
+                    portfolio_returns = daily_returns[-n:]
+
+                    # Covariance
+                    avg_portfolio = sum(portfolio_returns) / len(portfolio_returns)
+                    avg_spy = sum(spy_returns) / len(spy_returns)
+                    covariance = sum((p - avg_portfolio) * (s - avg_spy) for p, s in zip(portfolio_returns, spy_returns)) / n
+
+                    # Variance of market
+                    variance_market = sum((s - avg_spy) ** 2 for s in spy_returns) / len(spy_returns)
+
+                    beta = covariance / variance_market if variance_market > 0 else 0.0
+        except:
+            pass
+
+        total_cash_flow = sum(r['cash_flow_impact'] for r in returns_with_values)
+        start_value = returns_with_values[0]['portfolio_value']
+        end_value = returns_with_values[-1]['portfolio_value']
+        gross_gain = end_value - start_value
+        net_gain = gross_gain - total_cash_flow
+
+        # Calculate basic returns
+        # True ROI: Net Gain relative to all capital invested
+        # Total invested = Start Value + Deposits (cash flow into portfolio)
+        total_invested = start_value + total_cash_flow  # deposits are positive
+        total_return_pct = (net_gain / total_invested * 100) if total_invested > 0 else 0.0
+
+        # CAGR from Total Return (accounts for deposit timing)
+        # CAGR = (1 + Total Return)^(1/years) - 1
+        from datetime import datetime
+        start_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
+        end_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
+        years = (end_date - start_date).days / 365.25
+        total_return_decimal = total_return_pct / 100
+        cagr_decimal = (((1 + total_return_decimal) ** (1 / years) - 1)) if total_return_decimal > -1 and years > 0 else 0.0
+        cagr = cagr_decimal * 100
+
+        # Sharpe Ratio (annualized)
+        # SR = (Rp - Rf) / σp
+        rf_annual = 0.02  # 2% annual risk-free rate
+        sharpe_ratio = ((cagr_decimal - rf_annual) / (hist_volatility/100)) if hist_volatility > 0 else 0.0
+
+        # Monthly return (simplified: from daily returns)
+        # Better: compound daily returns to get monthly
+        monthly_returns = []
+        i = 0
+        while i < len(returns_with_values):
+            # Get month start
+            current_month_key = (datetime.strptime(returns_with_values[i]['date'], '%Y-%m-%d').date().year,
+                                  datetime.strptime(returns_with_values[i]['date'], '%Y-%m-%d').date().month)
+
+            # Find end of month
+            month_end = i
+            while month_end + 1 < len(returns_with_values):
+                next_date = datetime.strptime(returns_with_values[month_end + 1]['date'], '%Y-%m-%d').date()
+                next_key = (next_date.year, next_date.month)
+                if next_key != current_month_key:
+                    break
+                month_end += 1
+
+            # Calculate monthly return: compound daily returns
+            month_return = 0.0
+            for j in range(i, month_end + 1):
+                daily_ret = returns_with_values[j]['portfolio_daily_return'] / 100
+                # Compound: (1 + r1) * (1 + r2) - 1
+                month_return = (1 + month_return/100) * (1 + daily_ret) - 1
+                month_return *= 100
+
+            monthly_returns.append(month_return)
+            i = month_end + 1
+
+        avg_monthly_return = sorted(monthly_returns)[len(monthly_returns)//2] if monthly_returns else 0.0
+
         return {
             'total_days': len(returns_with_values),
             'start_date': returns_with_values[0]['date'],
             'end_date': returns_with_values[-1]['date'],
-            'start_value': returns_with_values[0]['portfolio_value'],
-            'end_value': returns_with_values[-1]['portfolio_value'],
-            'total_gain': returns_with_values[-1]['portfolio_value'] - returns_with_values[0]['portfolio_value'],
-            'avg_daily_return': avg,
-            'avg_investment_return': sum(r['investment_return'] for r in returns_with_values) / len(returns_with_values),
+            'start_value': start_value,
+            'end_value': end_value,
+            'total_gain': gross_gain,
+            'net_gain': net_gain,
             'total_cash_flow': total_cash_flow,
+            'total_return_pct': total_return_pct,
+            'avg_daily_return': avg,
+            'avg_monthly_return': avg_monthly_return,
+            'cagr': cagr,
+            'avg_investment_return': sum(r['investment_return'] for r in returns_with_values) / len(returns_with_values),
             'std_dev': std_dev,
             'hist_volatility': hist_volatility,
+            'beta': beta,
+            'sharpe_ratio': sharpe_ratio,
+            'var_95': var_95,
+            'var_99': var_99,
+            'cvar_95': cvar_95,
+            'cvar_99': cvar_99,
+            'max_drawdown': max_drawdown,
+            'avg_drawdown': avg_drawdown,
+            'avg_drawdown_duration': avg_drawdown_duration,
+        }
+
+    def evaluate_metric(self, metric_name: str, value: float) -> str:
+        """Evaluate metric and return assessment comment."""
+        assessments = {
+            'avg_daily_return': lambda v: '✅ Excellent' if v > 0.2 else ('⚠️ Below avg' if v > 0 else '❌ Negative'),
+            'avg_monthly_return': lambda v: '✅ Excellent' if v > 5 else ('⚠️ Below avg' if v > 0 else '❌ Negative'),
+            'cagr': lambda v: '✅ Excellent' if v > 20 else ('⚠️ Good' if v > 10 else ('⚠️ Moderate' if v > 0 else '❌ Negative')),
+            'total_return_pct': lambda v: '✅ Excellent' if v > 50 else ('⚠️ Good' if v > 20 else ('⚠️ Moderate' if v > 0 else '❌ Negative')),
+            'std_dev': lambda v: '✅ Low' if v < 2 else ('⚠️ Moderate' if v < 4 else '❌ High'),
+            'hist_volatility': lambda v: '✅ Low' if v < 20 else ('⚠️ Moderate' if v < 40 else '❌ High'),
+            'beta': lambda v: '✅ Low corr' if abs(v) < 0.5 else ('⚠️ Moderate' if abs(v) < 1 else '❌ High'),
+            'sharpe_ratio': lambda v: '✅ Excellent' if v > 2 else ('⚠️ Good' if v > 1 else ('⚠️ Poor' if v > 0 else '❌ Bad')),
+            'var_95': lambda v: '✅ Low risk' if v > -3 else ('⚠️ Moderate' if v > -5 else '❌ High risk'),
+            'var_99': lambda v: '✅ Low risk' if v > -5 else ('⚠️ Moderate' if v > -8 else '❌ High risk'),
+            'cvar_95': lambda v: '✅ Low risk' if v > -4 else ('⚠️ Moderate' if v > -7 else '❌ High risk'),
+            'cvar_99': lambda v: '✅ Low risk' if v > -6 else ('⚠️ Moderate' if v > -10 else '❌ High risk'),
+            'max_drawdown': lambda v: '✅ Excellent' if v < 10 else ('⚠️ Normal' if v < 25 else '❌ High'),
+            'avg_drawdown': lambda v: '✅ Low' if v < 4 else ('⚠️ Normal' if v < 8 else '❌ High'),
+            'avg_drawdown_duration': lambda v: '✅ Fast' if v < 10 else ('⚠️ Normal' if v < 30 else '❌ Slow'),
+            'hhi': lambda v: '✅ Diversified' if v < 0.15 else ('⚠️ Moderate' if v < 0.25 else '❌ Concentrated'),
+            'weighted_avg_exposure': lambda v: '✅ Low' if v < 0.1 else ('⚠️ Moderate' if v < 0.2 else '❌ High'),
+        }
+        return assessments.get(metric_name, lambda v: '')(value)
+
+    def get_concentration_metrics(self) -> dict:
+        """Calculate portfolio concentration metrics."""
+        allocation = self.get_allocation(allocation_type='all')
+        positions = allocation['positions']
+        total_value = allocation['total_value']
+
+        if total_value == 0 or not positions:
+            return {
+                'hhi': 0.0,
+                'weighted_avg_exposure': 0.0,
+                'num_positions': 0,
+            }
+
+        # Calculate HHI (sum of squared weights)
+        # HHI < 0.15 = low concentration, 0.15-0.25 = moderate, > 0.25 = high
+        weights = [p['value'] / total_value for p in positions]
+        hhi = sum(w ** 2 for w in weights)
+
+        # Weighted Average Exposure = average position weight
+        weighted_avg_exposure = sum(w for w in weights) / len(weights) if weights else 0.0
+
+        return {
+            'hhi': hhi,
+            'weighted_avg_exposure': weighted_avg_exposure,
+            'num_positions': len(positions),
         }
 
     def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, exchange: str = '', data_source: str = '') -> dict:
