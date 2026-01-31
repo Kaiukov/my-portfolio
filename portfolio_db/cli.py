@@ -366,6 +366,56 @@ def allocation(type, export, db):
 
 
 @cli.command()
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def cash(db):
+    """Show actual cash balances with breakdown."""
+    service = PortfolioService(db)
+
+    try:
+        cash_balances = service.get_actual_cash_balances()
+
+        click.echo("\n" + "=" * 90)
+        click.echo("ACTUAL CASH BALANCES")
+        click.echo("=" * 90 + "\n")
+
+        click.echo(f"{'Currency':<15} {'Balance':>18} {'Deposits':>18} {'Spent on BUY':>18} {'Received from SELL':>20}")
+        click.echo("-" * 90)
+
+        total_balance_usd = 0.0
+        for currency, data in cash_balances.items():
+            balance = data['balance']
+            deposits = data['deposits']
+            spent = data['spent']
+            received = data['received']
+
+            # Skip if no activity at all
+            if balance == 0 and deposits == 0 and spent == 0 and received == 0:
+                continue
+
+            balance_str = format_currency(balance)
+            deposits_str = format_currency(deposits)
+            spent_str = format_currency(spent)
+            received_str = format_currency(received)
+
+            click.echo(
+                f"{currency:<15} {balance_str:>18} {deposits_str:>18} "
+                f"{spent_str:>18} {received_str:>20}"
+            )
+
+            # Add to total (all balances are in USD equivalent)
+            total_balance_usd += balance
+
+        click.echo("-" * 90)
+        click.echo(f"{'TOTAL CASH (USD)':<15} {format_currency(total_balance_usd):>18}")
+        click.echo("\n" + "=" * 90)
+
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
+
+
+@cli.command()
 @click.option('--id', required=True, type=int, help='Transaction ID to delete')
 @click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
 @click.option('--db', default='portfolio.db', help='Path to database file')

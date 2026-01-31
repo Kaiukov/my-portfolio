@@ -513,6 +513,74 @@ class PortfolioService:
             ]
         }
 
+    def get_actual_cash_balances(self) -> dict:
+        """
+        Single source of truth for cash balances.
+
+        Calculates: Deposits - Spent on BUY + Received from SELL
+
+        Returns:
+            {
+                'USD': {'balance': 1234.56, 'deposits': 5000, 'spent': 4000, 'received': 234.56},
+                'EURUSD=X': {...},
+                'GBPUSD=X': {...}
+            }
+        """
+        from portfolio_db.calculator import get_asset_type
+
+        transactions = self.db.get_transactions()
+        cash_balances = {
+            'USD': {'balance': 0.0, 'deposits': 0.0, 'spent': 0.0, 'received': 0.0},
+            'EURUSD=X': {'balance': 0.0, 'deposits': 0.0, 'spent': 0.0, 'received': 0.0},
+            'GBPUSD=X': {'balance': 0.0, 'deposits': 0.0, 'spent': 0.0, 'received': 0.0},
+        }
+
+        for trans in transactions:
+            asset = trans[2]
+            action = trans[3].upper()
+            quantity = trans[4]
+            price = trans[6]
+
+            asset_type = get_asset_type(asset)
+
+            # Determine which cash currency is affected
+            if asset_type == 'stock_gbp':
+                cash_key = 'GBPUSD=X'
+            elif asset_type == 'stock_eur':
+                cash_key = 'EURUSD=X'
+            else:
+                cash_key = 'USD'
+
+            if action == 'DEPOSIT':
+                # Handle both new format (USD, EURUSD=X) and old format (CASH USD, CASH EUR)
+                if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
+                    # Map asset to cash key
+                    if asset_type == 'cash_base' or asset == 'CASH USD':
+                        deposit_key = 'USD'
+                    elif asset_type == 'cash_fx':
+                        deposit_key = asset  # EURUSD=X, GBPUSD=X
+                    elif asset == 'CASH EUR':
+                        deposit_key = 'EURUSD=X'
+                    elif asset == 'CASH GBP':
+                        deposit_key = 'GBPUSD=X'
+                    else:
+                        deposit_key = 'USD'
+
+                    cash_balances[deposit_key]['deposits'] += quantity
+                    cash_balances[deposit_key]['balance'] += quantity
+            elif action == 'BUY' and price:
+                # Buying deducts from cash
+                cost = quantity * price
+                cash_balances[cash_key]['spent'] += cost
+                cash_balances[cash_key]['balance'] -= cost
+            elif action == 'SELL' and price:
+                # Selling adds to cash
+                proceeds = quantity * price
+                cash_balances[cash_key]['received'] += proceeds
+                cash_balances[cash_key]['balance'] += proceeds
+
+        return cash_balances
+
     def get_position_summary(self, include_closed=True):
         """
         Get position-level summary with gains/losses.
@@ -550,7 +618,7 @@ class PortfolioService:
         except Exception:
             pass
 
-        # Build position data by asset
+        # Build position data by asset (skip cash DEPOSIT - will be replaced with actual balances)
         positions = {}
         for trans in transactions:
             asset = trans[2]
@@ -585,12 +653,40 @@ class PortfolioService:
                 if price:
                     positions[asset]['sell_proceeds'] += quantity * price
                     positions[asset]['last_price_from_trans'] = price
-            elif action == 'DEPOSIT':
-                # Handle both new format (USD, EURUSD=X) and old format (CASH USD, CASH EUR)
-                from portfolio_db.calculator import get_asset_type
-                asset_type = get_asset_type(asset)
-                if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
-                    positions[asset]['shares'] += quantity
+            # DEPOSIT for cash is handled separately via get_actual_cash_balances()
+
+        # Use actual cash balances as single source of truth
+        actual_cash = self.get_actual_cash_balances()
+
+        # Create/Update cash positions with actual balances
+        from portfolio_db.calculator import get_asset_type
+
+        for cash_key, cash_data in actual_cash.items():
+            # Skip if balance is 0 and no deposits ever made
+            if cash_data['balance'] == 0 and cash_data['deposits'] == 0:
+                continue
+
+            # Determine the symbol to use
+            if cash_key == 'USD':
+                symbol = 'USD'
+            else:
+                symbol = cash_key  # EURUSD=X, GBPUSD=X
+
+            # Add or update cash position with actual balance
+            if symbol not in positions:
+                positions[symbol] = {
+                    'symbol': symbol,
+                    'shares': cash_data['balance'],
+                    'buy_quantity': 0,
+                    'buy_cost': 0.0,
+                    'sell_quantity': 0,
+                    'sell_proceeds': 0.0,
+                    'dividend_income': 0.0,
+                    'first_buy_date': date.today(),
+                    'last_price_from_trans': None,
+                }
+            else:
+                positions[symbol]['shares'] = cash_data['balance']
 
         # Calculate summary metrics for each position
         result = []
@@ -685,7 +781,9 @@ class PortfolioService:
             avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
             # Total cost of CURRENT shares (not all shares ever bought)
             total_cost = (shares * avg_cost_per_share) if shares > 0 else 0
-            market_value = (shares * last_price) if last_price and shares > 0 else 0
+            # Market value: for cash, allow negative values; for other assets, only positive
+            is_cash = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
+            market_value = (shares * last_price) if last_price and (shares > 0 or is_cash) else 0
 
             # Unrealized gains (only for current holding)
             unrealized_gain_value = market_value - total_cost if shares > 0 else 0
@@ -807,22 +905,24 @@ class PortfolioService:
             asset_type = get_asset_type(symbol)
 
             # Convert to USD if not already USD
+            # FX pairs (EURUSD=X, GBPUSD=X) already have market_value in USD
+            # because market_value = shares (foreign currency) * price (FX rate to USD)
             if symbol == 'EURUSD=X':
-                value_usd = value * fx_prices['EURUSD=X']
-                fx_rate = fx_prices['EURUSD=X']
+                value_usd = value  # Already in USD
+                fx_rate = 1.0  # No conversion applied
             elif symbol == 'GBPUSD=X':
-                value_usd = value * fx_prices['GBPUSD=X']
-                fx_rate = fx_prices['GBPUSD=X']
+                value_usd = value  # Already in USD
+                fx_rate = 1.0  # No conversion applied
             elif symbol == 'CASH EUR':
-                # Backwards compatibility
+                # Backwards compatibility - old format needs conversion
                 value_usd = value * fx_prices['EURUSD=X']
                 fx_rate = fx_prices['EURUSD=X']
             elif symbol == 'CASH GBP':
-                # Backwards compatibility
+                # Backwards compatibility - old format needs conversion
                 value_usd = value * fx_prices['GBPUSD=X']
                 fx_rate = fx_prices['GBPUSD=X']
             else:
-                # USD or CASH USD
+                # USD
                 value_usd = value
                 fx_rate = 1.0
 
