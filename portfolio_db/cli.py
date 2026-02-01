@@ -509,8 +509,9 @@ def delete(id, confirm, db):
 @cli.command()
 @click.option('--db', default='portfolio.db', help='Path to database file')
 @click.option('--table', 'table_output', is_flag=True, help='Output as human-readable table')
-def performance(db, table_output):
-    """Show performance metrics (JSON by default, use --table for readable format)."""
+@click.option('--md', 'md_output', is_flag=True, help='Output as Markdown format')
+def performance(db, table_output, md_output):
+    """Show performance metrics (JSON by default, use --table or --md for readable format)."""
     import json
     service = PortfolioService(db)
     stats = service.get_performance_stats()
@@ -520,7 +521,67 @@ def performance(db, table_output):
     def eval_metric(name, value):
         return service.evaluate_metric(name, value)
 
-    if table_output:
+    if md_output:
+        # Markdown output
+        click.echo("# Portfolio Performance Metrics\n")
+        click.echo("## Period")
+        click.echo(f"- **Dates:** {stats['start_date']} to {stats['end_date']}")
+        click.echo(f"- **Total Days:** {stats['total_days']}\n")
+
+        click.echo("## Portfolio Values")
+        click.echo(f"| Metric | Value |")
+        click.echo(f"|--------|-------|")
+        click.echo(f"| Start Value | ${stats['start_value']:,.2f} |")
+        click.echo(f"| End Value | ${stats['end_value']:,.2f} |")
+        click.echo(f"| Total Gain | ${stats['total_gain']:,.2f} |")
+        click.echo(f"| Cash Flow (deposits) | ${stats['total_cash_flow']:,.2f} |")
+        click.echo(f"| Net Gain (excl. deposits) | ${stats['net_gain']:,.2f} |\n")
+
+        click.echo("## Returns")
+        click.echo(f"| Metric | Value | Assessment |")
+        click.echo(f"|--------|-------|------------|")
+        click.echo(f"| Total Return | {stats['total_return_pct']:.2f}% | {eval_metric('total_return_pct', stats['total_return_pct'])} |")
+        click.echo(f"| CAGR (annual) | {stats['cagr']:.2f}% | {eval_metric('cagr', stats['cagr'])} |")
+        click.echo(f"| Avg Daily Return | {stats['avg_daily_return']:.4f}% | {eval_metric('avg_daily_return', stats['avg_daily_return'])} |")
+        click.echo(f"| Avg Monthly Return | {stats['avg_monthly_return']:.2f}% | {eval_metric('avg_monthly_return', stats['avg_monthly_return'])} |\n")
+
+        click.echo("## Risk Metrics")
+        click.echo(f"| Metric | Value | Assessment |")
+        click.echo(f"|--------|-------|------------|")
+        click.echo(f"| Standard Deviation | {stats['std_dev']:.4f}% | {eval_metric('std_dev', stats['std_dev'])} |")
+        click.echo(f"| Historical Volatility (ann) | {stats['hist_volatility']:.4f}% | {eval_metric('hist_volatility', stats['hist_volatility'])} |")
+        click.echo(f"| Beta (β) vs SPY | {stats['beta']:.4f} | {eval_metric('beta', stats['beta'])} |")
+        click.echo(f"| Sharpe Ratio | {stats['sharpe_ratio']:.4f} | {eval_metric('sharpe_ratio', stats['sharpe_ratio'])} |")
+        click.echo(f"| Sortino Ratio | {stats['sortino_ratio']:.4f} | {eval_metric('sortino_ratio', stats['sortino_ratio'])} |")
+        click.echo(f"| Treynor Ratio | {stats['treynor_ratio']:.4f} | {eval_metric('treynor_ratio', stats['treynor_ratio'])} |")
+        click.echo(f"| Information Ratio | {stats['information_ratio']:.4f} | {eval_metric('information_ratio', stats['information_ratio'])} |")
+        click.echo(f"| Jensen\\'s Alpha | {stats['jensens_alpha']:.4f}% | {eval_metric('jensens_alpha', stats['jensens_alpha'])} |")
+        click.echo(f"| Relative Return vs SPY | {stats['relative_return']:.4f}% | {eval_metric('relative_return', stats['relative_return'])} |")
+        click.echo(f"| Tracking Error | {stats['tracking_error']:.4f}% | {eval_metric('tracking_error', stats['tracking_error'])} |\n")
+
+        click.echo("## Risk of Loss")
+        click.echo(f"| Metric | Value | Assessment |")
+        click.echo(f"|--------|-------|------------|")
+        click.echo(f"| VaR 95% (daily) | {stats['var_95']:.4f}% | {eval_metric('var_95', stats['var_95'])} |")
+        click.echo(f"| VaR 99% (daily) | {stats['var_99']:.4f}% | {eval_metric('var_99', stats['var_99'])} |")
+        click.echo(f"| CVaR 95% (daily) | {stats['cvar_95']:.4f}% | {eval_metric('cvar_95', stats['cvar_95'])} |")
+        click.echo(f"| CVaR 99% (daily) | {stats['cvar_99']:.4f}% | {eval_metric('cvar_99', stats['cvar_99'])} |\n")
+
+        click.echo("## Drawdowns")
+        click.echo(f"| Metric | Value | Assessment |")
+        click.echo(f"|--------|-------|------------|")
+        click.echo(f"| Max Drawdown | {stats['max_drawdown']:.4f}% | {eval_metric('max_drawdown', stats['max_drawdown'])} |")
+        click.echo(f"| Avg Drawdown | {stats['avg_drawdown']:.4f}% | {eval_metric('avg_drawdown', stats['avg_drawdown'])} |")
+        click.echo(f"| Avg Drawdown Duration | {stats['avg_drawdown_duration']:.1f} days | {eval_metric('avg_drawdown_duration', stats['avg_drawdown_duration'])} |\n")
+
+        click.echo("## Concentration")
+        click.echo(f"| Metric | Value | Assessment |")
+        click.echo(f"|--------|-------|------------|")
+        click.echo(f"| HHI (Herfindahl Index) | {concentration['hhi']:.4f} | {eval_metric('hhi', concentration['hhi'])} |")
+        click.echo(f"| Weighted Avg Exposure | {concentration['weighted_avg_exposure']:.4f} | {eval_metric('weighted_avg_exposure', concentration['weighted_avg_exposure'])} |")
+        click.echo(f"| Number of Positions | {concentration['num_positions']} | - |\n")
+
+    elif table_output:
         # Human-readable table output
         click.echo("\n" + "=" * 80)
         click.echo("PORTFOLIO PERFORMANCE METRICS")
