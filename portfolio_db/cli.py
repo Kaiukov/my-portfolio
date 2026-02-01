@@ -546,6 +546,7 @@ def performance(db, table_output):
         click.echo(f"{'Historical Volatility (ann):':<30} {stats['hist_volatility']:>10.4f}%   {eval_metric('hist_volatility', stats['hist_volatility'])}")
         click.echo(f"{'Sharpe Ratio:':<30} {stats['sharpe_ratio']:>10.4f}   {eval_metric('sharpe_ratio', stats['sharpe_ratio'])}")
         click.echo(f"{'Sortino Ratio:':<30} {stats['sortino_ratio']:>10.4f}   {eval_metric('sortino_ratio', stats['sortino_ratio'])}")
+        click.echo(f"{'Treynor Ratio:':<30} {stats['treynor_ratio']:>10.4f}   {eval_metric('treynor_ratio', stats['treynor_ratio'])}")
         click.echo(f"{'Beta (β) vs SPY:':<30} {stats['beta']:>10.4f}   {eval_metric('beta', stats['beta'])}")
         click.echo("-" * 80)
         click.echo(f"{'VaR 95% (daily):':<30} {stats['var_95']:>10.4f}%   {eval_metric('var_95', stats['var_95'])}")
@@ -591,7 +592,8 @@ def performance(db, table_output):
                 "hist_volatility_pct": [stats['hist_volatility'], eval_metric('hist_volatility', stats['hist_volatility'])],
                 "beta": [stats['beta'], eval_metric('beta', stats['beta'])],
                 "sharpe_ratio": [stats['sharpe_ratio'], eval_metric('sharpe_ratio', stats['sharpe_ratio'])],
-                "sortino_ratio": [stats['sortino_ratio'], eval_metric('sortino_ratio', stats['sortino_ratio'])]
+                "sortino_ratio": [stats['sortino_ratio'], eval_metric('sortino_ratio', stats['sortino_ratio'])],
+                "treynor_ratio": [stats['treynor_ratio'], eval_metric('treynor_ratio', stats['treynor_ratio'])]
             },
             "risk_of_loss": {
                 "var_95_pct": [stats['var_95'], eval_metric('var_95', stats['var_95'])],

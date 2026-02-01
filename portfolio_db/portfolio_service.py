@@ -152,6 +152,7 @@ class PortfolioService:
             'beta': 0.0,
             'sharpe_ratio': 0.0,
             'sortino_ratio': 0.0,
+            'treynor_ratio': 0.0,
             'var_95': 0.0,
             'var_99': 0.0,
             'cvar_95': 0.0,
@@ -292,6 +293,10 @@ class PortfolioService:
         sortino_daily = excess_return_daily / downside_deviation_daily if downside_deviation_daily > 0 else 0.0
         sortino_ratio = sortino_daily * math.sqrt(252)  # Annualize
 
+        # Treynor Ratio - reward per unit of systematic risk (beta)
+        # Treynor = (Rp - Rf) / β
+        treynor_ratio = ((cagr_decimal - rf_annual) / beta) if beta != 0 else 0.0
+
         # Monthly return (simplified: from daily returns)
         # Better: compound daily returns to get monthly
         monthly_returns = []
@@ -342,6 +347,7 @@ class PortfolioService:
             'beta': beta,
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
+            'treynor_ratio': treynor_ratio,
             'var_95': var_95,
             'var_99': var_99,
             'cvar_95': cvar_95,
@@ -363,6 +369,7 @@ class PortfolioService:
             'beta': lambda v: 'Low corr' if abs(v) < 0.5 else ('Moderate' if abs(v) < 1 else 'High'),
             'sharpe_ratio': lambda v: 'Excellent' if v > 2 else ('Good' if v > 1 else ('Poor' if v > 0 else 'Bad')),
             'sortino_ratio': lambda v: 'Excellent' if v > 3 else ('Good' if v > 1.5 else ('Poor' if v > 0 else 'Bad')),
+            'treynor_ratio': lambda v: 'Excellent' if v > 5 else ('Good' if v > 2 else ('Poor' if v > 0 else 'Bad')),
             'var_95': lambda v: 'Low risk' if v > -3 else ('Moderate' if v > -5 else 'High risk'),
             'var_99': lambda v: 'Low risk' if v > -5 else ('Moderate' if v > -8 else 'High risk'),
             'cvar_95': lambda v: 'Low risk' if v > -4 else ('Moderate' if v > -7 else 'High risk'),
