@@ -17,6 +17,8 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [capeRati
 7. CAPE Ratio: $ARGUMENTS[4]
 8. Fear & Greed Index: $ARGUMENTS[5]
 9. Unemployment: $ARGUMENTS[6]
+10. bash: "cat /home/kaiukov/my-portfolio/raw_news_data.md" (raw news data)
+11. bash: "cat /home/kaiukov/my-portfolio/market_data.json" (market data)
 
 # TASKS
 
