@@ -154,6 +154,7 @@ class PortfolioService:
             'sortino_ratio': 0.0,
             'treynor_ratio': 0.0,
             'information_ratio': 0.0,
+            'jensens_alpha': 0.0,
             'var_95': 0.0,
             'var_99': 0.0,
             'cvar_95': 0.0,
@@ -302,6 +303,7 @@ class PortfolioService:
         # IR = (Rp - Rb) / Tracking Error
         # Tracking Error = std dev of (portfolio return - benchmark return)
         information_ratio = 0.0
+        spy_cagr = 0.0  # Market (SPY) CAGR for Jensen's Alpha
         try:
             min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
             max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
@@ -320,6 +322,12 @@ class PortfolioService:
                     curr_val = float(spy_series.iloc[i])
                     if prev_val > 0:
                         spy_returns.append((curr_val - prev_val) / prev_val * 100)
+
+                # Calculate SPY CAGR
+                spy_start = float(spy_series.iloc[0])
+                spy_end = float(spy_series.iloc[-1])
+                spy_total_return = (spy_end - spy_start) / spy_start
+                spy_cagr = (((1 + spy_total_return) ** (1 / years) - 1)) if spy_total_return > -1 and years > 0 else 0.0
 
                 # Align portfolio and benchmark returns
                 n = min(len(spy_returns), len(daily_returns))
@@ -342,6 +350,11 @@ class PortfolioService:
                     information_ratio = (avg_excess_annual / tracking_error_annual) if tracking_error_annual > 0 else 0.0
         except:
             pass
+
+        # Jensen's Alpha - excess return over expected return (CAPM)
+        # Alpha = Rp - (Rf + B * (Rm - Rf))
+        # where Rp = portfolio return, Rf = risk-free rate, B = beta, Rm = market return
+        jensens_alpha = (cagr_decimal - (rf_annual + beta * (spy_cagr - rf_annual))) * 100  # In percentage
 
         # Monthly return (simplified: from daily returns)
         # Better: compound daily returns to get monthly
@@ -395,6 +408,7 @@ class PortfolioService:
             'sortino_ratio': sortino_ratio,
             'treynor_ratio': treynor_ratio,
             'information_ratio': information_ratio,
+            'jensens_alpha': jensens_alpha,
             'var_95': var_95,
             'var_99': var_99,
             'cvar_95': cvar_95,
@@ -418,6 +432,7 @@ class PortfolioService:
             'sortino_ratio': lambda v: 'Excellent' if v > 3 else ('Good' if v > 1.5 else ('Poor' if v > 0 else 'Bad')),
             'treynor_ratio': lambda v: 'Excellent' if v > 5 else ('Good' if v > 2 else ('Poor' if v > 0 else 'Bad')),
             'information_ratio': lambda v: 'Excellent' if v > 1.0 else ('Good' if v > 0.5 else ('Poor' if v > 0 else 'Bad')),
+            'jensens_alpha': lambda v: 'Excellent' if v > 3 else ('Good' if v > 1 else ('Neutral' if v > -1 else 'Underperforming')),
             'var_95': lambda v: 'Low risk' if v > -3 else ('Moderate' if v > -5 else 'High risk'),
             'var_99': lambda v: 'Low risk' if v > -5 else ('Moderate' if v > -8 else 'High risk'),
             'cvar_95': lambda v: 'Low risk' if v > -4 else ('Moderate' if v > -7 else 'High risk'),
