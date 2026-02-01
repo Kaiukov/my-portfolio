@@ -2,10 +2,10 @@
 allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), WebSearch, WebFetch, Read, sequentialthinking, TodoWrite
 description: Research latest financial news
 default-mode: acceptEdits
-argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
+argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [capeRatio] [fng] [unemployment]
 ---
 
-# Инструкции
+# Инструкции (все инструкции обязательны Пприми из во внимания для импользования в отчетах)
 
 0. ОБЯЗАТЕЛЬНО!!! Используй системный инструмент **TodoWrite**
 1. Загрузи skill: financial-report-format четко следуй инструкциям из skill (path: /home/kaiukov/my-portfolio/.claude/skills)
@@ -15,6 +15,9 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
 5. Отчет формат **.html** NO css
 6. Отчет Путь сохранения: $ARGUMENTS[2]
 7. Название файла: **reports/{yyyymmdd}-{название_на_русском_без_пробелов}.html**
+8. CAPE Ratio: $ARGUMENTS[4]
+9. Fear & Greed Index: $ARGUMENTS[5]
+10. Unemployment: $ARGUMENTS[6]
 
 # TASKS
 
@@ -23,12 +26,12 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
 ## План
 
 - [ ] Перед началом убедись, что все **Инструкции** приняты во внимание.
-- [ ] **Сбор и фильтрация новостей (WebSearch):**
-    1. Используй **WebSearch** что бы найти и отфильтровать послении новостей за последние 24 часа.
-    2. Используй **WebFetch** что бы загрузить и прочитать полный текст каждой отобранной статьи. Если не удастся загрузить статью используй MCP: **scrape_web**
-- [ ] Прочитай последние отчёты за 7 дней для контекста из папки $ARGUMENTS[2]. Выполни Bash: **ls -t $ARGUMENTS[2] | head -n 7**
+- [ ] **Сбор и фильтрация новостей:**
+    1. Прочитай носледнии новости в папке /home/kaiukov/my-portfolio/rss/$ARGUMENTS[3]/ используй bash: "cd /home/kaiukov/my-portfolio/rss/ &&  tree"
+    2. Используй **WebSearch** что бы найти и отфильтровать послении новостей за последние 24 часа.
+    3. Используй **WebFetch** что бы загрузить и прочитать полный текст каждой отобранной статьи. Если не удастся загрузить статью используй MCP: **scrape_web**
 - [ ] **Анализ:** Используй MCP: **sequentialthinking** для глубокого анализа собранных новостей, проведи cross check и свяжи события между собой. 
-- [ ] Будь **DRY** не повторяйся, так же есть новость уже была в предыдущих отчетах просто дай ссылку на предыдущий отчет с ультра-кратким описанием.
+- [ ] Будь **DRY** не повторяйся
 - [ ] **Подготовка отчета:** Проанализируй результаты, придумай креативное название на русском языке и сохрани отчёт.
 - [ ] **Проверка:** Убедись, что отчет существует в папке $ARGUMENTS[2] и ОБЯЗАТЕЛЬНО напиши полный путь к отчету в ответе!
 
