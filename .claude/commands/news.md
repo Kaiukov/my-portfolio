@@ -9,15 +9,14 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [capeRati
 
 0. ОБЯЗАТЕЛЬНО!!! Используй системный инструмент **TodoWrite**
 1. Загрузи skill: financial-report-format четко следуй инструкциям из skill (path: /home/kaiukov/my-portfolio/.claude/skills)
-2. Bash "tree ."
-3. Язык: $ARGUMENTS[0]
-4. Напиши отчет: $ARGUMENTS[1]
-5. Отчет формат **.html** NO css
-6. Отчет Путь сохранения: $ARGUMENTS[2]
-7. Название файла: **reports/{yyyymmdd}-{название_на_русском_без_пробелов}.html**
-8. CAPE Ratio: $ARGUMENTS[4]
-9. Fear & Greed Index: $ARGUMENTS[5]
-10. Unemployment: $ARGUMENTS[6]
+2. Язык: $ARGUMENTS[0]
+3. Напиши отчет: $ARGUMENTS[1]
+4. Отчет формат **.html** NO css
+5. Отчет Путь сохранения: $ARGUMENTS[2]
+6. Название файла: **reports/{yyyymmdd}-{название_на_русском_без_пробелов}.html**
+7. CAPE Ratio: $ARGUMENTS[4]
+8. Fear & Greed Index: $ARGUMENTS[5]
+9. Unemployment: $ARGUMENTS[6]
 
 # TASKS
 
@@ -27,7 +26,7 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [capeRati
 
 - [ ] Перед началом убедись, что все **Инструкции** приняты во внимание.
 - [ ] **Сбор и фильтрация новостей:**
-    1. Прочитай носледнии новости в папке **/home/kaiukov/my-portfolio/rss/** используй bash: "cd /home/kaiukov/my-portfolio/rss/ &&  tree -t"
+    1. ОБЯЗАТЕЛЬНО прочитай новости за 48 часов в папке **/home/kaiukov/my-portfolio/rss/** используй bash: "cd /home/kaiukov/my-portfolio/rss/ &&  tree -t" 
 - [ ] **Анализ:** Используй MCP: **sequentialthinking** для глубокого анализа собранных новостей, проведи cross check и свяжи события между собой. 
 - [ ] Будь **DRY** не повторяйся
 - [ ] **Подготовка отчета:** Проанализируй результаты, придумай креативное название на русском языке и сохрани отчёт.
