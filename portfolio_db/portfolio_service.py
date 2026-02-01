@@ -155,6 +155,8 @@ class PortfolioService:
             'treynor_ratio': 0.0,
             'information_ratio': 0.0,
             'jensens_alpha': 0.0,
+            'relative_return': 0.0,
+            'tracking_error': 0.0,
             'var_95': 0.0,
             'var_99': 0.0,
             'cvar_95': 0.0,
@@ -304,6 +306,8 @@ class PortfolioService:
         # Tracking Error = std dev of (portfolio return - benchmark return)
         information_ratio = 0.0
         spy_cagr = 0.0  # Market (SPY) CAGR for Jensen's Alpha
+        tracking_error = 0.0  # Annualized tracking error for benchmark comparison
+        relative_return = 0.0  # Portfolio return minus benchmark return
         try:
             min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
             max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
@@ -329,6 +333,9 @@ class PortfolioService:
                 spy_total_return = (spy_end - spy_start) / spy_start
                 spy_cagr = (((1 + spy_total_return) ** (1 / years) - 1)) if spy_total_return > -1 and years > 0 else 0.0
 
+                # Relative Return = Portfolio CAGR - Benchmark CAGR
+                relative_return = (cagr_decimal - spy_cagr) * 100  # In percentage
+
                 # Align portfolio and benchmark returns
                 n = min(len(spy_returns), len(daily_returns))
                 if n > 1:
@@ -345,6 +352,7 @@ class PortfolioService:
                     # Tracking Error = standard deviation of excess returns (annualized)
                     tracking_error_daily = math.sqrt(sum((e - avg_excess_daily) ** 2 for e in excess_returns) / len(excess_returns))
                     tracking_error_annual = tracking_error_daily * math.sqrt(252) / 100  # Convert to decimal
+                    tracking_error = tracking_error_annual * 100  # Convert to percentage
 
                     # Information Ratio
                     information_ratio = (avg_excess_annual / tracking_error_annual) if tracking_error_annual > 0 else 0.0
@@ -409,6 +417,8 @@ class PortfolioService:
             'treynor_ratio': treynor_ratio,
             'information_ratio': information_ratio,
             'jensens_alpha': jensens_alpha,
+            'relative_return': relative_return,
+            'tracking_error': tracking_error,
             'var_95': var_95,
             'var_99': var_99,
             'cvar_95': cvar_95,
@@ -433,6 +443,8 @@ class PortfolioService:
             'treynor_ratio': lambda v: 'Excellent' if v > 5 else ('Good' if v > 2 else ('Poor' if v > 0 else 'Bad')),
             'information_ratio': lambda v: 'Excellent' if v > 1.0 else ('Good' if v > 0.5 else ('Poor' if v > 0 else 'Bad')),
             'jensens_alpha': lambda v: 'Excellent' if v > 3 else ('Good' if v > 1 else ('Neutral' if v > -1 else 'Underperforming')),
+            'relative_return': lambda v: 'Outperforming' if v > 5 else ('Good' if v > 0 else ('Neutral' if v > -5 else 'Underperforming')),
+            'tracking_error': lambda v: 'Low' if v < 5 else ('Moderate' if v < 10 else 'High'),
             'var_95': lambda v: 'Low risk' if v > -3 else ('Moderate' if v > -5 else 'High risk'),
             'var_99': lambda v: 'Low risk' if v > -5 else ('Moderate' if v > -8 else 'High risk'),
             'cvar_95': lambda v: 'Low risk' if v > -4 else ('Moderate' if v > -7 else 'High risk'),

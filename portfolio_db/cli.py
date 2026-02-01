@@ -549,6 +549,8 @@ def performance(db, table_output):
         click.echo(f"{'Treynor Ratio:':<30} {stats['treynor_ratio']:>10.4f}   {eval_metric('treynor_ratio', stats['treynor_ratio'])}")
         click.echo(f"{'Information Ratio:':<30} {stats['information_ratio']:>10.4f}   {eval_metric('information_ratio', stats['information_ratio'])}")
         click.echo(f"{'Jensens Alpha:':<30} {stats['jensens_alpha']:>10.4f}%   {eval_metric('jensens_alpha', stats['jensens_alpha'])}")
+        click.echo(f"{'Relative Return vs SPY:':<30} {stats['relative_return']:>10.4f}%   {eval_metric('relative_return', stats['relative_return'])}")
+        click.echo(f"{'Tracking Error:':<30} {stats['tracking_error']:>10.4f}%   {eval_metric('tracking_error', stats['tracking_error'])}")
         click.echo(f"{'Beta (β) vs SPY:':<30} {stats['beta']:>10.4f}   {eval_metric('beta', stats['beta'])}")
         click.echo("-" * 80)
         click.echo(f"{'VaR 95% (daily):':<30} {stats['var_95']:>10.4f}%   {eval_metric('var_95', stats['var_95'])}")
@@ -597,7 +599,9 @@ def performance(db, table_output):
                 "sortino_ratio": [stats['sortino_ratio'], eval_metric('sortino_ratio', stats['sortino_ratio'])],
                 "treynor_ratio": [stats['treynor_ratio'], eval_metric('treynor_ratio', stats['treynor_ratio'])],
                 "information_ratio": [stats['information_ratio'], eval_metric('information_ratio', stats['information_ratio'])],
-                "jensens_alpha": [stats['jensens_alpha'], eval_metric('jensens_alpha', stats['jensens_alpha'])]
+                "jensens_alpha": [stats['jensens_alpha'], eval_metric('jensens_alpha', stats['jensens_alpha'])],
+                "relative_return": [stats['relative_return'], eval_metric('relative_return', stats['relative_return'])],
+                "tracking_error": [stats['tracking_error'], eval_metric('tracking_error', stats['tracking_error'])]
             },
             "risk_of_loss": {
                 "var_95_pct": [stats['var_95'], eval_metric('var_95', stats['var_95'])],
