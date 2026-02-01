@@ -153,6 +153,7 @@ class PortfolioService:
             'sharpe_ratio': 0.0,
             'sortino_ratio': 0.0,
             'treynor_ratio': 0.0,
+            'information_ratio': 0.0,
             'var_95': 0.0,
             'var_99': 0.0,
             'cvar_95': 0.0,
@@ -297,6 +298,51 @@ class PortfolioService:
         # Treynor = (Rp - Rf) / β
         treynor_ratio = ((cagr_decimal - rf_annual) / beta) if beta != 0 else 0.0
 
+        # Information Ratio - excess return vs benchmark per unit of tracking error
+        # IR = (Rp - Rb) / Tracking Error
+        # Tracking Error = std dev of (portfolio return - benchmark return)
+        information_ratio = 0.0
+        try:
+            min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
+            max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
+
+            spy_prices = self.price_service.fetch_all_prices(['SPY'], min_date, max_date)
+            if spy_prices and 'SPY' in spy_prices and len(spy_prices['SPY']) > 1:
+                import pandas as pd
+                spy_series = spy_prices['SPY']
+                if isinstance(spy_series, pd.DataFrame):
+                    spy_series = spy_series.iloc[:, 0]
+
+                # Calculate SPY daily returns
+                spy_returns = []
+                for i in range(1, len(spy_series)):
+                    prev_val = float(spy_series.iloc[i-1])
+                    curr_val = float(spy_series.iloc[i])
+                    if prev_val > 0:
+                        spy_returns.append((curr_val - prev_val) / prev_val * 100)
+
+                # Align portfolio and benchmark returns
+                n = min(len(spy_returns), len(daily_returns))
+                if n > 1:
+                    spy_returns = spy_returns[-n:]
+                    portfolio_returns = daily_returns[-n:]
+
+                    # Calculate excess returns (portfolio - benchmark)
+                    excess_returns = [p - s for p, s in zip(portfolio_returns, spy_returns)]
+
+                    # Average excess return (annualized)
+                    avg_excess_daily = sum(excess_returns) / len(excess_returns)
+                    avg_excess_annual = avg_excess_daily * 252 / 100  # Convert to decimal
+
+                    # Tracking Error = standard deviation of excess returns (annualized)
+                    tracking_error_daily = math.sqrt(sum((e - avg_excess_daily) ** 2 for e in excess_returns) / len(excess_returns))
+                    tracking_error_annual = tracking_error_daily * math.sqrt(252) / 100  # Convert to decimal
+
+                    # Information Ratio
+                    information_ratio = (avg_excess_annual / tracking_error_annual) if tracking_error_annual > 0 else 0.0
+        except:
+            pass
+
         # Monthly return (simplified: from daily returns)
         # Better: compound daily returns to get monthly
         monthly_returns = []
@@ -348,6 +394,7 @@ class PortfolioService:
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
             'treynor_ratio': treynor_ratio,
+            'information_ratio': information_ratio,
             'var_95': var_95,
             'var_99': var_99,
             'cvar_95': cvar_95,
@@ -370,6 +417,7 @@ class PortfolioService:
             'sharpe_ratio': lambda v: 'Excellent' if v > 2 else ('Good' if v > 1 else ('Poor' if v > 0 else 'Bad')),
             'sortino_ratio': lambda v: 'Excellent' if v > 3 else ('Good' if v > 1.5 else ('Poor' if v > 0 else 'Bad')),
             'treynor_ratio': lambda v: 'Excellent' if v > 5 else ('Good' if v > 2 else ('Poor' if v > 0 else 'Bad')),
+            'information_ratio': lambda v: 'Excellent' if v > 1.0 else ('Good' if v > 0.5 else ('Poor' if v > 0 else 'Bad')),
             'var_95': lambda v: 'Low risk' if v > -3 else ('Moderate' if v > -5 else 'High risk'),
             'var_99': lambda v: 'Low risk' if v > -5 else ('Moderate' if v > -8 else 'High risk'),
             'cvar_95': lambda v: 'Low risk' if v > -4 else ('Moderate' if v > -7 else 'High risk'),
