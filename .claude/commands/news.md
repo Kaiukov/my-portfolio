@@ -17,8 +17,7 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [capeRati
 7. CAPE Ratio: $ARGUMENTS[4]
 8. Fear & Greed Index: $ARGUMENTS[5]
 9. Unemployment: $ARGUMENTS[6]
-10. bash: "cat /home/kaiukov/my-portfolio/raw_news_data.md" (raw news data)
-11. bash: "cat /home/kaiukov/my-portfolio/market_data.json" (market data)
+
 
 # TASKS
 
@@ -29,6 +28,8 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [capeRati
 - [ ] Перед началом убедись, что все **Инструкции** приняты во внимание.
 - [ ] **Сбор и фильтрация новостей:**
     1. User @"news-explorer (agent)" and read news in the folder @rss/ for the latest 24H
+    2. User General purpose agent to read: "cat /home/kaiukov/my-portfolio/raw_news_data.md" (raw news data)
+    3. User General purpose agent to read: "cat /home/kaiukov/my-portfolio/market_data.json" (market data)
 - [ ] **Анализ:** Используй MCP: **sequentialthinking** для глубокого анализа собранных новостей, проведи cross check и свяжи события между собой. 
 - [ ] Будь **DRY** не повторяйся
 - [ ] **Подготовка отчета:** Проанализируй результаты, придумай креативное название на русском языке и сохрани отчёт.
