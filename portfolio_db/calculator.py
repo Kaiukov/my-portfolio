@@ -346,6 +346,28 @@ class DailyReturnCalculator:
                                     holdings[date][cash_currency] = 0
                                 holdings[date][cash_currency] += cash_proceeds
 
+                        elif action == 'FEE':
+                            # FEE reduces cash holdings without creating position
+                            # Use asset as cash currency (USD, EURUSD=X, GBPUSD=X)
+                            fee_currency = asset if is_cash_asset else get_cash_currency(asset_type)
+                            if fee_currency not in holdings[date]:
+                                holdings[date][fee_currency] = 0
+                            holdings[date][fee_currency] -= quantity
+
+                        elif action == 'EXCHANGE_FROM':
+                            # EXCHANGE_FROM reduces source currency (quantity is negative)
+                            exchange_currency = asset if is_cash_asset else get_cash_currency(asset_type)
+                            if exchange_currency not in holdings[date]:
+                                holdings[date][exchange_currency] = 0
+                            holdings[date][exchange_currency] += quantity  # quantity is negative
+
+                        elif action == 'EXCHANGE_TO':
+                            # EXCHANGE_TO adds to target currency
+                            exchange_currency = asset if is_cash_asset else get_cash_currency(asset_type)
+                            if exchange_currency not in holdings[date]:
+                                holdings[date][exchange_currency] = 0
+                            holdings[date][exchange_currency] += quantity
+
                         elif action == 'WITHDRAW':
                             # WITHDRAW reduces cash holdings but doesn't affect investment
                             holdings[date][asset] -= quantity

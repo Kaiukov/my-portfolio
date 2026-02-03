@@ -123,9 +123,10 @@ def transactions(format, db):
         click.echo("-" * 70)
 
         for t in trans:
+            asset_type = t['asset_type'] or '-'
             click.echo(
                 f"{t['date']:<12} {t['asset']:<15} {t['action']:<10} "
-                f"{t['quantity']:>10.6f} {t['asset_type']:<10}"
+                f"{t['quantity']:>10.6f} {asset_type:<10}"
             )
 
     service.close()
@@ -155,7 +156,7 @@ def status(db):
 @cli.command()
 @click.option('--date', required=True, help='Transaction date (DD-MM-YYYY)')
 @click.option('--asset', required=True, help='Asset symbol')
-@click.option('--action', required=True, type=click.Choice(['BUY', 'SELL', 'DEPOSIT'], case_sensitive=False), help='Transaction action')
+@click.option('--action', required=True, type=click.Choice(['BUY', 'SELL', 'DEPOSIT', 'FEE'], case_sensitive=False), help='Transaction action: BUY, SELL, DEPOSIT, or FEE')
 @click.option('--quantity', required=True, type=float, help='Transaction quantity')
 @click.option('--price', type=float, default=None, help='Asset price (optional)')
 @click.option('--currency', default='USD', help='Currency code (default USD)')
@@ -800,6 +801,44 @@ def summary(filter, export, db):
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
+    finally:
+        service.close()
+
+
+@cli.command()
+@click.option('--date', required=True, help='Transaction date (DD-MM-YYYY)')
+@click.option('--from', 'from_asset', required=True, help='Source asset/currency (e.g., USD, EURUSD=X)')
+@click.option('--to', 'to_asset', required=True, help='Target asset/currency (e.g., USD, EURUSD=X)')
+@click.option('--quantity', required=True, type=float, help='Amount to exchange (in source currency)')
+@click.option('--rate', required=True, type=float, help='Exchange rate (amount of target currency per 1 unit of source)')
+@click.option('--db', default='portfolio.db', help='Path to database file')
+def exchange(date, from_asset, to_asset, quantity, rate, db):
+    """Exchange one currency for another (e.g., USD to EUR)."""
+    try:
+        # Parse and validate date
+        date_obj = datetime.strptime(date, '%d-%m-%Y').date()
+    except ValueError:
+        click.echo(f"Error: Invalid date format. Use DD-MM-YYYY", err=True)
+        return
+
+    service = PortfolioService(db)
+    try:
+        result = service.exchange_currency(
+            date_obj=date_obj,
+            from_asset=from_asset,
+            to_asset=to_asset,
+            quantity=quantity,
+            rate=rate
+        )
+
+        target_amount = quantity * rate
+        click.echo(f"✓ Exchange recorded (ID: {result['from_trans_id']} / {result['to_trans_id']})")
+        click.echo(f"✓ Exchanged {quantity:.2f} {from_asset} → {target_amount:.2f} {to_asset} @ {rate}")
+        click.echo(f"✓ {result['recalc_type'].upper()} recalculation triggered from {result['from_date']}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        import traceback
+        traceback.print_exc()
     finally:
         service.close()
 

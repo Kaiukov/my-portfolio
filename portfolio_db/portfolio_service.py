@@ -547,6 +547,66 @@ class PortfolioService:
             'transaction_id': trans_id
         }
 
+    def exchange_currency(self, date_obj, from_asset: str, to_asset: str, quantity: float, rate: float) -> dict:
+        """
+        Exchange one currency for another.
+
+        Creates two transactions:
+        1. EXCHANGE_FROM: deducts from source currency
+        2. EXCHANGE_TO: adds to target currency
+
+        Args:
+            date_obj: Transaction date
+            from_asset: Source asset/currency (e.g., USD, EURUSD=X)
+            to_asset: Target asset/currency (e.g., USD, EURUSD=X)
+            quantity: Amount to exchange (in source currency)
+            rate: Exchange rate (amount of target per 1 unit of source)
+
+        Returns:
+            {"status": "success", "from_trans_id": ..., "to_trans_id": ..., "recalc_type": ..., "from_date": ...}
+        """
+        # Get last date BEFORE adding transaction
+        last_date_before = self.db.get_last_transaction_date()
+
+        target_amount = quantity * rate
+
+        # Add EXCHANGE_FROM transaction (deduct from source)
+        from_trans_id, _ = self.db.add_transaction(
+            date_obj, from_asset, 'EXCHANGE_FROM', -quantity,
+            asset_type=None, price=None, currency='', fees=None,
+            exchange='', data_source=f'→ {to_asset} @ {rate}'
+        )
+
+        # Add EXCHANGE_TO transaction (add to target)
+        to_trans_id, _ = self.db.add_transaction(
+            date_obj, to_asset, 'EXCHANGE_TO', target_amount,
+            asset_type=None, price=None, currency='', fees=None,
+            exchange='', data_source=f'← {from_asset} @ {rate}'
+        )
+
+        # Determine recalculation scope
+        if last_date_before is None:
+            is_full_recalc = True
+            from_date = date_obj
+        elif date_obj < last_date_before:
+            is_full_recalc = True
+            from_date = date_obj
+        else:
+            is_full_recalc = False
+            from_date = date_obj
+
+        # Perform recalculation
+        self.recalculate(from_date=from_date, force=False)
+
+        recalc_type = 'full' if is_full_recalc else 'partial'
+        return {
+            'status': 'success',
+            'from_trans_id': from_trans_id,
+            'to_trans_id': to_trans_id,
+            'recalc_type': recalc_type,
+            'from_date': str(from_date),
+        }
+
     def _generate_cache_key(self) -> str:
         """Generate cache key based on transaction state."""
         transactions = self.db.get_transactions()
@@ -888,6 +948,51 @@ class PortfolioService:
                 proceeds = quantity * price
                 cash_balances[cash_key]['received'] += proceeds
                 cash_balances[cash_key]['balance'] += proceeds
+            elif action == 'FEE':
+                # FEE reduces cash balance (asset is the cash currency)
+                if asset_type in ('cash_base', 'cash_fx'):
+                    # Direct cash currency fee
+                    fee_key = asset if asset_type == 'cash_fx' else 'USD'
+                elif asset.startswith('CASH'):
+                    # Old format
+                    if asset == 'CASH EUR':
+                        fee_key = 'EURUSD=X'
+                    elif asset == 'CASH GBP':
+                        fee_key = 'GBPUSD=X'
+                    else:
+                        fee_key = 'USD'
+                else:
+                    # Fee related to asset, use corresponding cash currency
+                    fee_key = cash_key
+                cash_balances[fee_key]['balance'] -= quantity
+            elif action == 'EXCHANGE_FROM':
+                # EXCHANGE_FROM reduces source currency balance
+                if asset_type in ('cash_base', 'cash_fx'):
+                    exchange_key = asset if asset_type == 'cash_fx' else 'USD'
+                elif asset.startswith('CASH'):
+                    if asset == 'CASH EUR':
+                        exchange_key = 'EURUSD=X'
+                    elif asset == 'CASH GBP':
+                        exchange_key = 'GBPUSD=X'
+                    else:
+                        exchange_key = 'USD'
+                else:
+                    exchange_key = cash_key
+                cash_balances[exchange_key]['balance'] += quantity  # quantity is negative
+            elif action == 'EXCHANGE_TO':
+                # EXCHANGE_TO adds to target currency balance
+                if asset_type in ('cash_base', 'cash_fx'):
+                    exchange_key = asset if asset_type == 'cash_fx' else 'USD'
+                elif asset.startswith('CASH'):
+                    if asset == 'CASH EUR':
+                        exchange_key = 'EURUSD=X'
+                    elif asset == 'CASH GBP':
+                        exchange_key = 'GBPUSD=X'
+                    else:
+                        exchange_key = 'USD'
+                else:
+                    exchange_key = cash_key
+                cash_balances[exchange_key]['balance'] += quantity
 
         return cash_balances
 
@@ -928,7 +1033,7 @@ class PortfolioService:
         except Exception:
             pass
 
-        # Build position data by asset (skip cash DEPOSIT - will be replaced with actual balances)
+        # Build position data by asset (skip cash DEPOSIT and FEE - handled separately)
         positions = {}
         for trans in transactions:
             asset = trans[2]
@@ -936,6 +1041,10 @@ class PortfolioService:
             quantity = trans[4]
             price = trans[6]
             date_obj = trans[1]
+
+            # Skip FEE, DEPOSIT, EXCHANGE for cash - they don't create investment positions
+            if action in ('FEE', 'DEPOSIT', 'EXCHANGE_FROM', 'EXCHANGE_TO'):
+                continue
 
             if asset not in positions:
                 positions[asset] = {
@@ -963,7 +1072,6 @@ class PortfolioService:
                 if price:
                     positions[asset]['sell_proceeds'] += quantity * price
                     positions[asset]['last_price_from_trans'] = price
-            # DEPOSIT for cash is handled separately via get_actual_cash_balances()
 
         # Use actual cash balances as single source of truth
         actual_cash = self.get_actual_cash_balances()
