@@ -267,6 +267,7 @@ Create aggregation section with tables and lists:
 
 - **Data Precision:** Every number has context + source URL
 - **Percentage + Absolute:** Always show both: +1.44% (до 6,894 пунктов)
+- **Term Explanations:** First mention of financial term = [объяснение из vocabulary.md]
 - **Interpretation:** Each metric section ends with "Why does this matter?"
 - **Objectivity:** Show both risks (❌) and opportunities (✅)
 - **Tone:** Professional, specific, no marketing language
@@ -278,6 +279,7 @@ Create aggregation section with tables and lists:
 - [ ] H1: emoji + title + thesis on first line
 - [ ] Date and metadata in opening paragraph
 - [ ] All metrics have source URLs linked
+- [ ] **Financial terms have [explanations] from vocabulary.md at first mention**
 - [ ] Each section ends with interpretation paragraph
 - [ ] Risk/opportunity assessment included in synthesis section
 - [ ] Scenarios: 3 with probability % totaling ~100%
@@ -328,6 +330,33 @@ Working HTML examples in `examples/`:
 
 ## Writing Style
 
+### Vocabulary with Explanations (ОБЯЗАТЕЛЬНО)
+
+При первом упоминании финансового термина **всегда** добавлять объяснение в квадратных скобках из `references/vocabulary.md`:
+
+```html
+✅ "<strong>Волатильность</strong> [насколько быстро меняется цена] достигла максимума"
+✅ "<strong>CAPE Ratio</strong> [цена / средняя прибыль за 10 лет] показывает 40.3"
+✅ "<strong>Коррекция</strong> [цена упала после роста] составила -15%"
+
+❌ "Волатильность достигла максимума" (нет объяснения)
+❌ "CAPE Ratio показывает перегрев" (термин без расшифровки)
+```
+
+**Правила:**
+1. **Первое упоминание** = термин + [объяснение из vocabulary.md]
+2. **Повторные упоминания** = можно без объяснения
+3. **Каждый раздел** = минимум 2-3 термина с объяснениями
+4. Объяснения берём **только** из `references/vocabulary.md` для единообразия
+
+**Категории терминов в vocabulary.md:**
+- Market Movement (волатильность, коррекция, консолидация, тренд)
+- Profitability (маржа, ROI, EPS, капитализация)
+- Economic Indicators (инфляция, ВВП, безработица, рецессия)
+- Stock Valuation (P/E, CAPE, Price-to-Book)
+- Risk Management (хеджирование, диверсификация, VIX)
+- Crypto (блокчейн, стейкинг, газ)
+
 ### Imperative Form
 Structure sections with action-oriented language:
 
@@ -352,6 +381,7 @@ Essential for credibility:
 
 ## Common Mistakes to Avoid
 
+❌ **Terms without explanations** - First mention needs [объяснение из vocabulary.md]
 ❌ **Unsourced claims** - Every fact needs attribution
 ❌ **Vague interpretations** - Always explain significance
 ❌ **Missing context** - Raw numbers without background
