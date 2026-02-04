@@ -6,7 +6,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "git pull && uv run $(pwd)/.claude/hooks/init.py && find /Users/oleksandrkaiukov/Code/my-portfolio/news -type f -mtime -1 -exec cat {} +"
+                        "command": "rm -rf tmp/* && uv run .claude/hooks/startup.py"
                     }
                 ]
             }
