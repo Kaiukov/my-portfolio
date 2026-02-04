@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+import subprocess
+import os
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent.parent
+init_script = project_root / ".claude" / "hooks" / "init.py"
+news_dir = project_root / "news"
+tmp_dir = project_root / "tmp"
+market_data_file = tmp_dir / "market_data.json"
+recent_news_file = tmp_dir / "recent_news.md"
+
+tmp_dir.mkdir(exist_ok=True)
+
+# Run init.py and save market data
+if init_script.exists():
+    result = subprocess.run(
+        ["uv", "run", str(init_script)],
+        capture_output=True,
+        text=True,
+        cwd=project_root
+    )
+    if result.stdout:
+        market_data_file.write_text(result.stdout)
+
+# Collect and save recent news
+news_content = []
+if news_dir.exists():
+    for f in sorted(news_dir.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.is_file():
+            news_content.append(f.read_text())
+            news_content.append("---\n")
+
+if news_content:
+    recent_news_file.write_text("".join(news_content))
+
+print(f"Market data saved to {market_data_file}")
+print(f"Recent news saved to {recent_news_file}")
+

@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "searxng": {
+            "command": "/Users/oleksandrkaiukov/Code/my-portfolio/.venv/bin/python",
+            "args": ["-m", "mcp_searxng"],
+            "env": {
+                "SEARXNG_BASE_URL": "http://zimaos.neon-chuckwalla.ts.net:3000"
+            }
+        }
+    }
+}
