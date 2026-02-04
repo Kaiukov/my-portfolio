@@ -2,7 +2,6 @@
 allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), WebSearch, WebFetch, Read, sequentialthinking, TodoWrite
 description: Load initial data for analysis
 default-mode: acceptEdits
-
 ---
 
 # Prime

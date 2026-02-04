@@ -6,7 +6,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "rm -rf tmp/* && uv run .claude/hooks/startup.py"
+                        "command": "git pull && rm -rf tmp/* && uv run .claude/hooks/startup.py"
                     }
                 ]
             }
