@@ -2,7 +2,7 @@
     "mcpServers": {
         "searxng": {
             "command": "uv",
-            "args": ["run", "--no-sync", "mcp-searxng"],
+            "args": ["run", "--with", "mcp-searxng", "mcp-searxng"],
             "env": {
                 "SEARXNG_BASE_URL": "http://zimaos.neon-chuckwalla.ts.net:3000"
             }
