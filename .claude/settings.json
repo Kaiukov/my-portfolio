@@ -6,7 +6,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "echo 'Load the financial-report-format skill'"
+                        "command": "uv run .claude/hooks/init.py && echo 'always use uv for python over pip, python3, etc'"
                     }
                 ]
             }
