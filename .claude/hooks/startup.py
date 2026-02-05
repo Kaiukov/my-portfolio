@@ -14,7 +14,7 @@ tmp_dir.mkdir(exist_ok=True)
 
 # Pull latest changes from git (only if working directory is clean)
 result = subprocess.run(
-    ["git", "status", "--porcelain"],
+    ["git", "status", "--porcelain", "--untracked-files=no"],
     capture_output=True,
     text=True,
     cwd=project_root
