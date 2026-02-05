@@ -12,6 +12,20 @@ recent_news_file = tmp_dir / "recent_news.md"
 
 tmp_dir.mkdir(exist_ok=True)
 
+# Pull latest changes from git (only if working directory is clean)
+result = subprocess.run(
+    ["git", "status", "--porcelain"],
+    capture_output=True,
+    text=True,
+    cwd=project_root
+)
+
+if result.stdout.strip():
+    print("Skipping git pull - you have unstaged changes")
+else:
+    print("Pulling latest changes...")
+    subprocess.run(["git", "pull"], cwd=project_root)
+
 # Run init.py and save market data
 market_saved = False
 if init_script.exists():
