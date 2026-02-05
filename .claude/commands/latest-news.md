@@ -29,7 +29,7 @@ All futher command must run unattended and do not wait confirmation from user to
 4. Use `financial-report-format` skill vocabulary
 
 ## Phase 5:
-- Run sub-agent to write reportData.json -> 
+- Run sub-agent to write tmp/reportData.json -> 
 ```json
 "reportName": "string",
 "reportPath": "string",

@@ -12,7 +12,7 @@ DATE = datetime.now().strftime("%Y-%m-%d")
 
 async def main():
     async for message in query(
-        prompt=f"Read and execute: {PROJECT_ROOT}/.claude/prompts/news-orchestrator.md",
+        prompt=f"",
         options=ClaudeAgentOptions(
             permission_mode="bypassPermissions",
             allowed_tools=["Read", "Write", "Edit", "Grep", "Glob", "Bash", "Task", "Skill"]

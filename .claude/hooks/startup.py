@@ -13,6 +13,7 @@ recent_news_file = tmp_dir / "recent_news.md"
 tmp_dir.mkdir(exist_ok=True)
 
 # Run init.py and save market data
+market_saved = False
 if init_script.exists():
     result = subprocess.run(
         ["uv", "run", str(init_script)],
@@ -22,6 +23,9 @@ if init_script.exists():
     )
     if result.stdout:
         market_data_file.write_text(result.stdout)
+        market_saved = True
+    elif result.stderr:
+        print(f"Error fetching market data: {result.stderr.strip()}")
 
 # Collect and save recent news
 news_content = []
@@ -31,9 +35,13 @@ if news_dir.exists():
             news_content.append(f.read_text())
             news_content.append("---\n")
 
+news_saved = False
 if news_content:
     recent_news_file.write_text("".join(news_content))
+    news_saved = True
 
-print(f"Market data saved to {market_data_file}")
-print(f"Recent news saved to {recent_news_file}")
+if market_saved:
+    print(f"Market data saved to {market_data_file}")
+if news_saved:
+    print(f"Recent news saved to {recent_news_file}")
 

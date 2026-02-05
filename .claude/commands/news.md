@@ -19,10 +19,10 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
 ## Данные
 
 - bash ls tmp/* -> Прочитай файлы и подсуммируй:
-    - Послдении новости: tmp/recent_news.md (Ожидается что файл большой прим. 1000 строк, разбей его что бы не перегружать контекст)
-    - Фондовые рынки: tmp/market_data.json 
-    - Ukraine news: tmp/ukr_news.md
-    - Biggest investors news: tmp/biggest_investors_news.md
+    - [ ] Послдении новости: tmp/recent_news.md (Ожидается что файл большой прим. 1000 строк, разбей его что бы не перегружать контекст)
+    - [ ] Фондовые рынки: tmp/market_data.json 
+    - [ ] Ukraine news: tmp/ukr_news.md
+    - [ ] Biggest investors news: tmp/biggest_investors_news.md
 
 ## Структура отчета
 Проанализируй за последние 24 часа:
@@ -30,7 +30,7 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
 1. **Фондовые рынки** — S&P 500, NASDAQ, европейские индексы
 2. **Криптовалюты** — BTC, ETH, альткоины
 3. **Драгоценные металлы** — золото, серебро
-4. **Инвестиции в Украину** — ОВГЗ, еврооблигации (tmp/recent_news.md)
+4. **Инвестиции в Украину** — ОВГЗ, еврооблигации (tmp/ukr-news.md)
 5. **Макроиндикаторы** — CAPE, Fear&Greed, безработица, признаки рецессии
 6. **Крупные инвесторы** — действия Баффетта, CZ и др. (tmp/recent_news.md)
 7. **Breaking News** — влияние на рынок

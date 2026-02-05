@@ -86,29 +86,31 @@ async def main():
     run_startup_tasks()
 
     async for message in query(
-        prompt=f"""# News orchestrator
-        All futher command must run unattended and do not wait confirmation from user to continue.
+        prompt=f"""You are News orchestrator. 
 
-        ## Phase 1: Preparation phase 
+        All tasks should run unattended without waiting for user confirmation.
 
-        ### Skills
-        - Load SKILL: financial-report-format
+        Phase 1: Run these tasks in parallel:
+        1. Use the biggest-investors-news agent to gather investor news
+        2. Use the ukr-news agent to gather Ukraine news
 
-        ## Phase 2: Run simultaniosly (IMPORTANT: ENSURE THEN AGENT RUNNING. OTHERWISE IT WILL BE USELESS)
-        - Sub-Agent: biggest-investors-news (use MCP mcp__searxng__web_search)
-        - Sub-Agent: ukr-news (use MCP mcp__searxng__web_search)
+        Phase 2: After Phase 1 is completed, 
 
-        ## Phase 3: Run when phase 2 is completed 
-        - Command: {PROJECT_ROOT}/.claude/commands/news.md (/news [{LANGUAGE}] [Standart-daily-report] [{PROJECT_ROOT}/reports] [date: {DATE}])
+        - Read and execute command {PROJECT_ROOT}/.claude/commands/news.md with parameters:
+            - Language: {LANGUAGE}
+            - Report type: Standart-daily-report
+            - Output path: {PROJECT_ROOT}/reports
+            - Date: {DATE}
+        - Load skill "financial-report-format"
 
-        ## Phase 4: Run when phase 3 is completed (IMPORTANT: Run Sub-agent for general-purpose)
-        1. Find all english works in the report
-        2. Translate to `{LANGUAGE}` language, except names of companies and people.
-        3. Do not mix languages in the final report
-        4. Use `financial-report-format` skill vocabulary
-
-        ## Path
-        - {PROJECT_ROOT}/tmp/ use for temporary files/""",
+        Phase 3: Spellcheck the report
+        - Edit the report to ensure it is free of errors
+        - Ensure that you use {LANGUAGE} language
+        - Do not mix languages
+        - Do not use Chinese characters
+        
+        Save PATH: 
+        Use {PROJECT_ROOT}/tmp/ directory for any temporary files.""",
         options=ClaudeAgentOptions(
             permission_mode="bypassPermissions",
             allowed_tools=["Read", "Write", "Edit", "Grep", "Glob", "Bash", "Task", "skill"],
