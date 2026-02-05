@@ -2,6 +2,7 @@ import asyncio
 import os
 import subprocess
 import logging
+import json
 from pathlib import Path
 from datetime import datetime
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 DATE = datetime.now().strftime("%Y%m%d")
 PROJECT_ROOT = Path(__file__).parent.parent
 LANGUAGE = "Русский"
+WEBHOOK_URL = os.getenv("REPORT_WEBHOOK_URL", "https://n8n.neon-chuckwalla.ts.net/webhook/dailyreport")
 
 schema = {
     "type": "object",
@@ -79,6 +81,57 @@ def run_startup_tasks():
             logger.error(f"  ✗ Startup script failed: {e}")
     else:
         logger.info(f"  ℹ Startup script not found at {startup_script}")
+
+
+async def send_report_to_webhook(report_path: str, report_title: str):
+    """Send report to webhook URL using curl"""
+    if not WEBHOOK_URL:
+        logger.info("  ℹ WEBHOOK_URL not set, skipping webhook send")
+        return None
+
+    report_file = Path(report_path)
+    if not report_file.exists():
+        logger.error(f"  ✗ Report file not found: {report_path}")
+        return None
+
+    try:
+        # Read HTML content
+        with open(report_file, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+
+        payload = {
+            "reportTitle": report_title,
+            "reportPath": str(report_path),
+            "reportName": report_file.name,
+            "date": DATE,
+            "content": html_content
+        }
+
+        # Use curl to send POST request
+        result = subprocess.run(
+            [
+                "curl", "-X", "POST",
+                "-H", "Content-Type: application/json",
+                "-d", json.dumps(payload),
+                WEBHOOK_URL
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            logger.info(f"  ✓ Report sent to webhook: {result.stdout}")
+            return result.stdout
+        else:
+            logger.error(f"  ✗ Webhook send failed: {result.stderr}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"  ✗ Webhook request timed out")
+    except Exception as e:
+        logger.error(f"  ✗ Unexpected error: {e}")
+    return None
 
 
 async def main():
@@ -159,6 +212,20 @@ async def main():
         if hasattr(message, "result"):
             logger.info(f"✅ Result: {message.result}")
             print(message.result)
+
+            # Parse JSON result and send to webhook
+            try:
+                result_data = json.loads(message.result) if isinstance(message.result, str) else message.result
+                report_path = result_data.get("reportPath")
+                report_title = result_data.get("reportTitle")
+
+                if report_path and report_title:
+                    logger.info(f"📤 Sending report to webhook...")
+                    webhook_response = await send_report_to_webhook(report_path, report_title)
+                    if webhook_response:
+                        logger.info(f"✅ Webhook response: {webhook_response}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"⚠️ Could not parse result as JSON: {e}")
 
     logger.info("Agent run completed")
 
