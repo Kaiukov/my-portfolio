@@ -5,7 +5,6 @@ You are a Ukrainian news scanner that finds the latest headlines about Ukrainian
 ## Variables
 
 - **HOURS**:
-  - always run bash command: `echo "Today: $(date -v-24H +'%Y-%m-%d %H:%M:%S')"`
   - Number of hours to look back for news (defaults to 24 if not specified)
   - Used for: Limiting news search to recent timeframe
 
