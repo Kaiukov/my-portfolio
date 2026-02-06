@@ -6,7 +6,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "git pull 2>/dev/null || (git config pull.rebase true 2>/dev/null; git pull); rm -rf tmp/* && uv run .claude/hooks/startup.py"
+                        "command": "echo 'Hello World'"
                     }
                 ]
             }

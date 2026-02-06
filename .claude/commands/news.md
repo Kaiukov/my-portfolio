@@ -2,10 +2,32 @@
 allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), WebSearch, WebFetch, Read, sequentialthinking, TodoWrite
 description: Research latest financial news
 default-mode: acceptEdits
-argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
+argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy] [Path_to_raw_news]
 ---
 
 # Ежедневный финансовый отчет
+
+## Schema
+```json
+schema = {
+    "type": "object",
+    "properties": {
+        "reportTitle": {
+            "type": "string",
+            "description": "The title of the generated report"
+        },
+        "reportPath": {
+            "type": "string",
+            "description": "The file system path where the report is stored"
+        },
+        "reportName": {
+            "type": "string",
+            "description": "The filename of the report"
+        }
+    },
+    "required": ["reportTitle", "reportPath", "reportName"]
+}
+```
 
 ## Контекст
 - **Дата:** ARGUMENTS[3] 
@@ -18,11 +40,7 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
 
 ## Данные
 
-- bash ls tmp/* -> Прочитай файлы и подсуммируй:
-    - [ ] Послдении новости: tmp/recent_news.md (Ожидается что файл большой прим. 1000 строк, разбей его что бы не перегружать контекст)
-    - [ ] Фондовые рынки: tmp/market_data.json 
-    - [ ] Ukraine news: tmp/ukr_news.md
-    - [ ] Biggest investors news: tmp/biggest_investors_news.md
+- Сырыей новости надо из обрабоать ARGUMENTS[4]
 
 ## Структура отчета
 Проанализируй за последние 24 часа:
@@ -49,4 +67,12 @@ argument-hint: [language] [reportType] [reportsDir] [date: dd-MM-yyyy]
 - Polymarket — данная платформа не может считаться достоверным источником информации, так как имеет гемблинговую природу (основана на ставках).
 
 ## После завершения
-Выведи полный путь к сохраненному файлу.
+
+Состать JSON: 
+```json
+{
+    "reportTitle": "Помести сюда название отчета",
+    "reportPath": "Путь к файлу",
+    "reportName": "Название файла"
+}
+```
