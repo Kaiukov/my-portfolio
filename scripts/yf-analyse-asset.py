@@ -14,6 +14,73 @@ from typing import Optional, Tuple
 BENCHMARK_TICKER = "^GSPC"  # S&P 500 for beta calculation
 RISK_FREE_RATE = 0.0425  # ~4.25% current risk-free rate (5-year Treasury)
 
+# ETF benchmark mapping for accurate tracking error calculation
+ETF_BENCHMARKS = {
+    # US Large Cap
+    "SPY": "^GSPC",     # S&P 500
+    "VOO": "^GSPC",     # Vanguard S&P 500
+    "IVV": "^GSPC",     # iShares Core S&P 500
+    "VTI": "^VTI",      # Total Stock Market (self)
+
+    # US Small/Mid Cap
+    "IWM": "^RUT",      # Russell 2000
+    "IWR": "^MID",      # Russell Midcap
+    "VO": "^VEXMX",     # Mid-cap ETF (approximate)
+    "VB": "^RUJ",       # Small-cap ETF
+
+    # US Sector
+    "XLK": "^SP500-45", # Technology
+    "XLF": "^SP500-40", # Financial
+    "XLV": "^SP500-35", # Healthcare
+    "XLE": "^SP500-10", # Energy
+    "XLY": "^SP500-30", # Consumer Discretionary
+    "XLP": "^SP500-25", # Consumer Staples
+    "XLI": "^SP500-20", # Industrial
+    "XLB": "^SP500-15", # Materials
+    "XLRE": "^SP500-50",# Real Estate
+    "XLU": "^SP500-55", # Utilities
+    "XLC": "^SP500-IT", # Communication Services
+
+    # International
+    "EFA": "^EFA",      # MSCI EAFE (developed international)
+    "EEM": "^EEM",      # MSCI Emerging Markets
+    "VEA": "^VEA",      # Vanguard Developed Markets
+    "VWO": "^VWO",      # Vanguard Emerging Markets
+    "VGK": "^VGK",      # Vanguard Europe
+    "VPL": "^VPL",      # Vanguard Pacific
+
+    # Bonds
+    "TLT": "^TNX",      # Treasury 20+ Year (use 10Y yield as proxy)
+    "IEF": "^FVX",      # Treasury 7-10 Year
+    "SHY": "^IRX",      # Treasury 1-3 Year
+    "AGG": "^AGG",      # Aggregate Bond (self)
+    "BND": "^BND",      # Vanguard Total Bond (self)
+    "LQD": "^LQD",      # Corporate Bond (self)
+    "HYG": "^HYG",      # High Yield Corporate (self)
+    "JNK": "^JNK",      # High Yield Junk (self)
+
+    # Commodities
+    "GLD": "GLD",       # Gold (use spot futures as proxy)
+    "SLV": "SLV",       # Silver
+    "GDX": "GDX",       # Gold Miners
+    "USO": "CL=F",      # Oil (WTI Crude)
+    "DBC": "DBC",       # Commodity Index (self)
+
+    # Volatility
+    "VXX": "^VIX",      # VIX (use index)
+    "UVXY": "^VIX",     # VIX (2x leverage)
+
+    # Nasdaq
+    "QQQ": "^NDX",      # Nasdaq 100
+    "QQQM": "^NDX",     # Invesco Nasdaq 100
+    "VGT": "^VGT",      # Vanguard Information Technology
+}
+
+
+def get_benchmark_ticker(etf_symbol: str) -> str:
+    """Get appropriate benchmark for ETF tracking error calculation."""
+    return ETF_BENCHMARKS.get(etf_symbol.upper(), BENCHMARK_TICKER)
+
 
 def detect_asset_type(ticker: yf.Ticker) -> str:
     """Detect if asset is stock, ETF, or crypto."""
@@ -27,8 +94,17 @@ def detect_asset_type(ticker: yf.Ticker) -> str:
     return 'STOCK'
 
 
-def get_benchmark_data(asset_hist: pd.DataFrame) -> pd.Series:
-    """Get benchmark returns for beta calculation, aligned with asset dates."""
+def get_benchmark_data(asset_hist: pd.DataFrame, asset_symbol: Optional[str] = None, for_tracking_error: bool = False) -> pd.Series:
+    """Get benchmark returns aligned with asset dates.
+
+    Args:
+        asset_hist: Historical data for the asset
+        asset_symbol: Ticker symbol (used to find correct benchmark for ETFs)
+        for_tracking_error: If True, use ETF-specific benchmark for tracking error
+
+    Returns:
+        Series of benchmark returns
+    """
     if asset_hist.empty:
         return pd.Series(dtype=float)
 
@@ -36,8 +112,14 @@ def get_benchmark_data(asset_hist: pd.DataFrame) -> pd.Series:
     start_date = asset_hist.index[0]
     end_date = asset_hist.index[-1]
 
+    # Select appropriate benchmark
+    if for_tracking_error and asset_symbol:
+        benchmark_ticker = get_benchmark_ticker(asset_symbol)
+    else:
+        benchmark_ticker = BENCHMARK_TICKER
+
     # Fetch benchmark data for the same date range
-    benchmark = yf.Ticker(BENCHMARK_TICKER)
+    benchmark = yf.Ticker(benchmark_ticker)
     bench_hist = benchmark.history(start=start_date, end=end_date)
 
     if bench_hist.empty:
@@ -304,6 +386,186 @@ def calculate_macd(hist: pd.DataFrame, fast: int = 12, slow: int = 26, signal: i
     }
 
 
+def calculate_williams_r(hist: pd.DataFrame, period: int = 14) -> dict:
+    """Calculate Williams %R indicator with multiple periods.
+
+    Williams %R = (Highest High - Close) / (Highest High - Lowest Low) × -100
+    Range: -100 to 0 (overbought: -20 to 0, oversold: -80 to -100)
+
+    Periods:
+    - 14: Standard period (most platforms, Finviz, TradingView)
+    - 2: Short-term period (Investing.com default)
+    """
+    results = {}
+
+    for p in [period, 2]:  # Calculate both requested period and period=2
+        if len(hist) < p:
+            results[f'williams_r_{p}'] = None
+            results[f'williams_r_{p}_signal'] = 'Insufficient data'
+            continue
+
+        close_prices = hist['Close']
+        high_prices = hist['High']
+        low_prices = hist['Low']
+
+        # Calculate rolling highest high and lowest low
+        highest_high = high_prices.rolling(window=p).max()
+        lowest_low = low_prices.rolling(window=p).min()
+
+        # Calculate Williams %R
+        williams_r = ((highest_high - close_prices) / (highest_high - lowest_low)) * -100
+
+        # Get current value
+        wr = williams_r.iloc[-1]
+
+        # Determine signal
+        if pd.isna(wr):
+            signal = 'N/A'
+        elif wr >= -20:
+            signal = "Overbought"
+        elif wr <= -80:
+            signal = "Oversold"
+        else:
+            signal = "Neutral"
+
+        results[f'williams_r_{p}'] = wr
+        results[f'williams_r_{p}_signal'] = signal
+
+    # Add primary result (using requested period, default 14)
+    results['williams_r'] = results.get(f'williams_r_{period}')
+    results['williams_r_signal'] = results.get(f'williams_r_{period}_signal')
+
+    return results
+
+
+def calculate_stoch(hist: pd.DataFrame, k_period: int = 14, d_period: int = 3, smoothing: int = 3) -> dict:
+    """Calculate Stochastic Oscillator (Slow Stochastic).
+
+    Fast %K = 100 × (Close - Lowest Low) / (Highest High - Lowest Low)
+    Slow %K = SMA(Fast %K, smoothing)
+    %D = SMA(Slow %K, d_period)
+    Range: 0 to 100 (overbought: >80, oversold: <20)
+    """
+    if len(hist) < k_period + smoothing:
+        return {
+            'stoch_k': None,
+            'stoch_d': None,
+            'stoch_signal': 'Insufficient data'
+        }
+
+    close_prices = hist['Close']
+    high_prices = hist['High']
+    low_prices = hist['Low']
+
+    # Calculate rolling highest high and lowest low
+    highest_high = high_prices.rolling(window=k_period).max()
+    lowest_low = low_prices.rolling(window=k_period).min()
+
+    # Calculate Fast %K
+    fast_k = 100 * (close_prices - lowest_low) / (highest_high - lowest_low)
+
+    # Calculate Slow %K (smoothed)
+    slow_k = fast_k.rolling(window=smoothing).mean()
+
+    # Calculate %D (smoothed again)
+    stoch_d = slow_k.rolling(window=d_period).mean()
+
+    # Get current values
+    k = slow_k.iloc[-1]
+    d = stoch_d.iloc[-1]
+
+    # Determine signal
+    if pd.isna(k) or pd.isna(d):
+        signal = 'N/A'
+    elif k >= 80:
+        signal = "Overbought"
+    elif k <= 20:
+        signal = "Oversold"
+    elif k > d:
+        signal = "Bullish crossover"
+    elif k < d:
+        signal = "Bearish crossover"
+    else:
+        signal = "Neutral"
+
+    return {
+        'stoch_k': k,
+        'stoch_d': d,
+        'stoch_signal': signal
+    }
+
+
+def calculate_stochrsi(hist: pd.DataFrame, rsi_period: int = 14, stoch_period: int = 14,
+                       k_smoothing: int = 3, d_smoothing: int = 3) -> dict:
+    """Calculate Stochastic RSI (StochRSI).
+
+    StochRSI = (RSI - Lowest RSI over n-period) / (Highest RSI over n-period - Lowest RSI over n-period)
+    %K = SMA(StochRSI, k_smoothing)
+    %D = SMA(%K, d_smoothing)
+    Range: 0 to 100 (overbought: >80, oversold: <20)
+    """
+    if len(hist) < rsi_period + stoch_period:
+        return {
+            'stochrsi_k': None,
+            'stochrsi_d': None,
+            'stochrsi_signal': 'Insufficient data'
+        }
+
+    # First calculate RSI
+    rsi_values = hist['Close'].copy()
+
+    # Calculate price changes
+    delta = rsi_values.diff()
+
+    # Separate gains and losses
+    gains = delta.where(delta > 0, 0)
+    losses = -delta.where(delta < 0, 0)
+
+    # Calculate average gains and losses
+    avg_gains = gains.rolling(window=rsi_period).mean()
+    avg_losses = losses.rolling(window=rsi_period).mean()
+
+    # Calculate RS and RSI
+    rs = avg_gains / avg_losses
+    rsi = 100 - (100 / (1 + rs))
+
+    # Calculate StochRSI
+    lowest_rsi = rsi.rolling(window=stoch_period).min()
+    highest_rsi = rsi.rolling(window=stoch_period).max()
+
+    stochrsi = (rsi - lowest_rsi) / (highest_rsi - lowest_rsi)
+
+    # Apply smoothing to get %K
+    stochrsi_k = stochrsi.rolling(window=k_smoothing).mean()
+
+    # Calculate %D
+    stochrsi_d = stochrsi_k.rolling(window=d_smoothing).mean()
+
+    # Get current values
+    k = stochrsi_k.iloc[-1]
+    d = stochrsi_d.iloc[-1]
+
+    # Determine signal
+    if pd.isna(k) or pd.isna(d):
+        signal = 'N/A'
+    elif k >= 80:
+        signal = "Overbought"
+    elif k <= 20:
+        signal = "Oversold"
+    elif k > d:
+        signal = "Bullish crossover"
+    elif k < d:
+        signal = "Bearish crossover"
+    else:
+        signal = "Neutral"
+
+    return {
+        'stochrsi_k': k,
+        'stochrsi_d': d,
+        'stochrsi_signal': signal
+    }
+
+
 def calculate_calmar_ratio(cagr: Optional[float], max_drawdown: Optional[float]) -> Optional[float]:
     """Calculate Calmar Ratio (CAGR / Max Drawdown)."""
     if cagr is None or max_drawdown is None:
@@ -444,7 +706,11 @@ def calculate_premium_discount(current_price: float, nav_price: Optional[float])
 
 
 def calculate_tracking_error(etf_returns: pd.Series, benchmark_returns: pd.Series) -> Optional[float]:
-    """Calculate Tracking Error (standard deviation of excess returns)."""
+    """Calculate Tracking Error (standard deviation of excess returns).
+
+    Tracking error measures how closely an ETF follows its benchmark.
+    Low tracking error (<0.5%) is good for index ETFs.
+    """
     # Align the data
     aligned_data = pd.DataFrame({
         'etf': etf_returns,
@@ -457,7 +723,7 @@ def calculate_tracking_error(etf_returns: pd.Series, benchmark_returns: pd.Serie
     # Calculate excess returns (ETF - Benchmark)
     excess_returns = aligned_data['etf'] - aligned_data['benchmark']
 
-    # Annualized standard deviation of excess returns
+    # Annualized standard deviation of excess returns (as decimal)
     tracking_error = excess_returns.std() * np.sqrt(252)
 
     return tracking_error
@@ -487,11 +753,71 @@ def calculate_sortino_ratio(returns: pd.Series, risk_free_rate: float = RISK_FRE
     return sortino
 
 
-def calculate_risk_metrics(hist: pd.DataFrame, info: dict) -> dict:
+def get_liquidity_metrics(info: dict, hist: pd.DataFrame) -> dict:
+    """Get bid/ask spread, volume, and open interest for trading assets."""
+    metrics = {}
+
+    # Bid/Ask prices
+    bid = info.get('bid')
+    ask = info.get('ask')
+
+    if bid is not None and ask is not None:
+        metrics['bid'] = bid
+        metrics['ask'] = ask
+        spread = ask - bid
+        spread_pct = (spread / bid) * 100 if bid != 0 else None
+        metrics['spread'] = spread
+        metrics['spread_pct'] = spread_pct
+    else:
+        metrics['bid'] = None
+        metrics['ask'] = None
+        metrics['spread'] = None
+        metrics['spread_pct'] = None
+
+    # Previous close
+    prev_close = info.get('previousClose')
+    if prev_close:
+        metrics['prev_close'] = prev_close
+    else:
+        metrics['prev_close'] = None
+
+    # Volume
+    volume = info.get('volume')
+    if volume and volume > 0:
+        metrics['volume'] = volume
+    else:
+        # Try from hist
+        if not hist.empty and 'Volume' in hist.columns:
+            metrics['volume'] = hist['Volume'].iloc[-1]
+        else:
+            metrics['volume'] = None
+
+    # Open Interest (futures only)
+    open_interest = info.get('openInterest')
+    if open_interest and open_interest > 0:
+        metrics['open_interest'] = open_interest
+    else:
+        metrics['open_interest'] = None
+
+    return metrics
+
+
+def calculate_risk_metrics(hist: pd.DataFrame, info: dict, asset_symbol: Optional[str] = None) -> dict:
+    """Calculate all risk metrics for the asset.
+
+    Args:
+        hist: Historical price data
+        info: Ticker info dictionary
+        asset_symbol: Ticker symbol for ETF benchmark lookup
+    """
     """Calculate all risk metrics for the asset."""
     daily_returns = hist['Close'].pct_change().dropna()
 
     metrics = {}
+
+    # Liquidity metrics (bid/ask, volume, open interest)
+    liquidity = get_liquidity_metrics(info, hist)
+    metrics.update(liquidity)
 
     # Beta (requires sufficient data)
     if len(hist) >= 50:
@@ -541,6 +867,18 @@ def calculate_risk_metrics(hist: pd.DataFrame, info: dict) -> dict:
     macd_metrics = calculate_macd(hist)
     metrics.update(macd_metrics)
 
+    # Williams %R
+    williams_r_metrics = calculate_williams_r(hist)
+    metrics.update(williams_r_metrics)
+
+    # Stochastic Oscillator
+    stoch_metrics = calculate_stoch(hist)
+    metrics.update(stoch_metrics)
+
+    # Stochastic RSI
+    stochrsi_metrics = calculate_stochrsi(hist)
+    metrics.update(stochrsi_metrics)
+
     # Calmar Ratio (using 3Y CAGR)
     max_dd, _ = calculate_max_drawdown(hist)
     hist_5y = yf.Ticker(info.get('symbol', '')).history(period="5y")
@@ -575,12 +913,15 @@ def calculate_risk_metrics(hist: pd.DataFrame, info: dict) -> dict:
     nav_price = info.get('navPrice')
     metrics['premium_discount'] = calculate_premium_discount(current_price, nav_price)
 
-    # Tracking Error (for ETFs vs benchmark)
-    if len(hist) >= 50:
-        benchmark_returns = get_benchmark_data(hist)
+    # Tracking Error (for ETFs vs appropriate benchmark)
+    if len(hist) >= 50 and asset_symbol:
+        benchmark_returns = get_benchmark_data(hist, asset_symbol, for_tracking_error=True)
         metrics['tracking_error'] = calculate_tracking_error(daily_returns, benchmark_returns)
+        # Store which benchmark was used
+        metrics['tracking_error_benchmark'] = get_benchmark_ticker(asset_symbol)
     else:
         metrics['tracking_error'] = None
+        metrics['tracking_error_benchmark'] = None
 
     return metrics
 
@@ -690,14 +1031,96 @@ def print_risk_metrics_table(ticker_symbol: str, metrics: dict):
 
     # Format Tracking Error
     tracking_error = metrics.get('tracking_error')
+    te_benchmark = metrics.get('tracking_error_benchmark')
     if tracking_error is not None:
-        te_display = f"{tracking_error:.2%}"
+        if te_benchmark and te_benchmark != BENCHMARK_TICKER:
+            te_display = f"{tracking_error:.2%} (vs {te_benchmark})"
+        else:
+            te_display = f"{tracking_error:.2%}"
     else:
         te_display = "N/A"
+
+    # Format Williams %R (show both period 14 and period 2)
+    williams_r_14 = metrics.get('williams_r_14')
+    wr_signal_14 = metrics.get('williams_r_14_signal')
+    williams_r_2 = metrics.get('williams_r_2')
+    wr_signal_2 = metrics.get('williams_r_2_signal')
+
+    if williams_r_14 is not None and williams_r_2 is not None:
+        williams_r_display = f"P14: {williams_r_14:.1f} ({wr_signal_14}) | P2: {williams_r_2:.1f} ({wr_signal_2})"
+    elif williams_r_14 is not None:
+        williams_r_display = f"P14: {williams_r_14:.1f} ({wr_signal_14})"
+    else:
+        williams_r_display = "N/A"
+
+    # Format Stochastic Oscillator
+    stoch_k = metrics.get('stoch_k')
+    stoch_d = metrics.get('stoch_d')
+    stoch_signal = metrics.get('stoch_signal')
+    if stoch_k is not None and stoch_d is not None:
+        stoch_display = f"K: {stoch_k:.1f} | D: {stoch_d:.1f} ({stoch_signal})"
+    else:
+        stoch_display = "N/A"
+
+    # Format Stochastic RSI
+    stochrsi_k = metrics.get('stochrsi_k')
+    stochrsi_d = metrics.get('stochrsi_d')
+    stochrsi_signal = metrics.get('stochrsi_signal')
+    if stochrsi_k is not None and stochrsi_d is not None:
+        stochrsi_display = f"K: {stochrsi_k:.1f} | D: {stochrsi_d:.1f} ({stochrsi_signal})"
+    else:
+        stochrsi_display = "N/A"
+
+    # Format Bid/Ask
+    bid = metrics.get('bid')
+    ask = metrics.get('ask')
+    spread_pct = metrics.get('spread_pct')
+    if bid is not None and ask is not None:
+        if spread_pct is not None:
+            bidask_display = f"Bid: ${bid:.2f} | Ask: ${ask:.2f} | Spread: {spread_pct:.3f}%"
+        else:
+            bidask_display = f"Bid: ${bid:.2f} | Ask: ${ask:.2f}"
+    else:
+        bidask_display = "N/A"
+
+    # Format Volume
+    volume = metrics.get('volume')
+    if volume is not None and volume > 0:
+        if volume >= 1_000_000:
+            vol_display = f"{volume / 1_000_000:.1f}M"
+        elif volume >= 1_000:
+            vol_display = f"{volume / 1_000:.1f}K"
+        else:
+            vol_display = f"{volume:.0f}"
+    else:
+        vol_display = "N/A"
+
+    # Format Open Interest
+    open_interest = metrics.get('open_interest')
+    if open_interest is not None and open_interest > 0:
+        if open_interest >= 1_000_000:
+            oi_display = f"{open_interest / 1_000_000:.1f}M"
+        elif open_interest >= 1_000:
+            oi_display = f"{open_interest / 1_000:.1f}K"
+        else:
+            oi_display = f"{open_interest:.0f}"
+    else:
+        oi_display = "N/A"
+
+    # Format Previous Close
+    prev_close = metrics.get('prev_close')
+    if prev_close is not None:
+        prev_close_display = f"${prev_close:.2f}"
+    else:
+        prev_close_display = "N/A"
 
     # Build DataFrame
     data = {
         "Metric": [
+            "Bid/Ask",
+            "Volume",
+            "Open Interest",
+            "Previous Close",
             "Beta",
             "52W Range %",
             "52W from High %",
@@ -712,6 +1135,9 @@ def print_risk_metrics_table(ticker_symbol: str, metrics: dict):
             "MACD",
             "MACD Histogram",
             "MACD Trend",
+            "Williams %R (P14/P2)",
+            "Stochastic (K/D)",
+            "StochRSI (K/D)",
             "Sharpe Ratio",
             "Sortino Ratio",
             "Calmar Ratio",
@@ -728,6 +1154,10 @@ def print_risk_metrics_table(ticker_symbol: str, metrics: dict):
             "5Y CAGR",
         ],
         "Value": [
+            bidask_display,
+            vol_display,
+            oi_display,
+            prev_close_display,
             beta_display,
             f"{metrics.get('52w_range_percent'):.1f}%" if metrics.get('52w_range_percent') is not None else "N/A",
             f"{metrics.get('52w_percent_from_high'):.1f}%" if metrics.get('52w_percent_from_high') is not None else "N/A",
@@ -742,6 +1172,9 @@ def print_risk_metrics_table(ticker_symbol: str, metrics: dict):
             macd_display,
             macd_hist_display,
             metrics.get('macd_trend', 'N/A'),
+            williams_r_display,
+            stoch_display,
+            stochrsi_display,
             f"{metrics.get('sharpe_ratio'):.2f}" if metrics.get('sharpe_ratio') is not None else "N/A",
             f"{metrics.get('sortino_ratio'):.2f}" if metrics.get('sortino_ratio') is not None else "N/A",
             f"{metrics.get('calmar_ratio'):.2f}" if metrics.get('calmar_ratio') is not None else "N/A",
@@ -880,7 +1313,7 @@ def analyze_asset(ticker_symbol: str, period: str = "1y"):
     print(f"Type: {asset_type}\n")
 
     # Calculate risk metrics with 5y data for CAGR
-    metrics = calculate_risk_metrics(hist, info | {'symbol': ticker_symbol})
+    metrics = calculate_risk_metrics(hist, info | {'symbol': ticker_symbol}, asset_symbol=ticker_symbol)
 
     if asset_type == 'CRYPTO':
         analyze_crypto(ticker, hist, metrics)
