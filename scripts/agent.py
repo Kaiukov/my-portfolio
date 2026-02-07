@@ -3,6 +3,7 @@ import os
 import subprocess
 import logging
 import json
+import urllib.request
 from pathlib import Path
 from datetime import datetime
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
@@ -83,52 +84,58 @@ def run_startup_tasks():
         logger.info(f"  ℹ Startup script not found at {startup_script}")
 
 
-async def send_report_to_webhook(report_path: str, report_title: str):
-    """Send report to webhook URL using curl"""
+def find_latest_report(reports_dir: Path) -> Path | None:
+    """Find the most recently modified .html report in the reports directory."""
+    html_files = sorted(
+        reports_dir.glob("*.html"),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    return html_files[0] if html_files else None
+
+
+def send_report_to_webhook(report_path: Path) -> str | None:
+    """Send report to webhook URL using stdlib urllib."""
     if not WEBHOOK_URL:
         logger.info("  ℹ WEBHOOK_URL not set, skipping webhook send")
         return None
 
-    report_file = Path(report_path)
-    if not report_file.exists():
+    if not report_path.exists():
         logger.error(f"  ✗ Report file not found: {report_path}")
         return None
 
     try:
-        # Read HTML content
-        with open(report_file, 'r', encoding='utf-8') as f:
-            html_content = f.read()
+        html_content = report_path.read_text(encoding="utf-8")
 
-        payload = {
-            "reportTitle": report_title,
-            "reportPath": str(report_path),
-            "reportName": report_file.name,
+        payload = json.dumps({
+            "reportTitle": report_path.stem,
+            "reportName": report_path.name,
             "date": DATE,
-            "content": html_content
-        }
+            "content": html_content,
+        }).encode("utf-8")
 
-        # Use curl to send POST request
-        result = subprocess.run(
-            [
-                "curl", "-X", "POST",
-                "-H", "Content-Type: application/json",
-                "-d", json.dumps(payload),
-                WEBHOOK_URL
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30
+        req = urllib.request.Request(
+            WEBHOOK_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
 
-        if result.returncode == 0:
-            logger.info(f"  ✓ Report sent to webhook: {result.stdout}")
-            return result.stdout
-        else:
-            logger.error(f"  ✗ Webhook send failed: {result.stderr}")
-            return None
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8")
+            if resp.status < 300:
+                logger.info(f"  ✓ Report sent to webhook ({resp.status}): {body}")
+                return body
+            else:
+                logger.error(f"  ✗ Webhook returned {resp.status}: {body}")
+                return None
 
-    except subprocess.TimeoutExpired:
-        logger.error(f"  ✗ Webhook request timed out")
+    except urllib.error.HTTPError as e:
+        logger.error(f"  ✗ Webhook HTTP error {e.code}: {e.read().decode()}")
+    except urllib.error.URLError as e:
+        logger.error(f"  ✗ Webhook connection error: {e.reason}")
+    except TimeoutError:
+        logger.error("  ✗ Webhook request timed out")
     except Exception as e:
         logger.error(f"  ✗ Unexpected error: {e}")
     return None
@@ -213,19 +220,20 @@ async def main():
             logger.info(f"✅ Result: {message.result}")
             print(message.result)
 
-            # Parse JSON result and send to webhook
-            try:
-                result_data = json.loads(message.result) if isinstance(message.result, str) else message.result
-                report_path = result_data.get("reportPath")
-                report_title = result_data.get("reportTitle")
+    # Find latest report in reports/ and send to webhook
+    reports_dir = PROJECT_ROOT / "reports"
+    latest = find_latest_report(reports_dir)
 
-                if report_path and report_title:
-                    logger.info(f"📤 Sending report to webhook...")
-                    webhook_response = await send_report_to_webhook(report_path, report_title)
-                    if webhook_response:
-                        logger.info(f"✅ Webhook response: {webhook_response}")
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"⚠️ Could not parse result as JSON: {e}")
+    if latest:
+        logger.info(f"📄 Latest report: {latest.name}")
+        logger.info(f"📤 Sending report to webhook...")
+        webhook_response = send_report_to_webhook(latest)
+        if webhook_response:
+            logger.info(f"✅ Webhook delivered successfully")
+        else:
+            logger.error("❌ Webhook delivery failed")
+    else:
+        logger.warning("⚠️ No .html reports found in reports/")
 
     logger.info("Agent run completed")
 
