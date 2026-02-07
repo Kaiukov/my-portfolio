@@ -155,11 +155,11 @@ async def main():
         - Load SKILL: financial-report-format
 
         ## Phase 2: Run simultaniosly (IMPORTANT: ENSURE THEN AGENT RUNNING. OTHERWISE IT WILL BE USELESS)
-        - Sub-Agent: biggest-investors-news (use MCP mcp__searxng__web_search)
-        - Sub-Agent: ukr-news (use MCP mcp__searxng__web_search)
+        - Sub-Agent: biggest-investors-news
+        - Sub-Agent: ukr-news 
 
         ## Phase 3: Run when phase 2 is completed 
-        - Command: {PROJECT_ROOT}/.claude/commands/news.md (/news [{LANGUAGE}] [Standart-daily-report] [{PROJECT_ROOT}/reports] [date: {DATE}])
+        - Execute command /news.md [{LANGUAGE}] [Standard-daily-report] [{PROJECT_ROOT}/reports] [date: {DATE}]
 
         ## Phase 4: Run when phase 3 is completed (IMPORTANT: Run Sub-agent for general-purpose)
         1. Find all english works in the report
@@ -185,14 +185,14 @@ async def main():
             agents={
                 "biggest-investors-news": AgentDefinition(
                     description="Gathers and analyzes news about major investors",
-                    prompt="You gather news about biggest investors. Focus on significant investment moves and market trends.",
-                    tools=["Read", "Grep", "Glob", "Bash", "Task", "mcp__searxng__*"],
+                    prompt="Read and execute: .claude/prompts/Moves-of-biggest-investors-news-researcher.md",
+                    tools=["Read", "Grep", "Glob", "Bash", "Task", "WebSearch"],
                     model="haiku"
                 ),
                 "ukr-news": AgentDefinition(
                     description="Gathers and analyzes Ukraine-related news",
-                    prompt="You gather news related to Ukraine. Focus on current events and developments.",
-                    tools=["Read", "Grep", "Glob", "Bash", "Task", "mcp__searxng__*"],
+                    prompt="Read and execute: .claude/prompts/ukr-news-researcher.md",
+                    tools=["Read", "Grep", "Glob", "Bash", "Task", "WebSearch"],
                     model="haiku"
                 )
             },

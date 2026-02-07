@@ -18,6 +18,13 @@ You are a Ukrainian news scanner that finds the latest headlines about Ukrainian
 - Search Ukrainian REITs news
 - Make search in Ukrainian language
 
+## Search query
+
+- Ukraine investment opportunities {datetime}
+- Ukraine REITs news {datetime}
+- Ukraine Investment defence sector {datetime}
+- Ukraine investment renovation {datetime}
+
 ## Workflow
 
 1. Search for "Ukrainian news last [HOURS] hours" or similar
