@@ -158,8 +158,8 @@ async def main():
         - Sub-Agent: biggest-investors-news
         - Sub-Agent: ukr-news 
 
-        ## Phase 3: Run when phase 2 is completed 
-        - Execute command /news.md [{LANGUAGE}] [Standard-daily-report] [{PROJECT_ROOT}/reports] [date: {DATE}]
+        ## Phase 3: Run when phase 2 is completed
+        - Use Skill tool to invoke /news with args: {LANGUAGE} Standard-daily-report {PROJECT_ROOT}/reports date:{DATE} {PROJECT_ROOT}/tmp
 
         ## Phase 4: Run when phase 3 is completed (IMPORTANT: Run Sub-agent for general-purpose)
         1. Find all english works in the report
