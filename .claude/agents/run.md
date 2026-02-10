@@ -13,3 +13,5 @@
 
 3. Run next agents:
 - report-writer
+
+4. Run git commit and push changes
