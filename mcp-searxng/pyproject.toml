@@ -21,3 +21,6 @@ packages = ["src/mcp_searxng"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/mcp_searxng"]
+
+[tool.hatch.build]
+sources = ["src"]

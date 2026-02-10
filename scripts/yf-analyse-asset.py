@@ -260,7 +260,11 @@ def calculate_downside_deviation(returns: pd.Series, risk_free_rate: float = RIS
 
 
 def calculate_rsi(hist: pd.DataFrame, period: int = 14) -> Optional[float]:
-    """Calculate Relative Strength Index (RSI)."""
+    """Calculate Relative Strength Index (RSI) using Wilder's smoothing.
+
+    Wilder's smoothing uses EMA with alpha = 1/period (not standard 2/(period+1)).
+    This matches TradingView, Finviz, and other professional platforms.
+    """
     if len(hist) < period + 1:
         return None
 
@@ -270,18 +274,16 @@ def calculate_rsi(hist: pd.DataFrame, period: int = 14) -> Optional[float]:
     delta = close_prices.diff()
 
     # Separate gains and losses
-    gains = delta.where(delta > 0, 0)
-    losses = -delta.where(delta < 0, 0)
+    gains = delta.where(delta > 0, 0.0)
+    losses = (-delta).where(delta < 0, 0.0)
 
-    # Calculate average gains and losses using Wilder's smoothing
-    avg_gains = gains.rolling(window=period, min_periods=1).mean()
-    avg_losses = losses.rolling(window=period, min_periods=1).mean()
+    # Wilder's smoothing: EMA with alpha = 1/period
+    # This is equivalent to: new_avg = prev_avg * (period-1)/period + current * 1/period
+    avg_gains = gains.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    avg_losses = losses.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
 
-    # Use the first period as simple average, then apply Wilder's smoothing
-    first_avg_gain = gains.iloc[:period].mean()
-    first_avg_loss = losses.iloc[:period].mean()
-
-    if first_avg_loss == 0:
+    # Avoid division by zero
+    if avg_losses.iloc[-1] == 0:
         return 100.0
 
     # Calculate RS (Relative Strength)
@@ -1246,6 +1248,8 @@ def analyze_etf(ticker: yf.Ticker, hist: pd.DataFrame, info: dict, metrics: dict
     print(f"Category:           {info.get('category', 'N/A')}")
     print(f"Fund Family:        {info.get('fundFamily', 'N/A')}")
     print(f"Assets Under Mgmt:  ${info.get('totalAssets', 'N/A')}")
+
+    print("\n⚠️  ETF prices are dividend-adjusted (auto_adjust=True). Use auto_adjust=False for raw prices.")
 
 
 def analyze_stock(ticker: yf.Ticker, hist: pd.DataFrame, info: dict, metrics: dict):

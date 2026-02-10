@@ -9,14 +9,36 @@ import yfinance as yf
 
 
 tickers = {
+    # US Indices
     "S&P 500": "^GSPC",
-    "Russell 2000": "^RUT",
     "Nasdaq": "^IXIC",
+    "Nasdaq 100": "^NDX",
     "Dow Jones": "^DJI",
+    "Russell 2000": "^RUT",
+    "S&P Midcap 400": "^MID",
+    "S&P Smallcap 600": "^SML",
+    "S&P 100": "^OEX",
+    "VIX": "^VIX",
+    # Canadian
+    "TSX Composite": "^GSPTSE",
+    # Asia-Pacific
+    "Nikkei 225": "^N225",
+    "Hang Seng": "^HSI",
+    "ASX 200": "^AXJO",
+    "KOSPI": "^KS11",
+    "Sensex": "^BSESN",
+    # Europe
+    "FTSE 100": "^UKX",
+    "DAX": "^GDAXI",
+    "CAC 40": "^FCHI",
+    "Euro Stoxx 50": "^STOXX50E",
+    # Crypto
     "Bitcoin": "BTC-USD",
     "Ethereum": "ETH-USD",
+    # Commodities
     "Gold": "GC=F",
     "Silver": "SI=F",
+    # Forex
     "EUR/USD": "EURUSD=X",
     "GBP/USD": "GBPUSD=X",
     "USD/UAH": "USDUAH=X",
