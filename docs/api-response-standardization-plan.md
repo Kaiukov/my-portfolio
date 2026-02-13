@@ -2,6 +2,12 @@
 
 ## Status: DRAFT — Awaiting Approval
 
+### Changelog
+| Date | Change |
+|---|---|
+| 2026-02-13 | Initial draft |
+| 2026-02-13 | Added pagination for `transactions` and `report`; date range filters; eliminated all plain-text / markdown output |
+
 ---
 
 ## 1. Context
@@ -14,7 +20,10 @@ The portfolio CLI currently outputs responses in inconsistent formats:
 - Assessments are mixed into numeric values as tuples `[float, string]`
 - Some commands produce no machine-readable output at all (`add`, `delete`, `exchange`, `migrate`, `recalculate`, `verify_prices`)
 
-**Goal:** Every CLI command outputs **pure JSON always**, wrapped in a **standard response envelope**.
+**Goals:**
+1. Every CLI command outputs **pure JSON always** — zero plain text, zero markdown, zero table output
+2. All output wrapped in a **standard response envelope**
+3. `transactions` and `report` support **pagination** and **date range filtering**
 
 ---
 
@@ -64,6 +73,7 @@ Every command MUST return one of two shapes:
 - `data` — the actual payload (object or array)
 - `meta.generated_at` — UTC timestamp of response generation
 - `meta.count` — number of items when `data` is an array, otherwise `null`
+- `meta.pagination` — present only on paginated commands (see §5), otherwise omitted
 
 ### 3.2 Error
 
@@ -116,7 +126,93 @@ Applied everywhere: `returns`, `risk_metrics`, `risk_of_loss`, `drawdowns`, `con
 
 ---
 
-## 5. Per-Command Payload Specification
+## 5. Pagination & Date Filtering
+
+Applies to: **`transactions`** and **`report`** (daily returns).
+
+### 5.1 CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--limit` | int | `50` | Max rows returned per call |
+| `--offset` | int | `0` | Number of rows to skip (cursor-style pagination) |
+| `--start-date` | `YYYY-MM-DD` | none | Include rows on or after this date |
+| `--end-date` | `YYYY-MM-DD` | none | Include rows on or before this date |
+
+Date format for these flags is `YYYY-MM-DD` (ISO 8601), consistent with what the DB stores.
+`--start-date` / `--end-date` can be used independently or together.
+When no date flags are given, default behaviour returns the **latest 50 rows** (ordered descending by date, then re-ordered ascending in the response).
+
+### 5.2 Pagination Envelope Extension
+
+When a command is paginated the `meta` object gains a `pagination` key:
+
+```json
+{
+  "ok": true,
+  "command": "transactions",
+  "data": [ ... ],
+  "meta": {
+    "generated_at": "2026-02-13T10:00:00Z",
+    "count": 50,
+    "pagination": {
+      "limit": 50,
+      "offset": 0,
+      "total": 142,
+      "has_more": true,
+      "next_offset": 50
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `limit` | int | Rows requested (`--limit`) |
+| `offset` | int | Rows skipped (`--offset`) |
+| `total` | int | Total rows matching the current filter (date range or all) |
+| `has_more` | bool | `true` when `offset + count < total` |
+| `next_offset` | int\|null | Convenience value: `offset + limit`, or `null` when `has_more` is false |
+
+### 5.3 Date Filter Interaction
+
+| `--start-date` | `--end-date` | Behaviour |
+|---|---|---|
+| — | — | Latest 50 rows across all time |
+| set | — | Rows from `start_date` to latest, paginated |
+| — | set | Rows up to `end_date`, paginated |
+| set | set | Rows within range, paginated |
+
+`total` in `pagination` always reflects the filtered row count, not the full table size.
+
+### 5.4 Usage Examples
+
+```bash
+# Last 50 transactions (default)
+portfolio transactions
+
+# Page 2 of 50 (rows 51–100)
+portfolio transactions --offset 50
+
+# Custom page size
+portfolio transactions --limit 10 --offset 20
+
+# Date range only
+portfolio transactions --start-date 2024-01-01 --end-date 2024-12-31
+
+# Date range + pagination
+portfolio transactions --start-date 2024-01-01 --limit 20 --offset 40
+
+# Daily returns last 50 days (default)
+portfolio report
+
+# Returns for a specific month
+portfolio report --start-date 2024-11-01 --end-date 2024-11-30
+```
+
+---
+
+## 6. Per-Command Payload Specification
 
 ### `migrate`
 ```json
@@ -186,6 +282,9 @@ Applied everywhere: `returns`, `risk_metrics`, `risk_of_loss`, `drawdowns`, `con
 ```
 
 ### `transactions`
+
+Flags: `--limit` (default `50`), `--offset` (default `0`), `--start-date`, `--end-date`
+
 ```json
 [
   {
@@ -203,9 +302,15 @@ Applied everywhere: `returns`, `risk_metrics`, `risk_of_loss`, `drawdowns`, `con
   }
 ]
 ```
-`meta.count` = number of transactions.
+
+`meta.count` = rows returned in this page.
+`meta.pagination` = pagination object (see §5.2).
+Rows ordered **ascending by date** within the page.
 
 ### `report` (daily returns)
+
+Flags: `--limit` (default `50`), `--offset` (default `0`), `--start-date`, `--end-date`
+
 ```json
 [
   {
@@ -218,7 +323,10 @@ Applied everywhere: `returns`, `risk_metrics`, `risk_of_loss`, `drawdowns`, `con
   }
 ]
 ```
-`meta.count` = number of rows.
+
+`meta.count` = rows returned in this page.
+`meta.pagination` = pagination object (see §5.2).
+Rows ordered **ascending by date** within the page.
 
 ### `status`
 ```json
@@ -343,9 +451,9 @@ Applied everywhere: `returns`, `risk_metrics`, `risk_of_loss`, `drawdowns`, `con
 
 | Command | Current behaviour | After |
 |---|---|---|
-| `transactions` | `--format json` needed | JSON always |
-| `report` | `--format json` needed | JSON always |
-| `performance` | JSON by default (but with `--table`/`--md` flags) | JSON always; remove flags |
+| `transactions` | `--format json` needed; no pagination | JSON always; `--limit`, `--offset`, `--start-date`, `--end-date`; default last 50 rows |
+| `report` | `--format json` needed; no pagination | JSON always; `--limit`, `--offset`, `--start-date`, `--end-date`; default last 50 rows |
+| `performance` | JSON by default but with `--table`/`--md` flags | JSON always; remove `--table` / `--md` |
 | `summary` | table by default | JSON always |
 | `allocation` | table by default | JSON always |
 | `cash` | table by default | JSON always |
@@ -358,6 +466,7 @@ Applied everywhere: `returns`, `risk_metrics`, `risk_of_loss`, `drawdowns`, `con
 | `verify_prices` | plain text table | JSON always |
 
 **Flags to remove:** `--format`, `--table`, `--md`, `--export` (CSV export is a separate concern, out of scope here).
+**Flags to add on `transactions` and `report`:** `--limit`, `--offset`, `--start-date`, `--end-date`.
 
 ---
 
@@ -382,13 +491,21 @@ Wrap each command output with `success()` / `error()`:
 4. `exchange`
 5. `recalculate`
 6. `verify_prices`
-7. `transactions` — remove `--format` flag
-8. `report` — remove `--format` flag
+7. `transactions` — remove `--format`; add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
+8. `report` — remove `--format`; add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
 9. `status`
 10. `performance` — remove `--table` / `--md` flags
 11. `summary`
 12. `allocation`
 13. `cash`
+
+### Phase 3a — Service layer pagination support
+- Update `get_transactions(limit, offset, start_date, end_date)` in `portfolio_service.py`
+  - Add `LIMIT / OFFSET` to the DuckDB query
+  - Run a separate `COUNT(*)` query (same filter, no limit) for `pagination.total`
+- Update `get_daily_returns(limit, offset, start_date, end_date)` in `portfolio_service.py`
+  - Same pattern: filtered query + count query
+- Both queries order by `date DESC` for the fetch (latest first), then reverse in Python before returning so the response is ascending by date within each page
 
 ### Phase 4 — Error handling
 - Wrap all command bodies in try/except
@@ -406,7 +523,7 @@ Wrap each command output with `success()` / `error()`:
 | File | Change |
 |---|---|
 | `portfolio_db/response.py` | **CREATE** — envelope helpers |
-| `portfolio_db/portfolio_service.py` | Update `evaluate_metric`, `get_performance_stats` |
+| `portfolio_db/portfolio_service.py` | Update `evaluate_metric`, `get_performance_stats`; add pagination params to `get_transactions`, `get_daily_returns` |
 | `portfolio_db/cli.py` | Rewrite output logic for all 13 commands; remove format flags |
 | `tests/test_response_envelope.py` | **CREATE** — envelope tests |
 | `tests/test_calculator.py` | Update if assertions on old output format exist |
@@ -418,7 +535,7 @@ Wrap each command output with `success()` / `error()`:
 - CSV export (`--export`) — separate concern, leave as-is
 - HTTP/REST API layer — not requested
 - Authentication / rate limiting
-- Pagination (no command returns large enough datasets to warrant it now)
+- Pagination on commands other than `transactions` and `report`
 - Schema migrations
 
 ---
