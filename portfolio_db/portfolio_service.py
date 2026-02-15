@@ -98,6 +98,22 @@ class PortfolioService:
             for ret in returns
         ]
 
+    def get_daily_returns_paginated(self, limit: int = 50, offset: int = 0, start_date=None, end_date=None):
+        """Get paginated daily returns with optional date filter."""
+        rows, total = self.db.get_daily_returns_paginated(limit, offset, start_date, end_date)
+        data = [
+            {
+                'date': str(ret[0]),
+                'portfolio_value': float(ret[1]),
+                'portfolio_daily_return': float(ret[2]) if ret[2] is not None else 0.0,
+                'investment_return': float(ret[3]) if ret[3] is not None else 0.0,
+                'cash_flow_impact': float(ret[4]) if ret[4] is not None else 0.0,
+                'adjusted_base': float(ret[5]) if ret[5] is not None else 0.0,
+            }
+            for ret in rows
+        ]
+        return data, total
+
     def get_transactions(self) -> list:
         """Get all transactions as list of dicts."""
         transactions = self.db.get_transactions()
@@ -114,6 +130,19 @@ class PortfolioService:
             ) for i in range(len(col_names))}
             for trans in transactions
         ]
+
+    def get_transactions_paginated(self, limit: int = 50, offset: int = 0, start_date=None, end_date=None):
+        """Get paginated transactions with optional date filter."""
+        col_names = [
+            'id', 'date', 'asset', 'action', 'quantity',
+            'asset_type', 'price', 'currency', 'fees', 'exchange', 'data_source'
+        ]
+        rows, total = self.db.get_transactions_paginated(limit, offset, start_date, end_date)
+        data = [
+            {col_names[i]: (str(trans[i]) if i == 1 else trans[i]) for i in range(len(col_names))}
+            for trans in rows
+        ]
+        return data, total
 
     def export_returns_json(self, output_path: str):
         """Export daily returns to JSON."""
@@ -455,7 +484,8 @@ class PortfolioService:
             'hhi': lambda v: 'Diversified' if v < 0.15 else ('Moderate' if v < 0.25 else 'Concentrated'),
             'weighted_avg_exposure': lambda v: 'Low' if v < 0.1 else ('Moderate' if v < 0.2 else 'High'),
         }
-        return assessments.get(metric_name, lambda v: '')(value)
+        assessment = assessments.get(metric_name, lambda v: '')(value)
+        return {"value": round(float(value), 6), "assessment": assessment}
 
     def get_concentration_metrics(self) -> dict:
         """Calculate portfolio concentration metrics."""

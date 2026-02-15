@@ -134,6 +134,31 @@ class PortfolioDatabase:
             "SELECT * FROM transactions ORDER BY date, id"
         ).fetchall()
 
+    def get_transactions_paginated(self, limit: int, offset: int, start_date=None, end_date=None):
+        """Get transactions with optional date filter and pagination, ordered DESC then reversed."""
+        params = []
+        where = []
+        if start_date:
+            where.append("date >= ?")
+            params.append(start_date)
+        if end_date:
+            where.append("date <= ?")
+            params.append(end_date)
+        where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+        count_row = self.con.execute(
+            f"SELECT COUNT(*) FROM transactions {where_clause}", params
+        ).fetchone()
+        total = count_row[0] if count_row else 0
+
+        params_page = params + [limit, offset]
+        rows = self.con.execute(
+            f"SELECT * FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?",
+            params_page,
+        ).fetchall()
+        rows = list(reversed(rows))
+        return rows, total
+
     def get_transaction_count(self):
         """Get total transaction count."""
         result = self.con.execute("SELECT COUNT(*) FROM transactions").fetchone()
@@ -259,6 +284,34 @@ class PortfolioDatabase:
             """SELECT date, portfolio_value, portfolio_daily_return, investment_return,
                       cash_flow_impact, adjusted_base FROM daily_returns ORDER BY date"""
         ).fetchall()
+
+    def get_daily_returns_paginated(self, limit: int, offset: int, start_date=None, end_date=None):
+        """Get daily returns with optional date filter and pagination, ordered DESC then reversed."""
+        params = []
+        where = []
+        if start_date:
+            where.append("date >= ?")
+            params.append(start_date)
+        if end_date:
+            where.append("date <= ?")
+            params.append(end_date)
+        where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+        count_row = self.con.execute(
+            f"SELECT COUNT(*) FROM daily_returns {where_clause}", params
+        ).fetchone()
+        total = count_row[0] if count_row else 0
+
+        params_page = params + [limit, offset]
+        rows = self.con.execute(
+            f"""SELECT date, portfolio_value, portfolio_daily_return, investment_return,
+                       cash_flow_impact, adjusted_base
+                FROM daily_returns {where_clause}
+                ORDER BY date DESC LIMIT ? OFFSET ?""",
+            params_page,
+        ).fetchall()
+        rows = list(reversed(rows))
+        return rows, total
 
     def clear_daily_returns(self):
         """Clear all daily returns."""

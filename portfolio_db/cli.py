@@ -1,40 +1,26 @@
 """CLI interface for portfolio_db."""
 
-import json
-import csv
 import click
-from datetime import datetime
+import sys
+from datetime import datetime, date
 from portfolio_db.portfolio_service import PortfolioService
+from portfolio_db.response import success, error, build_pagination
 
 
-def format_currency(value, decimals=2):
-    """Format value as currency."""
-    if value is None or value == 0:
-        return "$0.00"
-    return f"${value:,.{decimals}f}"
+def _parse_date(value: str, flag: str) -> date:
+    """Parse YYYY-MM-DD string; call error() and exit on failure."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        error("_", "VALIDATION_ERROR", f"{flag} must be YYYY-MM-DD, got: {value!r}")
 
 
-def format_percent_colored(value):
-    """Format value as percentage with color."""
-    if value > 0:
-        return click.style(f"+{value:.2f}%", fg='green')
-    elif value < 0:
-        return click.style(f"{value:.2f}%", fg='red')
-    else:
-        return f"{value:.2f}%"
-
-
-def format_number(value):
-    """Format number with appropriate precision."""
-    if value == 0 or value is None:
-        return "0"
-    if abs(value) < 0.01:
-        return f"{value:.6f}"
-    if abs(value) < 1:
-        return f"{value:.4f}"
-    if abs(value) < 100:
-        return f"{value:.2f}"
-    return f"{value:,.2f}"
+def _parse_legacy_date(value: str, flag: str) -> date:
+    """Parse DD-MM-YYYY string (used by add / exchange / recalculate)."""
+    try:
+        return datetime.strptime(value, "%d-%m-%Y").date()
+    except ValueError:
+        error("_", "VALIDATION_ERROR", f"{flag} must be DD-MM-YYYY, got: {value!r}")
 
 
 @click.group()
@@ -43,135 +29,113 @@ def cli():
     pass
 
 
+# ─── migrate ──────────────────────────────────────────────────────────────────
+
 @cli.command()
-@click.option('--csv', default='yfiance-transactions/transactions.csv', help='Path to CSV file')
-@click.option('--db', default='portfolio.db', help='Path to database file')
+@click.option("--csv", default="yfiance-transactions/transactions.csv", help="Path to CSV file")
+@click.option("--db", default="portfolio.db", help="Path to database file")
 def migrate(csv, db):
     """Migrate transactions from CSV to DuckDB."""
     service = PortfolioService(db)
-    service.setup_from_csv(csv)
-    print(f"Migrated {service.db.get_transaction_count()} transactions")
-    service.close()
-
-
-@cli.command()
-@click.option('--format', type=click.Choice(['json', 'table']), default='json')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def report(format, db):
-    """Show daily returns report."""
-    service = PortfolioService(db)
-    returns = service.get_daily_returns()
-
-    if format == 'json':
-        # Output pure JSON for shell redirection
-        click.echo(json.dumps(returns, indent=2))
-    else:
-        # Table format
-        if not returns:
-            click.echo("No data")
-            service.close()
-            return
-
-        click.echo("\n" + "=" * 100)
-        click.echo("PORTFOLIO DAILY RETURNS (WITH SEPARATED METRICS)")
-        click.echo("=" * 100 + "\n")
-
-        click.echo(f"{'Date':<12} {'Portfolio Value':>18} {'Daily %':>12} {'Invest %':>12} {'Cash Flow':>15}")
-        click.echo("-" * 100)
-
-        for ret in returns:
-            date_str = ret['date']
-            value = ret['portfolio_value']
-            daily_ret = ret['portfolio_daily_return']
-            invest_ret = ret['investment_return']
-            cash_flow = ret['cash_flow_impact']
-            click.echo(f"{date_str:<12} ${value:>16,.2f} {daily_ret:>11.2f}% {invest_ret:>11.2f}% ${cash_flow:>13,.2f}")
-
-        click.echo("\n" + "=" * 100)
-        stats = service.get_performance_stats()
-        click.echo(f"Total days: {stats['total_days']}")
-        click.echo(f"Start value: ${stats['start_value']:,.2f}")
-        click.echo(f"End value: ${stats['end_value']:,.2f}")
-        click.echo(f"Total gain: ${stats['total_gain']:,.2f}")
-        click.echo(f"Avg daily return: {stats['avg_daily_return']:.4f}%")
-        click.echo(f"Avg investment return: {stats['avg_investment_return']:.4f}%")
-        click.echo(f"Total cash flow: ${stats['total_cash_flow']:,.2f}")
-        click.echo("=" * 100)
-
-    service.close()
-
-
-@cli.command()
-@click.option('--format', type=click.Choice(['json', 'table']), default='json')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def transactions(format, db):
-    """List all transactions."""
-    service = PortfolioService(db)
-    trans = service.get_transactions()
-
-    if format == 'json':
-        # Output pure JSON for shell redirection
-        click.echo(json.dumps(trans, indent=2))
-    else:
-        # Table format
-        if not trans:
-            click.echo("No transactions")
-            service.close()
-            return
-
-        click.echo(f"\n{'Date':<12} {'Asset':<15} {'Action':<10} {'Qty':>10} {'Type':<10}")
-        click.echo("-" * 70)
-
-        for t in trans:
-            asset_type = t['asset_type'] or '-'
-            click.echo(
-                f"{t['date']:<12} {t['asset']:<15} {t['action']:<10} "
-                f"{t['quantity']:>10.6f} {asset_type:<10}"
-            )
-
-    service.close()
-
-
-@cli.command()
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def status(db):
-    """Show portfolio status with separated return metrics."""
-    service = PortfolioService(db)
-    trans_count = service.db.get_transaction_count()
-    returns = service.get_daily_returns()
-    stats = service.get_performance_stats()
-
-    click.echo(f"Transactions: {trans_count}")
-    click.echo(f"Daily returns: {len(returns)}")
-    click.echo(f"Start date: {stats['start_date']}")
-    click.echo(f"End date: {stats['end_date']}")
-    click.echo(f"Current value: ${stats['end_value']:,.2f}")
-    click.echo(f"Total gain: ${stats['total_gain']:,.2f}")
-    click.echo(f"Avg investment return: {stats['avg_investment_return']:.4f}%")
-    click.echo(f"Total cash flow: ${stats['total_cash_flow']:,.2f}")
-
-    service.close()
-
-
-@cli.command()
-@click.option('--date', required=True, help='Transaction date (DD-MM-YYYY)')
-@click.option('--asset', required=True, help='Asset symbol')
-@click.option('--action', required=True, type=click.Choice(['BUY', 'SELL', 'DEPOSIT', 'FEE'], case_sensitive=False), help='Transaction action: BUY, SELL, DEPOSIT, or FEE')
-@click.option('--quantity', required=True, type=float, help='Transaction quantity')
-@click.option('--price', type=float, default=None, help='Asset price (optional)')
-@click.option('--currency', default='USD', help='Currency code (default USD)')
-@click.option('--fees', type=float, default=None, help='Transaction fees (optional)')
-@click.option('--exchange', default='', help='Exchange name (optional)')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def add(date, asset, action, quantity, price, currency, fees, exchange, db):
-    """Add transaction and auto-recalculate returns."""
     try:
-        # Parse and validate date
-        date_obj = datetime.strptime(date, '%d-%m-%Y').date()
-    except ValueError:
-        click.echo(f"Error: Invalid date format. Use DD-MM-YYYY", err=True)
-        return
+        service.setup_from_csv(csv)
+        count = service.db.get_transaction_count()
+        success("migrate", {"rows_imported": count, "source": csv, "db": db})
+    except Exception as e:
+        error("migrate", "DB_ERROR", str(e))
+    finally:
+        service.close()
 
+
+# ─── report ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--limit", default=50, type=int, help="Max rows (default 50)")
+@click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
+@click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
+@click.option("--end-date", default=None, help="Filter to date (YYYY-MM-DD)")
+@click.option("--db", default="portfolio.db", help="Path to database file")
+def report(limit, offset, start_date, end_date, db):
+    """Show daily returns report."""
+    sd = _parse_date(start_date, "--start-date") if start_date else None
+    ed = _parse_date(end_date, "--end-date") if end_date else None
+    service = PortfolioService(db)
+    try:
+        data, total = service.get_daily_returns_paginated(limit, offset, sd, ed)
+        pagination = build_pagination(limit, offset, total)
+        success("report", data, count=len(data), pagination=pagination)
+    except Exception as e:
+        error("report", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── transactions ─────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--limit", default=50, type=int, help="Max rows (default 50)")
+@click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
+@click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
+@click.option("--end-date", default=None, help="Filter to date (YYYY-MM-DD)")
+@click.option("--db", default="portfolio.db", help="Path to database file")
+def transactions(limit, offset, start_date, end_date, db):
+    """List transactions."""
+    sd = _parse_date(start_date, "--start-date") if start_date else None
+    ed = _parse_date(end_date, "--end-date") if end_date else None
+    service = PortfolioService(db)
+    try:
+        data, total = service.get_transactions_paginated(limit, offset, sd, ed)
+        pagination = build_pagination(limit, offset, total)
+        success("transactions", data, count=len(data), pagination=pagination)
+    except Exception as e:
+        error("transactions", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── status ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--db", default="portfolio.db", help="Path to database file")
+def status(db):
+    """Show portfolio status."""
+    service = PortfolioService(db)
+    try:
+        trans_count = service.db.get_transaction_count()
+        stats = service.get_performance_stats()
+        data = {
+            "transactions": trans_count,
+            "start_date": stats["start_date"],
+            "end_date": stats["end_date"],
+            "portfolio_value": stats["end_value"],
+            "total_invested": stats["total_cash_flow"],
+            "total_gain": stats["total_gain"],
+            "total_gain_pct": stats["total_return_pct"],
+            "as_of_date": str(date.today()),
+        }
+        success("status", data)
+    except Exception as e:
+        error("status", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── add ──────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
+@click.option("--asset", required=True, help="Asset symbol")
+@click.option("--action", required=True,
+              type=click.Choice(["BUY", "SELL", "DEPOSIT", "FEE"], case_sensitive=False))
+@click.option("--quantity", required=True, type=float)
+@click.option("--price", type=float, default=None)
+@click.option("--currency", default="USD")
+@click.option("--fees", type=float, default=None)
+@click.option("--exchange", default="")
+@click.option("--db", default="portfolio.db")
+def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
+    """Add a transaction and auto-recalculate returns."""
+    date_obj = _parse_legacy_date(date_str, "--date")
     service = PortfolioService(db)
     try:
         result = service.add_transaction(
@@ -182,645 +146,290 @@ def add(date, asset, action, quantity, price, currency, fees, exchange, db):
             price=price,
             currency=currency,
             fees=fees,
-            exchange=exchange
+            exchange=exchange,
         )
-
-        click.echo(f"✓ Transaction added (ID: {result['transaction_id']})")
-        click.echo(f"✓ {result['recalc_type'].upper()} recalculation triggered from {result['from_date']}")
+        trans = service.db.con.execute(
+            "SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source "
+            "FROM transactions WHERE id = ?", [result["transaction_id"]]
+        ).fetchone()
+        cols = ["id", "date", "asset", "action", "quantity", "asset_type", "price", "currency", "fees", "exchange", "data_source"]
+        trans_dict = {cols[i]: (str(trans[i]) if i == 1 else trans[i]) for i in range(len(cols))}
+        success("add", {"transaction": trans_dict, "recalculated": True})
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        error("add", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
+# ─── verify_prices ────────────────────────────────────────────────────────────
+
 @cli.command()
-@click.option('--db', default='portfolio.db', help='Path to database file')
+@click.option("--db", default="portfolio.db")
 def verify_prices(db):
     """Verify prices table structure and storage."""
     service = PortfolioService(db)
-    info = service.verify_prices_storage()
+    try:
+        info = service.verify_prices_storage()
+        stats = info.get("statistics", {})
+        tickers = info.get("ticker_breakdown", [])
+        data = {
+            "total_rows": stats.get("total_records", 0),
+            "unique_tickers": len(tickers),
+            "date_range": {
+                "start": str(stats.get("min_date", "")),
+                "end": str(stats.get("max_date", "")),
+            },
+            "issues": info.get("optimization_notes", []),
+        }
+        success("verify_prices", data)
+    except Exception as e:
+        error("verify_prices", "DB_ERROR", str(e))
+    finally:
+        service.close()
 
-    click.echo("\n" + "=" * 70)
-    click.echo("PRICES TABLE VERIFICATION")
-    click.echo("=" * 70 + "\n")
 
-    click.echo("Schema:")
-    for col in info['schema']:
-        pk_marker = " [PRIMARY KEY]" if col['is_primary_key'] else ""
-        click.echo(f"  - {col['column']}: {col['type']}{pk_marker}")
-
-    click.echo("\nStatistics:")
-    click.echo(f"  Total records: {info['statistics']['total_records']:,}")
-    click.echo(f"  Date range: {info['statistics']['min_date']} to {info['statistics']['max_date']}")
-    click.echo(f"  Days: {info['statistics']['date_range_days']}")
-
-    click.echo(f"\nUnique tickers: {len(info['ticker_breakdown'])}")
-    if info['ticker_breakdown']:
-        click.echo("  Top tickers by record count:")
-        for ticker_info in info['ticker_breakdown'][:10]:
-            click.echo(f"    - {ticker_info['ticker']}: {ticker_info['record_count']:,} records")
-
-    click.echo("\nOptimization Notes:")
-    for note in info['optimization_notes']:
-        click.echo(f"  ✓ {note}")
-
-    click.echo("\n" + "=" * 70)
-    service.close()
-
+# ─── recalculate ──────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.option('--force', is_flag=True, help='Force full recalculation (ignore optimization)')
-@click.option('--from-date', default=None, help='Recalculate from date (DD-MM-YYYY, None = full recalc)')
-@click.option('--db', default='portfolio.db', help='Path to database file')
+@click.option("--force", is_flag=True)
+@click.option("--from-date", default=None, help="Recalculate from date (DD-MM-YYYY)")
+@click.option("--db", default="portfolio.db")
 def recalculate(force, from_date, db):
     """Recalculate portfolio returns."""
-    from_date_obj = None
-
-    if from_date:
-        try:
-            from_date_obj = datetime.strptime(from_date, '%d-%m-%Y').date()
-        except ValueError:
-            click.echo(f"Error: Invalid date format. Use DD-MM-YYYY", err=True)
-            return
-
+    from_date_obj = _parse_legacy_date(from_date, "--from-date") if from_date else None
     service = PortfolioService(db)
     try:
         result = service.recalculate(from_date=from_date_obj, force=force)
-
-        if result['status'] == 'success':
-            if result['recalc_type'] == 'cached':
-                click.echo(f"✓ Using cached results (no recalculation needed)")
-                click.echo(f"  Message: {result.get('message', 'Cached data is current')}")
-            else:
-                click.echo(f"✓ Recalculation completed")
-                click.echo(f"  Type: {result['recalc_type'].upper()}")
-                click.echo(f"  Rows affected: {result['rows_affected']}")
+        if result.get("status") == "success":
+            data = {
+                "rows_affected": result.get("rows_affected", 0),
+                "from_date": str(result.get("from_date", "")),
+                "forced": force,
+                "recalc_type": result.get("recalc_type", ""),
+            }
+            success("recalculate", data)
         else:
-            click.echo(f"Error: {result.get('message', 'Unknown error')}", err=True)
+            error("recalculate", "INTERNAL_ERROR", result.get("message", "Unknown error"))
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        error("recalculate", "INTERNAL_ERROR", str(e))
     finally:
         service.close()
 
 
+# ─── allocation ───────────────────────────────────────────────────────────────
+
 @cli.command()
-@click.option('--type', type=click.Choice(['assets', 'cash', 'all']), default='all', help='Allocation type: assets only, cash only, or both')
-@click.option('--export', default=None, help='Export to CSV file (e.g., allocation.csv)')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def allocation(type, export, db):
+@click.option("--type", "allocation_type",
+              type=click.Choice(["assets", "cash", "all"]), default="all")
+@click.option("--db", default="portfolio.db")
+def allocation(allocation_type, db):
     """Show portfolio allocation breakdown."""
     service = PortfolioService(db)
-
     try:
-        data = service.get_allocation(allocation_type=type)
-        positions = data['positions']
-        summary = data['summary']
-        total_value = data['total_value']
-
-        if not positions:
-            click.echo("No positions found")
-            service.close()
-            return
-
-        # Export to CSV if requested
-        if export:
-            try:
-                with open(export, 'w', newline='') as csvfile:
-                    fieldnames = ['Symbol', 'Type', 'Value', 'Percentage']
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-
-                    for pos in positions:
-                        writer.writerow({
-                            'Symbol': pos['symbol'],
-                            'Type': pos['type'],
-                            'Value': f"{pos['value']:.2f}",
-                            'Percentage': f"{pos['percentage']:.2f}",
-                        })
-
-                    # Add summary rows
-                    for s in summary:
-                        writer.writerow({
-                            'Symbol': s['symbol'],
-                            'Type': s['type'],
-                            'Value': f"{s['value']:.2f}",
-                            'Percentage': f"{s['percentage']:.2f}",
-                        })
-
-                click.echo(f"✓ Exported allocation to {export}")
-            except Exception as e:
-                click.echo(f"Error exporting CSV: {str(e)}", err=True)
-            finally:
-                service.close()
-            return
-
-        # Display table
-        click.echo("\n" + "=" * 120)
-        click.echo(f"PORTFOLIO ALLOCATION - {type.upper()}")
-        click.echo("=" * 120 + "\n")
-
-        # Table header
-        header = (
-            f"{'Symbol':<20} "
-            f"{'Type':<10} "
-            f"{'Value':>15} "
-            f"{'Percentage':>15}"
-        )
-        click.echo(header)
-        click.echo("-" * 120)
-
-        # Table rows
-        for pos in positions:
-            symbol = pos['symbol']
-            pos_type = pos['type']
-            value = format_currency(pos['value'], 2)
-            percentage = f"{pos['percentage']:.2f}%"
-
-            click.echo(
-                f"{symbol:<20} "
-                f"{pos_type:<10} "
-                f"{value:>15} "
-                f"{percentage:>15}"
-            )
-
-        # Summary section
-        click.echo("\n" + "-" * 120)
-        for s in summary:
-            symbol = s['symbol']
-            s_type = s['type']
-            value = format_currency(s['value'], 2)
-            percentage = f"{s['percentage']:.2f}%"
-
-            click.echo(
-                f"{symbol:<20} "
-                f"{s_type:<10} "
-                f"{value:>15} "
-                f"{percentage:>15}"
-            )
-
-        click.echo("\n" + "=" * 120)
-
+        data = service.get_allocation(allocation_type=allocation_type)
+        success("allocation", data)
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        error("allocation", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
-@cli.command()
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def cash(db):
-    """Show actual cash balances with breakdown (converted to USD)."""
-    service = PortfolioService(db)
+# ─── cash ─────────────────────────────────────────────────────────────────────
 
+@cli.command()
+@click.option("--db", default="portfolio.db")
+def cash(db):
+    """Show actual cash balances (converted to USD)."""
+    service = PortfolioService(db)
     try:
         cash_balances = service.get_actual_cash_balances()
 
-        # Fetch FX rates from yfinance
-        fx_rates = {'EURUSD=X': 1.0, 'GBPUSD=X': 1.0}
+        fx_rates = {"EURUSD=X": 1.0, "GBPUSD=X": 1.0}
         try:
             import yfinance as yf
-            from datetime import date, timedelta
-
-            end_date = date.today()
-            start_date = end_date - timedelta(days=7)
-
-            for ticker in ['EURUSD=X', 'GBPUSD=X']:
+            from datetime import timedelta
+            end = date.today()
+            start = end - timedelta(days=7)
+            for ticker in ["EURUSD=X", "GBPUSD=X"]:
                 try:
-                    data = yf.Ticker(ticker).history(start=start_date, end=end_date)
-                    if not data.empty:
-                        fx_rates[ticker] = float(data['Close'].iloc[-1])
-                except:
+                    hist = yf.Ticker(ticker).history(start=start, end=end)
+                    if not hist.empty:
+                        fx_rates[ticker] = float(hist["Close"].iloc[-1])
+                except Exception:
                     pass
-        except:
+        except Exception:
             pass
 
-        click.echo("\n" + "=" * 110)
-        click.echo("ACTUAL CASH BALANCES (USD EQUIVALENT)")
-        click.echo("=" * 110 + "\n")
+        result = []
+        for currency_key, bal_data in cash_balances.items():
+            balance = bal_data["balance"]
+            deposits = bal_data["deposits"]
+            spent = bal_data["spent"]
+            received = bal_data["received"]
 
-        click.echo(f"{'Currency':<15} {'Balance (USD equiv)':>20} {'Deposits':>18} {'Spent on BUY':>18} {'Received from SELL':>20}")
-        click.echo("-" * 110)
-
-        total_balance_usd = 0.0
-        for currency, data in cash_balances.items():
-            balance = data['balance']
-            deposits = data['deposits']
-            spent = data['spent']
-            received = data['received']
-
-            # Skip if no activity at all
             if balance == 0 and deposits == 0 and spent == 0 and received == 0:
                 continue
 
-            # Convert to USD for FX pairs
-            if currency == 'EURUSD=X':
-                fx_rate = fx_rates['EURUSD=X']
-                balance_usd = balance * fx_rate
-                deposits_usd = deposits * fx_rate
-                spent_usd = spent * fx_rate
-                received_usd = received * fx_rate
-                currency_display = f"EUR (rate: {fx_rate:.4f})"
-            elif currency == 'GBPUSD=X':
-                fx_rate = fx_rates['GBPUSD=X']
-                balance_usd = balance * fx_rate
-                deposits_usd = deposits * fx_rate
-                spent_usd = spent * fx_rate
-                received_usd = received * fx_rate
-                currency_display = f"GBP (rate: {fx_rate:.4f})"
+            if currency_key == "EURUSD=X":
+                fx_rate = fx_rates["EURUSD=X"]
+                currency = "EUR"
+            elif currency_key == "GBPUSD=X":
+                fx_rate = fx_rates["GBPUSD=X"]
+                currency = "GBP"
             else:
-                balance_usd = balance
-                deposits_usd = deposits
-                spent_usd = spent
-                received_usd = received
-                currency_display = currency
+                fx_rate = 1.0
+                currency = currency_key
 
-            balance_str = format_currency(balance_usd)
-            deposits_str = format_currency(deposits_usd)
-            spent_str = format_currency(spent_usd)
-            received_str = format_currency(received_usd)
+            result.append({
+                "currency": currency,
+                "balance": round(balance, 6),
+                "usd_value": round(balance * fx_rate, 2),
+                "fx_rate": fx_rate,
+                "deposits": round(deposits * fx_rate, 2),
+                "spent": round(spent * fx_rate, 2),
+                "received": round(received * fx_rate, 2),
+            })
 
-            click.echo(
-                f"{currency_display:<15} {balance_str:>20} {deposits_str:>18} "
-                f"{spent_str:>18} {received_str:>20}"
-            )
-
-            # Add to total (all in USD)
-            total_balance_usd += balance_usd
-
-        click.echo("-" * 110)
-        click.echo(f"{'TOTAL CASH (USD)':<15} {format_currency(total_balance_usd):>20}")
-        click.echo("\n" + "=" * 110)
-
+        success("cash", result, count=len(result))
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
-        import traceback
-        traceback.print_exc()
+        error("cash", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
-@cli.command()
-@click.option('--id', required=True, type=int, help='Transaction ID to delete')
-@click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def delete(id, confirm, db):
-    """Delete transaction by ID and auto-recalculate returns."""
-    service = PortfolioService(db)
+# ─── delete ───────────────────────────────────────────────────────────────────
 
+@cli.command()
+@click.option("--id", "trans_id", required=True, type=int)
+@click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
+@click.option("--db", default="portfolio.db")
+def delete(trans_id, confirm, db):
+    """Delete a transaction by ID and auto-recalculate returns."""
+    service = PortfolioService(db)
     try:
-        # Get transaction to confirm
         trans = service.db.con.execute(
             "SELECT id, date, asset, action, quantity, price FROM transactions WHERE id = ?",
-            [id]
+            [trans_id],
         ).fetchone()
 
         if not trans:
-            click.echo(f"Error: Transaction ID {id} not found", err=True)
-            service.close()
-            return
+            error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
 
-        # Show transaction details
-        click.echo(f"\nTransaction to delete (ID: {trans[0]}):")
-        click.echo(f"  Date:     {trans[1]}")
-        click.echo(f"  Asset:    {trans[2]}")
-        click.echo(f"  Action:   {trans[3]}")
-        click.echo(f"  Quantity: {trans[4]}")
-        click.echo(f"  Price:    {trans[5]}")
-
-        # Ask for confirmation
         if not confirm:
-            if not click.confirm("\nAre you sure you want to delete this transaction?"):
-                click.echo("Cancelled")
-                service.close()
-                return
+            # Non-interactive: require --confirm flag; output error envelope
+            error("delete", "VALIDATION_ERROR",
+                  "Pass --confirm to delete without interactive prompt")
 
-        # Delete and recalculate
-        result = service.delete_transaction(id)
-
-        click.echo(f"\n✓ Transaction deleted (ID: {result['transaction_id']})")
-        click.echo(f"✓ {result['recalc_type'].upper()} recalculation triggered from {result['from_date']}")
-        click.echo(f"✓ {result['rows_affected']} daily returns recalculated")
-
+        result = service.delete_transaction(trans_id)
+        success("delete", {"deleted_id": result["transaction_id"], "recalculated": True})
+    except SystemExit:
+        raise
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        error("delete", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
+# ─── performance ──────────────────────────────────────────────────────────────
+
 @cli.command()
-@click.option('--db', default='portfolio.db', help='Path to database file')
-@click.option('--table', 'table_output', is_flag=True, help='Output as human-readable table')
-@click.option('--md', 'md_output', is_flag=True, help='Output as Markdown format')
-def performance(db, table_output, md_output):
-    """Show performance metrics (JSON by default, use --table or --md for readable format)."""
-    import json
+@click.option("--db", default="portfolio.db")
+def performance(db):
+    """Show performance metrics."""
     service = PortfolioService(db)
-    stats = service.get_performance_stats()
-    concentration = service.get_concentration_metrics()
+    try:
+        stats = service.get_performance_stats()
+        concentration = service.get_concentration_metrics()
 
-    # Helper for metric evaluation
-    def eval_metric(name, value):
-        return service.evaluate_metric(name, value)
+        def m(name, value):
+            return service.evaluate_metric(name, value)
 
-    if md_output:
-        # Markdown output
-        click.echo("# Portfolio Performance Metrics\n")
-        click.echo("## Period")
-        click.echo(f"- **Dates:** {stats['start_date']} to {stats['end_date']}")
-        click.echo(f"- **Total Days:** {stats['total_days']}\n")
-
-        click.echo("## Portfolio Values")
-        click.echo(f"| Metric | Value |")
-        click.echo(f"|--------|-------|")
-        click.echo(f"| Start Value | ${stats['start_value']:,.2f} |")
-        click.echo(f"| End Value | ${stats['end_value']:,.2f} |")
-        click.echo(f"| Total Gain | ${stats['total_gain']:,.2f} |")
-        click.echo(f"| Cash Flow (deposits) | ${stats['total_cash_flow']:,.2f} |")
-        click.echo(f"| Net Gain (excl. deposits) | ${stats['net_gain']:,.2f} |\n")
-
-        click.echo("## Returns")
-        click.echo(f"| Metric | Value | Assessment |")
-        click.echo(f"|--------|-------|------------|")
-        click.echo(f"| Total Return | {stats['total_return_pct']:.2f}% | {eval_metric('total_return_pct', stats['total_return_pct'])} |")
-        click.echo(f"| CAGR (annual) | {stats['cagr']:.2f}% | {eval_metric('cagr', stats['cagr'])} |")
-        click.echo(f"| Avg Daily Return | {stats['avg_daily_return']:.4f}% | {eval_metric('avg_daily_return', stats['avg_daily_return'])} |")
-        click.echo(f"| Avg Monthly Return | {stats['avg_monthly_return']:.2f}% | {eval_metric('avg_monthly_return', stats['avg_monthly_return'])} |\n")
-
-        click.echo("## Risk Metrics")
-        click.echo(f"| Metric | Value | Assessment |")
-        click.echo(f"|--------|-------|------------|")
-        click.echo(f"| Standard Deviation | {stats['std_dev']:.4f}% | {eval_metric('std_dev', stats['std_dev'])} |")
-        click.echo(f"| Historical Volatility (ann) | {stats['hist_volatility']:.4f}% | {eval_metric('hist_volatility', stats['hist_volatility'])} |")
-        click.echo(f"| Beta (β) vs SPY | {stats['beta']:.4f} | {eval_metric('beta', stats['beta'])} |")
-        click.echo(f"| Sharpe Ratio | {stats['sharpe_ratio']:.4f} | {eval_metric('sharpe_ratio', stats['sharpe_ratio'])} |")
-        click.echo(f"| Sortino Ratio | {stats['sortino_ratio']:.4f} | {eval_metric('sortino_ratio', stats['sortino_ratio'])} |")
-        click.echo(f"| Treynor Ratio | {stats['treynor_ratio']:.4f} | {eval_metric('treynor_ratio', stats['treynor_ratio'])} |")
-        click.echo(f"| Information Ratio | {stats['information_ratio']:.4f} | {eval_metric('information_ratio', stats['information_ratio'])} |")
-        click.echo(f"| Jensen\\'s Alpha | {stats['jensens_alpha']:.4f}% | {eval_metric('jensens_alpha', stats['jensens_alpha'])} |")
-        click.echo(f"| Relative Return vs SPY | {stats['relative_return']:.4f}% | {eval_metric('relative_return', stats['relative_return'])} |")
-        click.echo(f"| Tracking Error | {stats['tracking_error']:.4f}% | {eval_metric('tracking_error', stats['tracking_error'])} |\n")
-
-        click.echo("## Risk of Loss")
-        click.echo(f"| Metric | Value | Assessment |")
-        click.echo(f"|--------|-------|------------|")
-        click.echo(f"| VaR 95% (daily) | {stats['var_95']:.4f}% | {eval_metric('var_95', stats['var_95'])} |")
-        click.echo(f"| VaR 99% (daily) | {stats['var_99']:.4f}% | {eval_metric('var_99', stats['var_99'])} |")
-        click.echo(f"| CVaR 95% (daily) | {stats['cvar_95']:.4f}% | {eval_metric('cvar_95', stats['cvar_95'])} |")
-        click.echo(f"| CVaR 99% (daily) | {stats['cvar_99']:.4f}% | {eval_metric('cvar_99', stats['cvar_99'])} |\n")
-
-        click.echo("## Drawdowns")
-        click.echo(f"| Metric | Value | Assessment |")
-        click.echo(f"|--------|-------|------------|")
-        click.echo(f"| Max Drawdown | {stats['max_drawdown']:.4f}% | {eval_metric('max_drawdown', stats['max_drawdown'])} |")
-        click.echo(f"| Avg Drawdown | {stats['avg_drawdown']:.4f}% | {eval_metric('avg_drawdown', stats['avg_drawdown'])} |")
-        click.echo(f"| Avg Drawdown Duration | {stats['avg_drawdown_duration']:.1f} days | {eval_metric('avg_drawdown_duration', stats['avg_drawdown_duration'])} |\n")
-
-        click.echo("## Concentration")
-        click.echo(f"| Metric | Value | Assessment |")
-        click.echo(f"|--------|-------|------------|")
-        click.echo(f"| HHI (Herfindahl Index) | {concentration['hhi']:.4f} | {eval_metric('hhi', concentration['hhi'])} |")
-        click.echo(f"| Weighted Avg Exposure | {concentration['weighted_avg_exposure']:.4f} | {eval_metric('weighted_avg_exposure', concentration['weighted_avg_exposure'])} |")
-        click.echo(f"| Number of Positions | {concentration['num_positions']} | - |\n")
-
-    elif table_output:
-        # Human-readable table output
-        click.echo("\n" + "=" * 80)
-        click.echo("PORTFOLIO PERFORMANCE METRICS")
-        click.echo("=" * 80 + "\n")
-
-        click.echo(f"{'Period:':<30} {stats['start_date']} to {stats['end_date']}")
-        click.echo(f"{'Total days:':<30} {stats['total_days']}")
-        click.echo("-" * 80)
-
-        click.echo(f"{'Start Value:':<30} ${stats['start_value']:,.2f}")
-        click.echo(f"{'End Value:':<30} ${stats['end_value']:,.2f}")
-        click.echo(f"{'Total Gain:':<30} ${stats['total_gain']:,.2f}")
-        click.echo(f"{'Cash Flow (deposits):':<30} ${stats['total_cash_flow']:,.2f}")
-        click.echo(f"{'Net Gain (excl. deposits):':<30} ${stats['net_gain']:,.2f}")
-        click.echo("-" * 80)
-
-        click.echo(f"{'Total Return:':<30} {stats['total_return_pct']:>10.2f}%   {eval_metric('total_return_pct', stats['total_return_pct'])}")
-        click.echo(f"{'CAGR (annual):':<30} {stats['cagr']:>10.2f}%   {eval_metric('cagr', stats['cagr'])}")
-        click.echo(f"{'Avg Daily Return:':<30} {stats['avg_daily_return']:>10.4f}%   {eval_metric('avg_daily_return', stats['avg_daily_return'])}")
-        click.echo(f"{'Avg Monthly Return:':<30} {stats['avg_monthly_return']:>10.2f}%   {eval_metric('avg_monthly_return', stats['avg_monthly_return'])}")
-        click.echo("-" * 80)
-        click.echo(f"{'Standard Deviation:':<30} {stats['std_dev']:>10.4f}%   {eval_metric('std_dev', stats['std_dev'])}")
-        click.echo(f"{'Historical Volatility (ann):':<30} {stats['hist_volatility']:>10.4f}%   {eval_metric('hist_volatility', stats['hist_volatility'])}")
-        click.echo(f"{'Sharpe Ratio:':<30} {stats['sharpe_ratio']:>10.4f}   {eval_metric('sharpe_ratio', stats['sharpe_ratio'])}")
-        click.echo(f"{'Sortino Ratio:':<30} {stats['sortino_ratio']:>10.4f}   {eval_metric('sortino_ratio', stats['sortino_ratio'])}")
-        click.echo(f"{'Treynor Ratio:':<30} {stats['treynor_ratio']:>10.4f}   {eval_metric('treynor_ratio', stats['treynor_ratio'])}")
-        click.echo(f"{'Information Ratio:':<30} {stats['information_ratio']:>10.4f}   {eval_metric('information_ratio', stats['information_ratio'])}")
-        click.echo(f"{'Jensens Alpha:':<30} {stats['jensens_alpha']:>10.4f}%   {eval_metric('jensens_alpha', stats['jensens_alpha'])}")
-        click.echo(f"{'Relative Return vs SPY:':<30} {stats['relative_return']:>10.4f}%   {eval_metric('relative_return', stats['relative_return'])}")
-        click.echo(f"{'Tracking Error:':<30} {stats['tracking_error']:>10.4f}%   {eval_metric('tracking_error', stats['tracking_error'])}")
-        click.echo(f"{'Beta (β) vs SPY:':<30} {stats['beta']:>10.4f}   {eval_metric('beta', stats['beta'])}")
-        click.echo("-" * 80)
-        click.echo(f"{'VaR 95% (daily):':<30} {stats['var_95']:>10.4f}%   {eval_metric('var_95', stats['var_95'])}")
-        click.echo(f"{'VaR 99% (daily):':<30} {stats['var_99']:>10.4f}%   {eval_metric('var_99', stats['var_99'])}")
-        click.echo(f"{'CVaR 95% (daily):':<30} {stats['cvar_95']:>10.4f}%   {eval_metric('cvar_95', stats['cvar_95'])}")
-        click.echo(f"{'CVaR 99% (daily):':<30} {stats['cvar_99']:>10.4f}%   {eval_metric('cvar_99', stats['cvar_99'])}")
-        click.echo(f"{'Max Drawdown:':<30} {stats['max_drawdown']:>10.4f}%   {eval_metric('max_drawdown', stats['max_drawdown'])}")
-        click.echo(f"{'Avg Drawdown:':<30} {stats['avg_drawdown']:>10.4f}%   {eval_metric('avg_drawdown', stats['avg_drawdown'])}")
-        click.echo(f"{'Avg Drawdown Duration:':<30} {stats['avg_drawdown_duration']:>10.1f} days   {eval_metric('avg_drawdown_duration', stats['avg_drawdown_duration'])}")
-
-        click.echo("\n" + "=" * 80)
-        click.echo("CONCENTRATION")
-        click.echo("=" * 80 + "\n")
-
-        click.echo(f"{'HHI (Herfindahl Index):':<30} {concentration['hhi']:>10.4f}   {eval_metric('hhi', concentration['hhi'])}")
-        click.echo(f"{'Weighted Avg Exposure:':<30} {concentration['weighted_avg_exposure']:>10.4f}   {eval_metric('weighted_avg_exposure', concentration['weighted_avg_exposure'])}")
-        click.echo(f"{'Number of Positions:':<30} {concentration['num_positions']:>10}")
-
-        click.echo("\n" + "=" * 80)
-    else:
-        # JSON output (default)
         result = {
             "period": {
-                "start_date": stats['start_date'],
-                "end_date": stats['end_date'],
-                "total_days": stats['total_days']
+                "start_date": stats["start_date"],
+                "end_date": stats["end_date"],
+                "total_days": stats["total_days"],
             },
             "values": {
-                "start_value": stats['start_value'],
-                "end_value": stats['end_value'],
-                "total_gain": stats['total_gain'],
-                "net_gain": stats['net_gain'],
-                "cash_flow": stats['total_cash_flow']
+                "start_value": stats["start_value"],
+                "end_value": stats["end_value"],
+                "total_gain": stats["total_gain"],
+                "net_gain": stats["net_gain"],
+                "cash_flow": stats["total_cash_flow"],
             },
             "returns": {
-                "total_return_pct": [stats['total_return_pct'], eval_metric('total_return_pct', stats['total_return_pct'])],
-                "cagr_pct": [stats['cagr'], eval_metric('cagr', stats['cagr'])],
-                "avg_daily_return_pct": [stats['avg_daily_return'], eval_metric('avg_daily_return', stats['avg_daily_return'])],
-                "avg_monthly_return_pct": [stats['avg_monthly_return'], eval_metric('avg_monthly_return', stats['avg_monthly_return'])]
+                "total_return_pct": m("total_return_pct", stats["total_return_pct"]),
+                "cagr_pct": m("cagr", stats["cagr"]),
+                "avg_daily_return_pct": m("avg_daily_return", stats["avg_daily_return"]),
+                "avg_monthly_return_pct": m("avg_monthly_return", stats["avg_monthly_return"]),
             },
             "risk_metrics": {
-                "std_dev_pct": [stats['std_dev'], eval_metric('std_dev', stats['std_dev'])],
-                "hist_volatility_pct": [stats['hist_volatility'], eval_metric('hist_volatility', stats['hist_volatility'])],
-                "beta": [stats['beta'], eval_metric('beta', stats['beta'])],
-                "sharpe_ratio": [stats['sharpe_ratio'], eval_metric('sharpe_ratio', stats['sharpe_ratio'])],
-                "sortino_ratio": [stats['sortino_ratio'], eval_metric('sortino_ratio', stats['sortino_ratio'])],
-                "treynor_ratio": [stats['treynor_ratio'], eval_metric('treynor_ratio', stats['treynor_ratio'])],
-                "information_ratio": [stats['information_ratio'], eval_metric('information_ratio', stats['information_ratio'])],
-                "jensens_alpha": [stats['jensens_alpha'], eval_metric('jensens_alpha', stats['jensens_alpha'])],
-                "relative_return": [stats['relative_return'], eval_metric('relative_return', stats['relative_return'])],
-                "tracking_error": [stats['tracking_error'], eval_metric('tracking_error', stats['tracking_error'])]
+                "std_dev_pct": m("std_dev", stats["std_dev"]),
+                "hist_volatility_pct": m("hist_volatility", stats["hist_volatility"]),
+                "beta": m("beta", stats["beta"]),
+                "sharpe_ratio": m("sharpe_ratio", stats["sharpe_ratio"]),
+                "sortino_ratio": m("sortino_ratio", stats["sortino_ratio"]),
+                "treynor_ratio": m("treynor_ratio", stats["treynor_ratio"]),
+                "information_ratio": m("information_ratio", stats["information_ratio"]),
+                "jensens_alpha": m("jensens_alpha", stats["jensens_alpha"]),
+                "relative_return": m("relative_return", stats["relative_return"]),
+                "tracking_error": m("tracking_error", stats["tracking_error"]),
             },
             "risk_of_loss": {
-                "var_95_pct": [stats['var_95'], eval_metric('var_95', stats['var_95'])],
-                "var_99_pct": [stats['var_99'], eval_metric('var_99', stats['var_99'])],
-                "cvar_95_pct": [stats['cvar_95'], eval_metric('cvar_95', stats['cvar_95'])],
-                "cvar_99_pct": [stats['cvar_99'], eval_metric('cvar_99', stats['cvar_99'])]
+                "var_95_pct": m("var_95", stats["var_95"]),
+                "var_99_pct": m("var_99", stats["var_99"]),
+                "cvar_95_pct": m("cvar_95", stats["cvar_95"]),
+                "cvar_99_pct": m("cvar_99", stats["cvar_99"]),
             },
             "drawdowns": {
-                "max_drawdown_pct": [stats['max_drawdown'], eval_metric('max_drawdown', stats['max_drawdown'])],
-                "avg_drawdown_pct": [stats['avg_drawdown'], eval_metric('avg_drawdown', stats['avg_drawdown'])],
-                "avg_drawdown_duration_days": [stats['avg_drawdown_duration'], eval_metric('avg_drawdown_duration', stats['avg_drawdown_duration'])]
+                "max_drawdown_pct": m("max_drawdown", stats["max_drawdown"]),
+                "avg_drawdown_pct": m("avg_drawdown", stats["avg_drawdown"]),
+                "avg_drawdown_duration_days": m("avg_drawdown_duration", stats["avg_drawdown_duration"]),
             },
             "concentration": {
-                "hhi": [concentration['hhi'], eval_metric('hhi', concentration['hhi'])],
-                "weighted_avg_exposure": [concentration['weighted_avg_exposure'], eval_metric('weighted_avg_exposure', concentration['weighted_avg_exposure'])],
-                "num_positions": concentration['num_positions']
-            }
+                "hhi": m("hhi", concentration["hhi"]),
+                "weighted_avg_exposure": m("weighted_avg_exposure", concentration["weighted_avg_exposure"]),
+                "num_positions": concentration["num_positions"],
+            },
         }
-        click.echo(json.dumps(result, indent=2))
-
-    service.close()
-
-
-@cli.command()
-@click.option('--filter', type=click.Choice(['open', 'all']), default='all', help='Filter positions (open=held, all=including closed)')
-@click.option('--export', default=None, help='Export to CSV file (e.g., portfolio.csv)')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def summary(filter, export, db):
-    """Show portfolio position summary with gains/losses."""
-    service = PortfolioService(db)
-
-    try:
-        include_closed = (filter == 'all')
-        positions = service.get_position_summary(include_closed=include_closed)
-
-        if not positions:
-            click.echo("No positions found")
-            service.close()
-            return
-
-        # Export to CSV if requested
-        if export:
-            try:
-                with open(export, 'w', newline='') as csvfile:
-                    fieldnames = [
-                        'Symbol', 'Status', 'Shares', 'Last Price', 'AC/Share',
-                        'Total Cost', 'Market Value',
-                        'Day Gain %', 'Day Gain $', 'Total Gain %', 'Total Gain $',
-                        'Realized Gain $', 'Realized Gain %'
-                    ]
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-
-                    for pos in positions:
-                        writer.writerow({
-                            'Symbol': pos['symbol'],
-                            'Status': pos['status'],
-                            'Shares': f"{pos['shares']:.6f}".rstrip('0').rstrip('.'),
-                            'Last Price': f"{pos['last_price']:.2f}" if pos['last_price'] else "0",
-                            'AC/Share': f"{pos['avg_cost_per_share']:.2f}",
-                            'Total Cost': f"{pos['total_cost']:.2f}",
-                            'Market Value': f"{pos['market_value']:.2f}",
-                            'Day Gain %': f"{pos['day_gain_pct']:.2f}",
-                            'Day Gain $': f"{pos['day_gain_value']:.2f}",
-                            'Total Gain %': f"{pos['total_gain_pct']:.2f}",
-                            'Total Gain $': f"{pos['total_gain_value']:.2f}",
-                            'Realized Gain $': f"{pos['realized_gain_value']:.2f}",
-                            'Realized Gain %': f"{pos['realized_gain_pct']:.2f}",
-                        })
-
-                click.echo(f"✓ Exported {len(positions)} positions to {export}")
-            except Exception as e:
-                click.echo(f"Error exporting CSV: {str(e)}", err=True)
-            finally:
-                service.close()
-            return
-
-        # Display table
-        click.echo("\n" + "=" * 200)
-        click.echo("PORTFOLIO POSITION SUMMARY")
-        click.echo("=" * 200 + "\n")
-
-        # Compact table header
-        header = (
-            f"{'Symbol':<10} "
-            f"{'Status':<6} "
-            f"{'Shares':>11} "
-            f"{'Price':>11} "
-            f"{'AC/Sh':>10} "
-            f"{'Cost':>12} "
-            f"{'Market Val':>12} "
-            f"{'Day %':>8} "
-            f"{'Day $':>11} "
-            f"{'Total %':>8} "
-            f"{'Total $':>11} "
-            f"{'Real Gain $':>12} "
-            f"{'Real %':>8}"
-        )
-        click.echo(header)
-        click.echo("-" * 200)
-
-        # Table rows
-        for pos in positions:
-            symbol = pos['symbol']
-            status = pos['status']
-            shares = format_number(pos['shares'])
-            last_price = format_currency(pos['last_price'], 2) if pos['last_price'] else "$0"
-            avg_cost = format_currency(pos['avg_cost_per_share'], 2)
-            total_cost = format_currency(pos['total_cost'], 0)
-            market_value = format_currency(pos['market_value'], 0)
-            day_gain_pct = format_percent_colored(pos['day_gain_pct'])
-            day_gain_value = format_currency(pos['day_gain_value'], 0)
-            total_gain_pct = format_percent_colored(pos['total_gain_pct'])
-            total_gain_value = format_currency(pos['total_gain_value'], 0)
-            realized_gain_value = format_currency(pos['realized_gain_value'], 0)
-            realized_gain_pct = format_percent_colored(pos['realized_gain_pct'])
-
-            click.echo(
-                f"{symbol:<10} "
-                f"{status:<6} "
-                f"{shares:>11} "
-                f"{last_price:>11} "
-                f"{avg_cost:>10} "
-                f"{total_cost:>12} "
-                f"{market_value:>12} "
-                f"{day_gain_pct:>8} "
-                f"{day_gain_value:>11} "
-                f"{total_gain_pct:>8} "
-                f"{total_gain_value:>11} "
-                f"{realized_gain_value:>12} "
-                f"{realized_gain_pct:>8}"
-            )
-
-        click.echo("\n" + "=" * 200)
-
+        success("performance", result)
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
+        error("performance", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
-@cli.command()
-@click.option('--date', required=True, help='Transaction date (DD-MM-YYYY)')
-@click.option('--from', 'from_asset', required=True, help='Source asset/currency (e.g., USD, EURUSD=X)')
-@click.option('--to', 'to_asset', required=True, help='Target asset/currency (e.g., USD, EURUSD=X)')
-@click.option('--quantity', required=True, type=float, help='Amount to exchange (in source currency)')
-@click.option('--rate', required=True, type=float, help='Exchange rate (amount of target currency per 1 unit of source)')
-@click.option('--db', default='portfolio.db', help='Path to database file')
-def exchange(date, from_asset, to_asset, quantity, rate, db):
-    """Exchange one currency for another (e.g., USD to EUR)."""
-    try:
-        # Parse and validate date
-        date_obj = datetime.strptime(date, '%d-%m-%Y').date()
-    except ValueError:
-        click.echo(f"Error: Invalid date format. Use DD-MM-YYYY", err=True)
-        return
+# ─── summary ──────────────────────────────────────────────────────────────────
 
+@cli.command()
+@click.option("--filter", "position_filter",
+              type=click.Choice(["open", "all"]), default="all")
+@click.option("--db", default="portfolio.db")
+def summary(position_filter, db):
+    """Show portfolio position summary with gains/losses."""
+    service = PortfolioService(db)
+    try:
+        include_closed = position_filter == "all"
+        positions = service.get_position_summary(include_closed=include_closed)
+        success("summary", positions, count=len(positions))
+    except Exception as e:
+        error("summary", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── exchange ─────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
+@click.option("--from", "from_asset", required=True)
+@click.option("--to", "to_asset", required=True)
+@click.option("--quantity", required=True, type=float)
+@click.option("--rate", required=True, type=float)
+@click.option("--db", default="portfolio.db")
+def exchange(date_str, from_asset, to_asset, quantity, rate, db):
+    """Exchange one currency for another."""
+    date_obj = _parse_legacy_date(date_str, "--date")
     service = PortfolioService(db)
     try:
         result = service.exchange_currency(
@@ -828,20 +437,21 @@ def exchange(date, from_asset, to_asset, quantity, rate, db):
             from_asset=from_asset,
             to_asset=to_asset,
             quantity=quantity,
-            rate=rate
+            rate=rate,
         )
-
-        target_amount = quantity * rate
-        click.echo(f"✓ Exchange recorded (ID: {result['from_trans_id']} / {result['to_trans_id']})")
-        click.echo(f"✓ Exchanged {quantity:.2f} {from_asset} → {target_amount:.2f} {to_asset} @ {rate}")
-        click.echo(f"✓ {result['recalc_type'].upper()} recalculation triggered from {result['from_date']}")
+        data = {
+            "from": {"asset": from_asset, "quantity": quantity},
+            "to": {"asset": to_asset, "quantity": round(quantity * rate, 6)},
+            "rate": rate,
+            "date": str(date_obj),
+            "transaction_ids": [result["from_trans_id"], result["to_trans_id"]],
+        }
+        success("exchange", data)
     except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
-        import traceback
-        traceback.print_exc()
+        error("exchange", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     cli()
