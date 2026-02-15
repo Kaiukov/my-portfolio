@@ -9,11 +9,14 @@ dist/
 build/
 .mypy_cache/
 .pytest_cache/
+*.lock
+uv.lock
 
 # Virtual environments
 .venv/
 venv/
 env/
+**/.venv/
 
 # IDE
 .vscode/
@@ -25,19 +28,34 @@ env/
 # Environment variables
 .env
 .env.local
+.env.*.local
 
 # Data and cache
 data/cache/
 .portfolio_cache/
-
+*.db
+*.sqlite
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+Trashes
 Thumbs.db
 
 # Images
 *.jpg
+*.jpeg
 *.png
+*.gif
+*.svg
+*.ico
+
+# Logs
+*.log
+logs/
+.playwright-mcp/
 
 # Project specific
 *.csv
@@ -46,11 +64,11 @@ Thumbs.db
 reports/
 portfolio_reports/
 ukr_news/
-.db
 portfolio.db
 srcNOUSE
 duckdb
-.playwright-mcp/console-2026-02-04T15-18-41-575Z.log
 tmp/
-logs/
-.playwright-mcp/
+yfiance-transactions/DONE/
+mcp-searxng/.venv/
+.claude/agent-memory/
+.claude/__pycache__/
