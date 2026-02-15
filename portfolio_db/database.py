@@ -237,7 +237,8 @@ class PortfolioDatabase:
 
             self.con.commit()
         except Exception:
-            # Ignore errors - schema might not exist yet
+            # Table might not exist yet on first run - this is expected
+            # No action needed - schema will be created by _create_schema()
             pass
 
     def clear_transactions(self):
