@@ -152,8 +152,11 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
             "SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source "
             "FROM transactions WHERE id = ?", [result["transaction_id"]]
         ).fetchone()
-        cols = ["id", "date", "asset", "action", "quantity", "asset_type", "price", "currency", "fees", "exchange", "data_source"]
-        trans_dict = {cols[i]: (str(trans[i]) if i == 1 else trans[i]) for i in range(len(cols))}
+        col_names = ["id", "date", "asset", "action", "quantity", "asset_type", "price", "currency", "fees", "exchange", "data_source"]
+        trans_dict = {
+            name: (str(value) if name == "date" else value)
+            for name, value in zip(col_names, trans)
+        }
         success("add", {"transaction": trans_dict, "recalculated": True})
     except Exception as e:
         error("add", "DB_ERROR", str(e))
@@ -245,6 +248,7 @@ def cash(db):
         cash_balances = service.get_actual_cash_balances()
 
         fx_rates = {"EURUSD=X": 1.0, "GBPUSD=X": 1.0}
+        fx_fetch_errors = []  # Track which FX rates failed to fetch
         try:
             import yfinance as yf
             from datetime import timedelta
@@ -255,10 +259,12 @@ def cash(db):
                     hist = yf.Ticker(ticker).history(start=start, end=end)
                     if not hist.empty:
                         fx_rates[ticker] = float(hist["Close"].iloc[-1])
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Record failure but continue with default rate
+                    fx_fetch_errors.append(ticker)
         except Exception:
-            pass
+            # yfinance not available or import failed
+            fx_fetch_errors.extend(["EURUSD=X", "GBPUSD=X"])
 
         result = []
         for currency_key, bal_data in cash_balances.items():
@@ -285,12 +291,18 @@ def cash(db):
                 "balance": round(balance, 6),
                 "usd_value": round(balance * fx_rate, 2),
                 "fx_rate": fx_rate,
+                "fx_rate_is_default": currency_key in fx_fetch_errors,
                 "deposits": round(deposits * fx_rate, 2),
                 "spent": round(spent * fx_rate, 2),
                 "received": round(received * fx_rate, 2),
             })
 
-        success("cash", result, count=len(result))
+        # Warn about FX rates that couldn't be fetched
+        warnings = []
+        if fx_fetch_errors:
+            warnings.append(f"FX rates defaulted (using 1.0) for: {', '.join(fx_fetch_errors)}")
+
+        success("cash", result, count=len(result), extra_meta={"warnings": warnings} if warnings else None)
     except Exception as e:
         error("cash", "DB_ERROR", str(e))
     finally:
@@ -319,6 +331,8 @@ def delete(trans_id, confirm, db):
             # Non-interactive: require --confirm flag; output error envelope
             error("delete", "VALIDATION_ERROR",
                   "Pass --confirm to delete without interactive prompt")
+            # error() calls sys.exit(1), but linters don't know that
+            return  # Never reached, kept for clarity
 
         result = service.delete_transaction(trans_id)
         success("delete", {"deleted_id": result["transaction_id"], "recalculated": True})

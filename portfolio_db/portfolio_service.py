@@ -284,8 +284,8 @@ class PortfolioService:
                     variance_market = sum((s - avg_spy) ** 2 for s in spy_returns) / len(spy_returns)
 
                     beta = covariance / variance_market if variance_market > 0 else 0.0
-        except:
-            pass
+        except Exception:
+            beta = 0.0
 
         total_cash_flow = sum(r['cash_flow_impact'] for r in returns_with_values)
         start_value = returns_with_values[0]['portfolio_value']
@@ -385,8 +385,8 @@ class PortfolioService:
 
                     # Information Ratio
                     information_ratio = (avg_excess_annual / tracking_error_annual) if tracking_error_annual > 0 else 0.0
-        except:
-            pass
+        except Exception:
+            spy_cagr = 0.0
 
         # Jensen's Alpha - excess return over expected return (CAPM)
         # Alpha = Rp - (Rf + B * (Rm - Rf))
@@ -875,10 +875,13 @@ class PortfolioService:
                         if price is None or (isinstance(price, float) and price != price):  # NaN check
                             continue
                         self.db.insert_price(asset, date_obj, float(price))
-                    except Exception:
-                        pass  # Skip individual price insert errors
-        except Exception:
-            pass  # Non-critical: if price persistence fails, calculation still works
+                    except Exception as e:
+                        # Individual price insert failures are non-critical
+                        # Calculation still works with fresh prices
+                        continue
+        except Exception as e:
+            # Price persistence is non-critical - calculations use fresh prices
+            pass
 
     def verify_prices_storage(self) -> dict:
         """Verify and report on prices table structure and optimization."""
