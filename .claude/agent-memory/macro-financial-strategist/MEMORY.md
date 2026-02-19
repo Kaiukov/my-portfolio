@@ -1,28 +1,46 @@
 # Macro-Financial Strategist Memory
 
-## Current Market Regime (Feb 9, 2026)
+## Current Market Regime (Feb 19, 2026 - LATEST)
 
 ### Valuation Thresholds
-- **CAPE Ratio**: Current 40.38 = 135% above historical mean (17.3)
-  - Highest since Dot-com peak (44.19 in 2000)
+- **CAPE Ratio**: Current 40.01 (+0.27 from Feb 18) = 131% above historical mean (17.34)
+  - Still highest since Dot-com peak (44.19 in Dec 1999)
   - Risk Threshold: Above 35 = elevated caution, multiple compression risk
-  - Historical Context: Mean ~17, median ~16; >30 warrants hedging
+  - Historical Context: Mean 17.34, median 16.07; >30 warrants hedging
+  - SUPPORTED BY: S&P 500 earnings growth 14.4% expected 2026, net margins at 13.2% (highest since 2009)
+  - STATUS: Entering extended valuation risk zone; above 40 signals extreme territory
 
-### Sentiment Baseline (Feb 2026)
-- **Equity Fear/Greed**: 44 = Neutral/Mild Fear (safe zone, no extremes yet)
+### Sentiment Baseline (Feb 14, 2026)
+- **Equity Fear/Greed**: Unable to access CNN Fear/Greed index (access denied Feb 14)
+- **Previous reading (Feb 9)**: 44 = Neutral/Mild Fear
 - **Crypto Fear/Greed**: 9 = Extreme Fear (risk-off canary; liquidations accelerating)
 - **Divergence Signal**: When equities neutral but crypto capitulating, equity drawdown typically follows 2-6 weeks later
+- NOTE: CNN index access issue may indicate high volatility/server load—market stress indicator?
 
-### Key Fed Guidance
-- **Current Rate**: 3.50-3.75% (paused after 3 cuts)
-- **Next Expected Move**: June 2026 (50bps cuts expected if economy softens)
-- **Inflation Pressure**: 2.9% headline (up from 2.7%) = Fed will pause longer if trend continues
-- **Labor Watch**: Jobless claims rising, but establishment survey still strong; watch for divergence
+### Key Fed Guidance (UPDATED Feb 19)
+- **Current Rate**: 3.50-3.75% target (paused after 3 cuts in late 2025)
+- **Next Expected Move**: Highly uncertain. Market pricing ~2 rate cuts maximum in 2026
+  - Previous (Jan): 2-3 cuts expected for 2026
+  - **Current**: CME FedWatch shows preference for pause through Q2, then potential cuts later
+  - New Fed Chair expected to be selected before Jerome Powell's term ends May 15, 2026
+- **Inflation Pressure**: CPI COOLING trend confirmed
+  - January 2026: 2.4% YoY (8-month low), below 2.5% forecast
+  - Core CPI: 2.5% YoY (lowest since April 2021)
+  - Monthly: +0.2% (slower than December, trending toward target)
+  - Tariff effects creating uncertainty; inflation expected to resume path toward 2% as tariff impact ebbs
+- **Labor Market**: Unemployment at 4.3% (Jan 2026), down from 4.4% (Dec), 4.5% peak (Nov)
+  - Marginal improvement, but job gains described as "low" by Fed guidance
+  - Labor market stable but showing early signs of softening
 
-### Yield Curve Status
-- **10Y-2Y Spread**: Positive (steepening from inversion)
-- **Interpretation**: Economic expansion signal intact, but fragile
-- **Risk**: Rapid steepening if long-end rallies on recession fears
+### Yield Curve Status (UPDATED Feb 19)
+- **10Y-2Y Spread**: +0.62% as of Feb 18 (stable, positive for 2+ weeks)
+  - 10Y Treasury yield: ~4.08% (mid-range Feb 13-18)
+  - Earlier in month: 10Y fell to 4.04% (lowest since Nov 2025)
+  - Peak: 4.276% early Feb; now +19 bps lower
+- **Historical Context**: Previously inverted Oct 2022 - Dec 2024 (16 months) but NO recession materialized
+  - Break from historical pattern suggests altered regime or limited predictive value
+- **Interpretation**: Normalized positive curve = expansion signal; 62 bps spread suggests stable growth expectations
+- **Risk Assessment**: No imminent recession signal from curve; watch for >100 bps steepening (would suggest rate-cut expectations rising)
 
 ### USA-Specific Patterns
 - AI CapEx cycle sustaining earnings growth (2026 GDP target 2.6%)
@@ -49,11 +67,24 @@
 - **CPI**: BLS CPI Home (Jan release expected Feb 13, 2026)
 - **Fed Rate**: Federal Reserve H.15 releases (daily updates)
 
+## Global Economic Outlook (Feb 19, 2026)
+- **IMF Forecast**: Global growth 3.3% (2026), 3.2% (2027); USA 2.4% (2026)
+  - Advanced economies: 1.8% (2026)
+  - Emerging markets: 4%+ (2026-27)
+- **OECD Forecast**: Global 2.9% (2026), USA 1.7% (2026)—more cautious than IMF
+  - Downside risks: AI expectation reset, geopolitical escalation
+- **Key Headwind**: Tariff impacts becoming increasingly visible; full effects still to be felt
+- **Geopolitical Context**:
+  - Top global risk: geoeconomic confrontation (WEF ranking)
+  - China readiness timeline acceleration; grey zone warfare likely in 2026
+  - Trade conflicts + populism = renewed market volatility expected
+
 ## Investment Framework (USA-Focused)
-- **Growth Bias**: 2026 expected to reward AI/CapEx winners over value rotation
-- **Sector Rotation Risk**: Tech-heavy portfolios vulnerable if multiples compress
-- **Macro Hedge**: Consider duration (bonds) if inflation reaccelerates; consider volatility if sentiment shifts
-- **Global Context**: Europe recession risk (France/Germany 0.9% growth) = USD strength, commodity pressure
+- **Growth Bias**: 2026 expected to reward AI/CapEx winners over value rotation (earnings: Q1 11.1%, Q2 14.9%)
+- **Sector Rotation Risk**: Tech-heavy portfolios vulnerable if multiples compress from current 40.01 CAPE
+- **Recession Probability**: J.P. Morgan 35% (12-month), primary trigger = AI investment normalization or labor shock
+- **Macro Hedge**: Consider duration (bonds) if inflation reaccelerates; consider volatility if labor data deteriorates
+- **Global Context**: Europe soft growth (1.7% OECD forecast) = USD strength, commodity pressure
 
 ## Critical Updates (Feb 9, 2026 Analysis)
 
@@ -74,8 +105,21 @@
 - Feb 13 CPI report critical: if >0.3% MoM = confirm re-acceleration, Fed extends pause to June
 - Headline-core divergence sticky (goods/energy prices remain elevated)
 
-## Next Analysis Triggers
-- **Feb 11**: Jobs data (delayed from shutdown)—Payrolls <100K = recession scenario
-- **Feb 13**: CPI confirmation (>0.3% MoM = inflation re-acceleration)
+## Key Data Updates (Feb 14, 2026)
+
+### COMPLETED TRIGGERS
+- **Feb 11**: Jobs data—BETTER than expected, forced traders to LOWER rate-cut expectations (surprise bullish)
+- **Feb 13**: CPI confirmation—2.4% YoY (BETTER than 2.5% forecast), monthly +0.2% (cooling confirmed)
+  - This should support Fed pause, but strong labor data is offsetting easing narrative
+
+### UPCOMING TRIGGERS
 - **Feb 18-22**: Magnificent 7 earnings for AI capex ROI validation
 - **Feb-Mar**: Watch crypto Fear Index for reversal above 25 (equity correction signal)
+- **Q1 Earnings**: 11.1% growth expected; Q2 14.9% growth expected (momentum building)
+
+## Key Insight: Rate Cut Surprise
+- Market was pricing 2-3 rate cuts for 2026
+- Strong labor data (Feb 11) + cooling inflation (Feb 13) should have been mixed signal
+- But traders reacted by LOWERING rate-cut expectations to ~2 total cuts
+- This suggests market pricing "no landing" scenario: growth strong enough Fed doesn't need to cut
+- Goldilocks sweet spot but with limited margin of safety if any data point disappoints

@@ -1,0 +1,2166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Global Financial Market Report | February 14, 2026</title>
+  <style>
+    /* ================================================================
+       DESIGN SYSTEM — typography, colors, spacing
+    ================================================================ */
+    :root {
+      --color-bg:          #0d1117;
+      --color-surface:     #161b22;
+      --color-surface-2:   #1c2128;
+      --color-border:      #30363d;
+      --color-border-light:#21262d;
+      --color-text:        #e6edf3;
+      --color-text-muted:  #8b949e;
+      --color-text-dim:    #6e7681;
+
+      --color-gold:        #d29922;
+      --color-gold-light:  #f0c040;
+      --color-green:       #3fb950;
+      --color-green-dim:   #196c2e;
+      --color-red:         #f85149;
+      --color-red-dim:     #6e1c1c;
+      --color-blue:        #388bfd;
+      --color-blue-dim:    #1f3b6e;
+      --color-orange:      #d4800a;
+      --color-orange-dim:  #5c3400;
+      --color-purple:      #8b6df9;
+
+      --radius-sm:  4px;
+      --radius-md:  8px;
+      --radius-lg:  12px;
+
+      --shadow-card: 0 4px 24px rgba(0,0,0,0.40);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    a { color: var(--color-blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ================================================================
+       LAYOUT
+    ================================================================ */
+    .wrapper {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    /* ================================================================
+       HEADER / MASTHEAD
+    ================================================================ */
+    .masthead {
+      background: linear-gradient(135deg, #0d1117 0%, #161b22 60%, #1a2236 100%);
+      border-bottom: 1px solid var(--color-border);
+      padding: 56px 0 48px;
+      text-align: center;
+    }
+
+    .masthead__label {
+      display: inline-block;
+      font-family: 'Arial', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--color-gold);
+      border: 1px solid var(--color-gold);
+      padding: 4px 14px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 20px;
+    }
+
+    .masthead__title {
+      font-size: clamp(26px, 4vw, 42px);
+      font-weight: 700;
+      color: var(--color-text);
+      line-height: 1.25;
+      max-width: 800px;
+      margin: 0 auto 16px;
+    }
+
+    .masthead__title span {
+      color: var(--color-gold);
+    }
+
+    .masthead__subtitle {
+      font-family: 'Arial', sans-serif;
+      font-size: 14px;
+      color: var(--color-text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .masthead__meta {
+      margin-top: 28px;
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      flex-wrap: wrap;
+    }
+
+    .meta-pill {
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      padding: 6px 16px;
+      border-radius: 20px;
+    }
+
+    .meta-pill strong {
+      color: var(--color-text);
+    }
+
+    /* ================================================================
+       RISK BANNER
+    ================================================================ */
+    .risk-banner {
+      background: linear-gradient(90deg, var(--color-red-dim) 0%, #3a1010 100%);
+      border: 1px solid var(--color-red);
+      border-radius: var(--radius-md);
+      padding: 14px 20px;
+      margin: 32px 0 0;
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: #ffa0a0;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .risk-banner__icon {
+      font-size: 18px;
+      flex-shrink: 0;
+      margin-top: -1px;
+    }
+
+    .risk-banner strong {
+      color: var(--color-red);
+    }
+
+    /* ================================================================
+       EXECUTIVE SUMMARY
+    ================================================================ */
+    .exec-summary {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-top: 3px solid var(--color-gold);
+      border-radius: var(--radius-lg);
+      padding: 36px 40px;
+      margin-top: 40px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .section-label {
+      font-family: 'Arial', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--color-gold);
+      margin-bottom: 20px;
+    }
+
+    .exec-summary h2 {
+      font-size: 22px;
+      color: var(--color-text);
+      margin-bottom: 16px;
+    }
+
+    .exec-summary p {
+      color: var(--color-text-muted);
+      margin-bottom: 24px;
+      font-size: 15px;
+    }
+
+    .key-takeaways {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+
+    .takeaway {
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--radius-md);
+      padding: 18px 20px;
+    }
+
+    .takeaway__num {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-gold);
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+
+    .takeaway__text {
+      font-size: 13px;
+      color: var(--color-text-muted);
+      line-height: 1.5;
+    }
+
+    .takeaway__text strong {
+      color: var(--color-text);
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    /* ================================================================
+       REGIME BADGE
+    ================================================================ */
+    .regime-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      margin: 32px 0;
+      flex-wrap: wrap;
+    }
+
+    .regime-badge {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 6px 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid;
+    }
+
+    .badge--risk-off  { background: var(--color-red-dim);    border-color: var(--color-red);    color: var(--color-red); }
+    .badge--neutral   { background: var(--color-orange-dim);  border-color: var(--color-orange); color: var(--color-gold); }
+    .badge--risk-on   { background: var(--color-green-dim);   border-color: var(--color-green);  color: var(--color-green); }
+    .badge--warning   { background: var(--color-red-dim);     border-color: var(--color-red);    color: var(--color-red); }
+    .badge--structural{ background: var(--color-blue-dim);    border-color: var(--color-blue);   color: var(--color-blue); }
+    .badge--positive  { background: var(--color-green-dim);   border-color: var(--color-green);  color: var(--color-green); }
+    .badge--hold      { background: var(--color-surface-2);   border-color: var(--color-border); color: var(--color-text-muted); }
+
+    .regime-bar__label {
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+
+    .regime-bar__value {
+      font-size: 13px;
+      color: var(--color-text);
+      font-weight: 600;
+    }
+
+    /* ================================================================
+       SECTION HEADERS
+    ================================================================ */
+    .report-section {
+      margin-top: 56px;
+    }
+
+    .section-header {
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 12px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .section-header h2 {
+      font-size: 20px;
+      color: var(--color-text);
+      font-weight: 700;
+    }
+
+    .section-header .agent-tag {
+      font-family: 'Arial', sans-serif;
+      font-size: 10px;
+      color: var(--color-text-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      border: 1px solid var(--color-border);
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    /* ================================================================
+       TABLES
+    ================================================================ */
+    .tbl-wrap {
+      overflow-x: auto;
+      margin: 20px 0;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Arial', sans-serif;
+      font-size: 13px;
+    }
+
+    thead tr {
+      background: var(--color-surface-2);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    thead th {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--color-border-light);
+      transition: background 0.15s;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--color-surface-2); }
+
+    tbody td {
+      padding: 12px 16px;
+      color: var(--color-text);
+      vertical-align: top;
+    }
+
+    .td-muted  { color: var(--color-text-muted); }
+    .td-green  { color: var(--color-green); font-weight: 600; }
+    .td-red    { color: var(--color-red);   font-weight: 600; }
+    .td-gold   { color: var(--color-gold);  font-weight: 600; }
+    .td-blue   { color: var(--color-blue);  font-weight: 600; }
+    .td-orange { color: var(--color-orange);font-weight: 600; }
+
+    /* ================================================================
+       CONFIDENCE BARS
+    ================================================================ */
+    .conf-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .conf-bar {
+      height: 6px;
+      background: var(--color-border);
+      border-radius: 3px;
+      flex: 1;
+      max-width: 80px;
+      overflow: hidden;
+    }
+
+    .conf-bar__fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--color-blue) 0%, var(--color-gold) 100%);
+    }
+
+    .conf-pct {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-gold);
+      min-width: 30px;
+    }
+
+    /* ================================================================
+       CARDS
+    ================================================================ */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .card__label {
+      font-family: 'Arial', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--color-text-dim);
+      margin-bottom: 8px;
+    }
+
+    .card__value {
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .card__change {
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .card__note {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      color: var(--color-text-dim);
+      line-height: 1.4;
+    }
+
+    /* ================================================================
+       ALERT BOXES
+    ================================================================ */
+    .alert {
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      margin: 16px 0;
+      font-family: 'Arial', sans-serif;
+      font-size: 13px;
+      border-left: 4px solid;
+    }
+
+    .alert--danger {
+      background: var(--color-red-dim);
+      border-color: var(--color-red);
+      color: #ffb3b0;
+    }
+
+    .alert--warning {
+      background: var(--color-orange-dim);
+      border-color: var(--color-orange);
+      color: #ffd080;
+    }
+
+    .alert--info {
+      background: var(--color-blue-dim);
+      border-color: var(--color-blue);
+      color: #90c8ff;
+    }
+
+    .alert--success {
+      background: var(--color-green-dim);
+      border-color: var(--color-green);
+      color: #90e090;
+    }
+
+    .alert strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ================================================================
+       SCENARIO CARDS
+    ================================================================ */
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .scenario-card {
+      border-radius: var(--radius-lg);
+      border: 1px solid;
+      padding: 28px 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .scenario-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+
+    .scenario-card--opt {
+      background: linear-gradient(135deg, #0d2018 0%, #0f1c15 100%);
+      border-color: var(--color-green);
+    }
+
+    .scenario-card--opt::before { background: var(--color-green); }
+
+    .scenario-card--real {
+      background: linear-gradient(135deg, #1a1508 0%, #16140a 100%);
+      border-color: var(--color-gold);
+    }
+
+    .scenario-card--real::before { background: var(--color-gold); }
+
+    .scenario-card--pess {
+      background: linear-gradient(135deg, #1c0a0a 0%, #160808 100%);
+      border-color: var(--color-red);
+    }
+
+    .scenario-card--pess::before { background: var(--color-red); }
+
+    .scenario-card__prob {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .scenario-card--opt  .scenario-card__prob { color: var(--color-green); }
+    .scenario-card--real .scenario-card__prob { color: var(--color-gold); }
+    .scenario-card--pess .scenario-card__prob { color: var(--color-red); }
+
+    .scenario-card__prob-bar {
+      height: 8px;
+      background: var(--color-border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+
+    .scenario-card--opt  .scenario-card__prob-bar .fill { background: var(--color-green); width: 25%; height: 100%; border-radius: 4px; }
+    .scenario-card--real .scenario-card__prob-bar .fill { background: var(--color-gold);  width: 50%; height: 100%; border-radius: 4px; }
+    .scenario-card--pess .scenario-card__prob-bar .fill { background: var(--color-red);   width: 25%; height: 100%; border-radius: 4px; }
+
+    .scenario-card h3 {
+      font-size: 17px;
+      margin-bottom: 12px;
+    }
+
+    .scenario-card ul {
+      padding-left: 18px;
+      font-size: 13px;
+      color: var(--color-text-muted);
+      line-height: 1.7;
+    }
+
+    .scenario-card ul li { margin-bottom: 4px; }
+
+    .scenario-card__positioning {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--color-border-light);
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: var(--color-text-dim);
+    }
+
+    .scenario-card__positioning strong {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    /* ================================================================
+       RECOMMENDATIONS TABLE
+    ================================================================ */
+    .rec-tag {
+      display: inline-block;
+      font-family: 'Arial', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid;
+      white-space: nowrap;
+    }
+
+    .rec-tag--overweight { background: #0e2a18; border-color: #3fb950; color: #3fb950; }
+    .rec-tag--accumulate { background: #0b2118; border-color: #26a641; color: #26a641; }
+    .rec-tag--hold       { background: #1c2128; border-color: #484f58; color: #8b949e; }
+    .rec-tag--selective  { background: #1a1508; border-color: #d29922; color: #d29922; }
+    .rec-tag--neutral    { background: #1c2128; border-color: #6e7681; color: #6e7681; }
+    .rec-tag--underweight{ background: #2a1010; border-color: #f85149; color: #f85149; }
+    .rec-tag--avoid      { background: #3a1010; border-color: #ff4444; color: #ff4444; }
+    .rec-tag--speculative{ background: #1a0b2e; border-color: #8b6df9; color: #8b6df9; }
+    .rec-tag--monitor    { background: #1a1508; border-color: #d4800a; color: #d4800a; }
+
+    /* ================================================================
+       RISK PROFILE TABLE
+    ================================================================ */
+    .profile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .profile-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 22px 20px;
+    }
+
+    .profile-card__type {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .profile-card--conservative .profile-card__type { color: var(--color-green); }
+    .profile-card--balanced     .profile-card__type { color: var(--color-gold); }
+    .profile-card--aggressive   .profile-card__type { color: var(--color-red); }
+
+    .profile-card ul {
+      list-style: none;
+      font-size: 13px;
+    }
+
+    .profile-card ul li {
+      padding: 5px 0;
+      border-bottom: 1px solid var(--color-border-light);
+      display: flex;
+      justify-content: space-between;
+      color: var(--color-text-muted);
+    }
+
+    .profile-card ul li:last-child { border-bottom: none; }
+
+    .profile-card ul li span {
+      font-weight: 700;
+      color: var(--color-text);
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+    }
+
+    /* ================================================================
+       CRITICAL RISK SECTION
+    ================================================================ */
+    .risk-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .risk-item {
+      background: var(--color-surface);
+      border: 1px solid var(--color-red);
+      border-radius: var(--radius-md);
+      padding: 18px 18px;
+    }
+
+    .risk-item__priority {
+      font-family: 'Arial', sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--color-red);
+      margin-bottom: 6px;
+    }
+
+    .risk-item h4 {
+      font-size: 14px;
+      color: var(--color-text);
+      margin-bottom: 8px;
+    }
+
+    .risk-item p {
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      line-height: 1.5;
+    }
+
+    /* ================================================================
+       DATA CALENDAR
+    ================================================================ */
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .calendar-item {
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .calendar-item__date {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-gold);
+      white-space: nowrap;
+      padding-top: 2px;
+    }
+
+    .calendar-item__desc {
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      line-height: 1.4;
+    }
+
+    .calendar-item__desc strong {
+      display: block;
+      color: var(--color-text);
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .priority-badge {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-left: 4px;
+    }
+
+    .priority-badge--critical { background: var(--color-red-dim); color: var(--color-red); }
+    .priority-badge--high     { background: var(--color-orange-dim); color: var(--color-orange); }
+
+    /* ================================================================
+       CONCLUSION
+    ================================================================ */
+    .conclusion {
+      background: linear-gradient(135deg, #13101a 0%, #101318 100%);
+      border: 1px solid var(--color-border);
+      border-top: 3px solid var(--color-purple);
+      border-radius: var(--radius-lg);
+      padding: 36px 40px;
+      margin-top: 56px;
+    }
+
+    .conclusion h2 {
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+
+    .conclusion p {
+      color: var(--color-text-muted);
+      margin-bottom: 16px;
+      font-size: 15px;
+    }
+
+    .conclusion p:last-child { margin-bottom: 0; }
+
+    /* ================================================================
+       METHODOLOGY
+    ================================================================ */
+    .methodology {
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--radius-md);
+      padding: 24px 28px;
+      margin-top: 40px;
+      font-family: 'Arial', sans-serif;
+      font-size: 12px;
+      color: var(--color-text-dim);
+    }
+
+    .methodology h3 {
+      font-size: 13px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-bottom: 12px;
+    }
+
+    .methodology ul {
+      padding-left: 18px;
+      line-height: 1.8;
+    }
+
+    .methodology p { margin-top: 10px; line-height: 1.6; }
+
+    /* ================================================================
+       FOOTER
+    ================================================================ */
+    .footer {
+      text-align: center;
+      padding: 48px 0 24px;
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      color: var(--color-text-dim);
+      border-top: 1px solid var(--color-border-light);
+      margin-top: 56px;
+      line-height: 1.8;
+    }
+
+    .footer strong { color: var(--color-text-muted); }
+
+    /* ================================================================
+       UTILITIES
+    ================================================================ */
+    .prose {
+      color: var(--color-text-muted);
+      margin-bottom: 20px;
+      font-size: 15px;
+    }
+
+    .prose strong { color: var(--color-text); }
+
+    .mt-8  { margin-top:  8px; }
+    .mt-16 { margin-top: 16px; }
+    .mt-24 { margin-top: 24px; }
+
+    .text-sm { font-family: 'Arial', sans-serif; font-size: 13px; }
+    .text-xs { font-family: 'Arial', sans-serif; font-size: 11px; color: var(--color-text-dim); }
+
+    ol.styled { padding-left: 20px; color: var(--color-text-muted); font-size: 14px; line-height: 1.8; }
+    ol.styled li { margin-bottom: 4px; }
+    ol.styled li strong { color: var(--color-text); }
+
+    ul.bullet { list-style: disc; padding-left: 20px; color: var(--color-text-muted); font-size: 14px; line-height: 1.8; }
+    ul.bullet li { margin-bottom: 4px; }
+    ul.bullet li strong { color: var(--color-text); }
+
+    /* ================================================================
+       PRINT
+    ================================================================ */
+    @media print {
+      body { background: white; color: black; }
+      .masthead { background: white; }
+    }
+
+    /* ================================================================
+       RESPONSIVE
+    ================================================================ */
+    @media (max-width: 600px) {
+      .wrapper { padding: 0 16px 60px; }
+      .exec-summary { padding: 24px 20px; }
+      .conclusion   { padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ================================================================
+     MASTHEAD
+================================================================ -->
+<div class="masthead">
+  <div class="wrapper">
+    <div class="masthead__label">Daily Standard Report &mdash; Multi-Asset Analysis</div>
+    <h1 class="masthead__title">
+      Глобальные рынки на <span>критическом переломе</span>:<br>
+      Экстремальные оценки, структурные ротации и три сценария
+    </h1>
+    <p class="masthead__subtitle">
+      Global Financial Market Report &mdash; Comprehensive Multi-Asset Investment Outlook
+    </p>
+    <div class="masthead__meta">
+      <div class="meta-pill"><strong>Дата:</strong> 14 февраля 2026</div>
+      <div class="meta-pill"><strong>Агентов:</strong> 8 специализированных аналитических агентов</div>
+      <div class="meta-pill"><strong>Порог уверенности:</strong> 88%+</div>
+      <div class="meta-pill"><strong>Режим рынка:</strong> RISK-OFF с избирательными Risk-On карманами</div>
+    </div>
+
+    <div class="risk-banner">
+      <span class="risk-banner__icon">&#9888;</span>
+      <span>
+        <strong>ПРЕДУПРЕЖДЕНИЕ О РИСКАХ:</strong>
+        Данный отчёт носит исключительно информационный характер и не является инвестиционной рекомендацией. Любые инвестиционные решения принимаются на собственный риск. Прошлые результаты не гарантируют будущую доходность. Перед инвестированием проконсультируйтесь с лицензированным финансовым советником.
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     MAIN WRAPPER
+================================================================ -->
+<div class="wrapper">
+
+  <!-- ================================================================
+       EXECUTIVE SUMMARY
+  ================================================================ -->
+  <div class="exec-summary">
+    <div class="section-label">Executive Summary &mdash; Ключевые выводы</div>
+    <h2>Обзор ситуации на 14 февраля 2026</h2>
+    <p>
+      Глобальные рынки достигли критической точки бифуркации, где экстремальные оценки сталкиваются со структурными изменениями сразу в нескольких классах активов. Коэффициент CAPE на уровне 40,38 приближается к территории пузыря «Дот-ком», тогда как индекс страха на крипторынках опустился до 9 &mdash; исторически опережающий индикатор коррекции фондовых рынков за 2&ndash;6 недель. Активная ротация от роста к стоимости, геополитические события и политика Федрезерва определяют инвестиционную повестку первого квартала 2026 года.
+    </p>
+    <div class="key-takeaways">
+      <div class="takeaway">
+        <div class="takeaway__num">01</div>
+        <div class="takeaway__text">
+          <strong>CAPE 40,38 &mdash; экстремальное завышение</strong>
+          Оценка S&amp;P 500 предполагает устойчивый рост прибыли на 14,1% в год. Любое разочарование в отчётности Q1 2026 способно запустить сжатие мультипликаторов.
+        </div>
+      </div>
+      <div class="takeaway">
+        <div class="takeaway__num">02</div>
+        <div class="takeaway__text">
+          <strong>Crypto Fear Index 9: сигнал тревоги</strong>
+          Исторически крипто-капитуляция ниже 15 при спокойных акциях предшествует коррекции рынка акций за 2&ndash;6 недель (успех 75%).
+        </div>
+      </div>
+      <div class="takeaway">
+        <div class="takeaway__num">03</div>
+        <div class="takeaway__text">
+          <strong>Ротация: Dow vs NASDAQ</strong>
+          Dow Jones закрепился выше 50 000 (+0,2%), NASDAQ снизился (-0,46%). Лидерство переходит от Magnificent 7 к стоимостным акциям и малой капитализации.
+        </div>
+      </div>
+      <div class="takeaway">
+        <div class="takeaway__num">04</div>
+        <div class="takeaway__text">
+          <strong>Золото $5 031: структурный бычий рынок</strong>
+          15-й месяц подряд закупок ЦБ Китая. Цель JPMorgan по меди $12 500/т в Q2 2026. Сырьевые активы поддержаны слабостью доллара.
+        </div>
+      </div>
+      <div class="takeaway">
+        <div class="takeaway__num">05</div>
+        <div class="takeaway__text">
+          <strong>Украина: 55% вероятность перемирия</strong>
+          EU готовит постепенное членство, одобрен кредит 90 млрд евро. Реконструкция открывает опционную стоимость, но требует подтверждения мира.
+        </div>
+      </div>
+      <div class="takeaway">
+        <div class="takeaway__num">06</div>
+        <div class="takeaway__text">
+          <strong>Баффет держит 33% в кэше</strong>
+          Berkshire Hathaway продаёт акции 12 кварталов подряд, сосредоточен в энергетике ($58 млрд). Сигнал осторожности от самого известного стоимостного инвестора.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REGIME BAR -->
+  <div class="regime-bar">
+    <div>
+      <div class="regime-bar__label">Режим рынка</div>
+      <div class="regime-bar__value">RISK-OFF &mdash; избирательные Risk-On карманы</div>
+    </div>
+    <span class="regime-badge badge--risk-off">RISK-OFF</span>
+    <span class="regime-badge badge--neutral">VIX 18,64</span>
+    <span class="regime-badge badge--warning">CAPE 40,38</span>
+    <span class="regime-badge badge--structural">ФРС на паузе</span>
+    <span class="regime-badge badge--positive">DAX +0,94%</span>
+    <span class="regime-badge badge--positive">Hang Seng +1,73%</span>
+  </div>
+
+  <!-- ================================================================
+       SECTION 1: INDEXES
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>I. Индексы</h2>
+      <span class="agent-tag">Index Analyst Agent</span>
+    </div>
+
+    <p class="prose">
+      Американский рынок демонстрирует острую внутреннюю дивергенцию: Dow Jones обновил исторический максимум выше 50 000 пунктов, тогда как NASDAQ и S&amp;P 500 остаются под давлением технологического сектора. Европейские и азиатские индексы опережают американские аналоги, свидетельствуя о перетоке капитала в реальную экономику.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Индекс</th>
+            <th>Последнее значение</th>
+            <th>Изменение %</th>
+            <th>Ключевое наблюдение</th>
+            <th>Сигнал</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>S&amp;P 500</strong></td>
+            <td>~6 950</td>
+            <td class="td-red">-0,24%</td>
+            <td class="td-muted">Снова в минусе за 2026 год; давление технологий</td>
+            <td><span class="regime-badge badge--neutral">НЕЙТРАЛЬНО</span></td>
+          </tr>
+          <tr>
+            <td><strong>NASDAQ</strong></td>
+            <td>~23 031</td>
+            <td class="td-red">-0,46%</td>
+            <td class="td-muted">Слабость техсектора сохраняется; риск концентрации</td>
+            <td><span class="regime-badge badge--risk-off">ОСТОРОЖНО</span></td>
+          </tr>
+          <tr>
+            <td><strong>Dow Jones</strong></td>
+            <td>50 219+</td>
+            <td class="td-green">+0,20%</td>
+            <td class="td-muted">Новый ATH; дивергенция от техсектора; сила стоимости</td>
+            <td><span class="regime-badge badge--positive">ПОЗИТИВНО</span></td>
+          </tr>
+          <tr>
+            <td><strong>DAX (Германия)</strong></td>
+            <td>24 721</td>
+            <td class="td-green">+0,94%</td>
+            <td class="td-muted">Опережает рынок; защитная сила</td>
+            <td><span class="regime-badge badge--positive">ПОЗИТИВНО</span></td>
+          </tr>
+          <tr>
+            <td><strong>FTSE 100 (UK)</strong></td>
+            <td>10 369+</td>
+            <td class="td-green">+0,59%</td>
+            <td class="td-muted">Устойчив; стоимостная ориентация</td>
+            <td><span class="regime-badge badge--positive">ПОЗИТИВНО</span></td>
+          </tr>
+          <tr>
+            <td><strong>Hang Seng (HK)</strong></td>
+            <td>27 027</td>
+            <td class="td-green">+1,73%</td>
+            <td class="td-muted">Вернулся выше 27 000; поддержка техсектора и банков</td>
+            <td><span class="regime-badge badge--positive">ВОССТАНОВЛЕНИЕ</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alert alert--warning mt-16">
+      <strong>Ключевой риск: Программный сектор</strong>
+      Около $1 трлн капитализации стёрто с рынка ПО. iShares Expanded Tech-Software ETF &mdash; -28% от максимумов, -17% с начала года. Инструменты ИИ-автоматизации разрушают традиционные SaaS-бизнес-модели.
+    </div>
+
+    <ol class="styled mt-16">
+      <li><strong>Сократить концентрацию в технологиях.</strong> Ротировать в Dow-компоненты и качественные акции малой капитализации.</li>
+      <li><strong>Европейские оценки привлекательны.</strong> Ротационные потоки из США поддерживают DAX и FTSE.</li>
+      <li><strong>Hang Seng выше 27 000.</strong> Консолидация возможна, но позиция фрагильна без подтверждения восстановления Китая.</li>
+    </ol>
+  </div>
+
+  <!-- ================================================================
+       SECTION 2: STOCKS / ETFs
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>II. Акции и ETF</h2>
+      <span class="agent-tag">Market Signal Analyzer Agent</span>
+    </div>
+
+    <p class="prose">
+      Высококонфидентные сигналы агента выявили четыре структурных изменения, которые будут определять рынок в 2026 году: финансовый декаплинг Китая и США, фискальная экспансия Японии, вектор смягчения ФРС и расширение лидерства рынка от Magnificent 7 до малой и средней капитализации.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Сигнал</th>
+            <th>Уверенность</th>
+            <th>Вердикт</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Китай советует банкам сокращать US Treasuries</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:94%"></div></div>
+                <span class="conf-pct">94%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">МАКРО-СТРУКТУРНЫЙ СДВИГ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Победа Такаити на выборах в Японии</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:93%"></div></div>
+                <span class="conf-pct">93%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">МАКРО-СТРУКТУРНЫЙ СДВИГ</span></td>
+          </tr>
+          <tr>
+            <td><strong>ФРС удерживает ставку 3,50&ndash;3,75%</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:92%"></div></div>
+                <span class="conf-pct">92%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--hold">ОЖИДАЕМО / УЧТЕНО</span></td>
+          </tr>
+          <tr>
+            <td><strong>Dow Jones выше 50 000</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:91%"></div></div>
+                <span class="conf-pct">91%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--neutral">ПСИХОЛОГИЧЕСКИЙ / ШУМОВОЙ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Квартальная прибыль S&amp;P 500: Beat, Mag-7 отстаёт</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:89%"></div></div>
+                <span class="conf-pct">89%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">ФУНДАМЕНТАЛЬНЫЙ СИГНАЛ</span></td>
+          </tr>
+          <tr>
+            <td><strong>AMD Q4: превзошла выручку, акция -17%</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:90%"></div></div>
+                <span class="conf-pct">90%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--warning">РАЗРЫВ СТОИМОСТИ И ЦЕНЫ</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-grid mt-24">
+      <div class="card">
+        <div class="card__label">Рекомендация</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-green)">HOLD / MAINTAIN</div>
+        <div class="card__note">Диверсифицированные позиции в акциях и качественный технологический портфель</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Добавлять</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-blue)">ACCUMULATE</div>
+        <div class="card__note">Японские акции, малая/средняя кап., хедж в драгметаллах</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Мониторить</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-gold)">MONITOR</div>
+        <div class="card__note">Дюрация US Treasuries, отчётность Nvidia 25 фев., USD/JPY вблизи 160</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Избегать</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-red)">AVOID</div>
+        <div class="card__note">Погоня за импульсом Dow 50K, концентрированные позиции в Mag-7</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SECTION 3: CRYPTO
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>III. Криптовалюты</h2>
+      <span class="agent-tag">Crypto Signal Analyzer Agent</span>
+    </div>
+
+    <p class="prose">
+      Биткоин скорректировался с максимумов $80K до $60K и восстановился до ~$70K. Ликвидации на $2,65 млрд 5&ndash;6 февраля зачистили избыточный левередж. Фундамент остаётся конструктивным: регуляторная ясность, зрелость ETF-инфраструктуры и рекордная сетевая активность Ethereum создают структурную поддержку.
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card__label">Bitcoin</div>
+        <div class="card__value" style="color:var(--color-gold)">~$70 000</div>
+        <div class="card__change td-red">-12,5% от ATH</div>
+        <div class="card__note">Зона накопления. ETF-инфраструктура ($10B объём IBIT) + регуляторная ясность = структурная поддержка</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Ethereum</div>
+        <div class="card__value" style="color:var(--color-blue)">ATH сети</div>
+        <div class="card__change td-red">-62% от максимумов 2025</div>
+        <div class="card__note">Сильнейшее соотношение риск/доходность среди крупных монет. 2,5M транзакций в день при упавшей цене = стоимостной сигнал</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Fear &amp; Greed</div>
+        <div class="card__value" style="color:var(--color-red)">9</div>
+        <div class="card__change" style="color:var(--color-text-dim)">Зона экстремального страха</div>
+        <div class="card__note">Исторически &mdash; опережающий индикатор коррекции акций. Капитуляция уже происходит</div>
+      </div>
+      <div class="card">
+        <div class="card__label">BTC цель (Bernstein)</div>
+        <div class="card__value" style="color:var(--color-green)">$150K</div>
+        <div class="card__change" style="color:var(--color-text-dim)">к концу 2026</div>
+        <div class="card__note">Консенсус институциональных аналитиков на фоне зрелой ETF-инфраструктуры и GENIUS Act</div>
+      </div>
+    </div>
+
+    <div class="tbl-wrap mt-24">
+      <table>
+        <thead>
+          <tr>
+            <th>Сигнал</th>
+            <th>Уверенность</th>
+            <th>Значимость</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>SEC-CFTC запустили совместный «Project Crypto»</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:95%"></div></div>
+                <span class="conf-pct">95%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">ДОЛГОСРОЧНЫЙ СИГНАЛ</span></td>
+          </tr>
+          <tr>
+            <td><strong>BlackRock IBIT ETF &mdash; рекордный объём $10B</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:93%"></div></div>
+                <span class="conf-pct">93%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">ДОЛГОСРОЧНЫЙ СИГНАЛ</span></td>
+          </tr>
+          <tr>
+            <td><strong>GENIUS Act: стейблкоин-фреймворк активен</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:92%"></div></div>
+                <span class="conf-pct">92%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">ДОЛГОСРОЧНЫЙ СИГНАЛ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Bitmine приобрела 4,33M ETH в казначейство</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:90%"></div></div>
+                <span class="conf-pct">90%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">ДОЛГОСРОЧНЫЙ СИГНАЛ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Ethereum: 2,5M транзакций/день &mdash; ATH</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:88%"></div></div>
+                <span class="conf-pct">88%</span>
+              </div>
+            </td>
+            <td><span class="regime-badge badge--structural">ДОЛГОСРОЧНЫЙ СИГНАЛ</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alert alert--info mt-16">
+      <strong>Примечание по стейблкоинам</strong>
+      В рамках GENIUS Act USDC предпочтителен USDT для долгосрочных позиций как наиболее соответствующий регуляторным требованиям стейблкоин.
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SECTION 4: COMMODITIES
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>IV. Сырьевые товары</h2>
+      <span class="agent-tag">Commodities Signal Analyzer Agent</span>
+    </div>
+
+    <p class="prose">
+      Мировой банк прогнозирует снижение цен на сырьё на 7% в 2026 году &mdash; четвёртый год подряд падения. Однако это не однородное движение: золото и медь демонстрируют структурный бычий тренд, тогда как нефть страдает от исторического избытка предложения.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Сырьё</th>
+            <th>Цена</th>
+            <th>Позиция</th>
+            <th>Уверенность</th>
+            <th>Рекомендация</th>
+            <th>Ключевой драйвер</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Золото</strong></td>
+            <td class="td-gold">$5 031/унц.</td>
+            <td><span class="rec-tag rec-tag--overweight">Overweight</span></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:94%"></div></div>
+                <span class="conf-pct">94%</span>
+              </div>
+            </td>
+            <td>Накапливать на просадках</td>
+            <td class="td-muted">+72,45% г/г; ЦБ Китая: 15 мес. покупок подряд</td>
+          </tr>
+          <tr>
+            <td><strong>Серебро</strong></td>
+            <td>$83,49/унц.</td>
+            <td><span class="rec-tag rec-tag--neutral">Neutral</span></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:88%"></div></div>
+                <span class="conf-pct">88%</span>
+              </div>
+            </td>
+            <td>Избегать до снижения волатильности</td>
+            <td class="td-muted">Высокая волатильность; промышленный спрос нестабилен</td>
+          </tr>
+          <tr>
+            <td><strong>WTI Crude</strong></td>
+            <td class="td-red">$63,70/барр.</td>
+            <td><span class="rec-tag rec-tag--underweight">Underweight</span></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:92%"></div></div>
+                <span class="conf-pct">92%</span>
+              </div>
+            </td>
+            <td>Структурный избыток подтверждён</td>
+            <td class="td-muted">Brent цель EIA: $56/барр. в 2026; Саудовский демпинг</td>
+          </tr>
+          <tr>
+            <td><strong>Природный газ</strong></td>
+            <td>$3,14/MMBtu</td>
+            <td><span class="rec-tag rec-tag--hold">Hold</span></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:88%"></div></div>
+                <span class="conf-pct">88%</span>
+              </div>
+            </td>
+            <td>Тактические покупки на погодных просадках</td>
+            <td class="td-muted">Сезонный фактор; структурного драйвера нет</td>
+          </tr>
+          <tr>
+            <td><strong>Медь</strong></td>
+            <td class="td-green">$5,87/фунт</td>
+            <td><span class="rec-tag rec-tag--accumulate">Accumulate</span></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:90%"></div></div>
+                <span class="conf-pct">90%</span>
+              </div>
+            </td>
+            <td>Структурный спрос на энергопереход</td>
+            <td class="td-muted">Цель JPMorgan: $12 500/т в Q2 2026; ЦОД + электромобили</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alert alert--success mt-16">
+      <strong>Структурная тема: энергопереход и ЦОД</strong>
+      Медь поддержана двойным структурным спросом: расширение сетей электромобилей в Китае и строительство дата-центров ИИ. J.P. Morgan нацелен на $12 500/т к Q2 2026 несмотря на краткосрочную слабость спроса в Китае.
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SECTION 5: BONDS & TREASURIES
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>V. Облигации и казначейские бумаги</h2>
+      <span class="agent-tag">Bonds Treasury Signal Analyzer Agent</span>
+    </div>
+
+    <p class="prose">
+      Рынок облигаций предоставляет наиболее привлекательное соотношение риск/доходность среди основных классов активов. Спреды IG достигли 2-го процентиля исторических значений, указывая на экстремальную дороговизну корпоративного долга. Промежуточные казначейские бумаги США предлагают привлекательную доходность с поддержкой паузы ФРС.
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card__label">10Y Treasury</div>
+        <div class="card__value" style="color:var(--color-blue)">4,22%</div>
+        <div class="card__change td-green">-4 б.п. на слабых данных по труду</div>
+        <div class="card__note">Стабильный; поддерживается паузой ФРС и спросом на аукционах (69,7% indirect)</div>
+      </div>
+      <div class="card">
+        <div class="card__label">2Y Treasury</div>
+        <div class="card__value" style="color:var(--color-blue)">3,50%</div>
+        <div class="card__change" style="color:var(--color-text-dim)">Закреплён ФРС</div>
+        <div class="card__note">Спред 10Y-2Y: +72 б.п. &mdash; позитивная наклонная кривая, сигнал роста</div>
+      </div>
+      <div class="card">
+        <div class="card__label">IG Credit Spread</div>
+        <div class="card__value" style="color:var(--color-red)">78 б.п.</div>
+        <div class="card__change td-red">2-й процентиль &mdash; ДОРОГО</div>
+        <div class="card__note">Исторически тесные спреды. Минимальная компенсация за кредитный риск</div>
+      </div>
+      <div class="card">
+        <div class="card__label">HY Spread</div>
+        <div class="card__value" style="color:var(--color-orange)">285 б.п.</div>
+        <div class="card__change" style="color:var(--color-text-dim)">Тесный; расширение CCC</div>
+        <div class="card__note">Только рейтинг BB. Избегать CCC-экспозиции при текущей оценке рисков</div>
+      </div>
+    </div>
+
+    <div class="tbl-wrap mt-24">
+      <table>
+        <thead>
+          <tr>
+            <th>Инструмент</th>
+            <th>Позиция</th>
+            <th>Обоснование</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>US Treasuries 5&ndash;10Y</strong></td>
+            <td><span class="rec-tag rec-tag--overweight">Overweight</span></td>
+            <td class="td-muted">Привлекательная доходность; пауза ФРС поддерживает; сильный аукционный спрос</td>
+          </tr>
+          <tr>
+            <td><strong>US Treasuries 20Y+</strong></td>
+            <td><span class="rec-tag rec-tag--neutral">Neutral</span></td>
+            <td class="td-muted">Повышенный риск дюрации; неопределённость с преемником Пауэлла (май 2026)</td>
+          </tr>
+          <tr>
+            <td><strong>IG Corporate Bonds</strong></td>
+            <td><span class="rec-tag rec-tag--underweight">Underweight</span></td>
+            <td class="td-muted">Спреды на историческом минимуме (2-й процентиль); асимметрия риска вниз</td>
+          </tr>
+          <tr>
+            <td><strong>HY Corporate (только BB)</strong></td>
+            <td><span class="rec-tag rec-tag--selective">Selective</span></td>
+            <td class="td-muted">Избирательно; избегать CCC при расширении спредов</td>
+          </tr>
+          <tr>
+            <td><strong>Municipal Bonds</strong></td>
+            <td><span class="rec-tag rec-tag--overweight">Overweight</span></td>
+            <td class="td-muted">Для налогооблагаемых счетов; сильные технические факторы</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alert alert--warning mt-16">
+      <strong>Ключевой риск: смена руководства ФРС</strong>
+      Срок полномочий Пауэлла истекает 15 мая 2026 года. Назначение нового председателя ФРС может изменить траекторию ставок и увеличить волатильность рынка облигаций. Это ключевой политический риск 2026 года.
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SECTION 6: UKRAINE
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>VI. Инвестиционные возможности Украины</h2>
+      <span class="agent-tag">Ukraine Signal Analyzer Agent</span>
+    </div>
+
+    <p class="prose">
+      Украина представляет уникальную опционную стоимость для долгосрочных инвесторов: страна держит крупнейшие запасы титана в Европе и третьи по величине запасы лития. ЕС готовит постепенное членство, ЕБРР поставил рекорд инвестиций в $2,9 млрд. Однако реализация потенциала требует урегулирования конфликта.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Сигнал</th>
+            <th>Уверенность</th>
+            <th>Воздействие на сектор</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>ЕС готовит постепенные права членства</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:94%"></div></div>
+                <span class="conf-pct">94%</span>
+              </div>
+            </td>
+            <td class="td-muted">Регуляторное выравнивание; снижение странового риска</td>
+          </tr>
+          <tr>
+            <td><strong>ЕП голосует по кредиту &euro;90 млрд</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:93%"></div></div>
+                <span class="conf-pct">93%</span>
+              </div>
+            </td>
+            <td class="td-muted">Ликвидность для реконструкции; снижение долгового риска</td>
+          </tr>
+          <tr>
+            <td><strong>Переговоры о мире &mdash; США ставят срок: июнь</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:91%"></div></div>
+                <span class="conf-pct">91%</span>
+              </div>
+            </td>
+            <td class="td-muted">Снижение военной премии; катализатор для инфраструктуры</td>
+          </tr>
+          <tr>
+            <td><strong>ЕБРР: рекордные &euro;2,9 млрд в 2025 году</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:90%"></div></div>
+                <span class="conf-pct">90%</span>
+              </div>
+            </td>
+            <td class="td-muted">Энергетический сектор &mdash; приоритет; институциональная валидация</td>
+          </tr>
+          <tr>
+            <td><strong>Amber Dragon Infrastructure Fund (&euro;200M)</strong></td>
+            <td>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar"><div class="conf-bar__fill" style="width:90%"></div></div>
+                <span class="conf-pct">90%</span>
+              </div>
+            </td>
+            <td class="td-muted">Разблокировка институционального капитала</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tbl-wrap mt-16">
+      <table>
+        <thead>
+          <tr>
+            <th>Сектор</th>
+            <th>Рекомендация</th>
+            <th>Уверенность</th>
+            <th>Катализатор</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Критические минералы и добыча</strong></td>
+            <td><span class="rec-tag rec-tag--accumulate">ДОЛГОСРОЧНО НАКАПЛИВАТЬ</span></td>
+            <td class="td-gold">91%</td>
+            <td class="td-muted">Крупнейшие запасы Ti в Европе; 3-е место по Li; фонд US-Ukraine $150M</td>
+          </tr>
+          <tr>
+            <td><strong>Энергетика ($67B потребность)</strong></td>
+            <td><span class="rec-tag rec-tag--selective">ИЗБИРАТЕЛЬНЫЙ ВХОД</span></td>
+            <td class="td-gold">89%</td>
+            <td class="td-muted">ЕБРР &euro;2,9 млрд приоритет; риск атак на инфраструктуру</td>
+          </tr>
+          <tr>
+            <td><strong>Оборонные технологии</strong></td>
+            <td><span class="rec-tag rec-tag--speculative">СПЕКУЛЯТИВНО</span></td>
+            <td class="td-gold">88%</td>
+            <td class="td-muted">10 центров экспорта вооружений в ЕС к концу 2026</td>
+          </tr>
+          <tr>
+            <td><strong>Инфраструктура</strong></td>
+            <td><span class="rec-tag rec-tag--monitor">ЖДАТЬ МИРНОГО СОГЛАШЕНИЯ</span></td>
+            <td class="td-gold">86%</td>
+            <td class="td-muted">HANetf ETF одобрен; BlackRock приостановил поиск фонда</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alert alert--info mt-16">
+      <strong>Вероятностная оценка</strong>
+      55% вероятность перемирия к Q2 2026. 40% вероятность устойчивого мира к Q4 2026. До подтверждения мирного соглашения украинские инвестиции остаются спекулятивными с высокой опционной стоимостью.
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SECTION 7: BIG INVESTORS
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>VII. Крупные инвесторы &mdash; необычная активность</h2>
+      <span class="agent-tag">Big Investor Signal Analyzer Agent</span>
+    </div>
+
+    <p class="prose">
+      Институциональное позиционирование даёт смешанные сигналы: Баффет накапливает защитный кэш, BlackRock сохраняет оптимизм по ИИ, Vanguard предупреждает о чрезмерных оценках технологий. Объявление 13F-отчётов 17 февраля 2026 может существенно изменить рыночный нарратив.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Инвестор</th>
+            <th>Действие</th>
+            <th>Уверенность</th>
+            <th>Интерпретация сигнала</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Berkshire Hathaway (Баффет)</strong></td>
+            <td>$58 млрд ставка на энергетику; кэш 33%</td>
+            <td class="td-gold">92%</td>
+            <td><span class="regime-badge badge--risk-off">ЗАЩИТНОЕ ПОЗИЦИОНИРОВАНИЕ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Binance SAFU Fund</strong></td>
+            <td>Конвертирует $1 млрд в BTC за 30 дней</td>
+            <td class="td-gold">89%</td>
+            <td><span class="regime-badge badge--structural">ИНСТИТУЦИОНАЛЬНЫЙ СПРОС BTC</span></td>
+          </tr>
+          <tr>
+            <td><strong>Виталик Бутерин</strong></td>
+            <td>$45M ETH на проекты безопасности</td>
+            <td class="td-gold">90%</td>
+            <td><span class="regime-badge badge--positive">РАЗВИТИЕ ЭКОСИСТЕМЫ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Брэд Гарлингхаус</strong></td>
+            <td>XRP ETF привлекли $700M+</td>
+            <td class="td-gold">88%</td>
+            <td><span class="regime-badge badge--structural">ИНСТИТУЦИОНАЛЬНЫЙ СПРОС XRP</span></td>
+          </tr>
+          <tr>
+            <td><strong>Elliott Management</strong></td>
+            <td>Расширение активизма в Японии</td>
+            <td class="td-gold">89%</td>
+            <td><span class="regime-badge badge--positive">УЛУЧШЕНИЕ КОРПОРАТИВНОГО УПРАВЛЕНИЯ</span></td>
+          </tr>
+          <tr>
+            <td><strong>TCIM</strong></td>
+            <td>Активистская позиция в Target (TGT)</td>
+            <td class="td-gold">88%</td>
+            <td><span class="regime-badge badge--structural">КАТАЛИЗАТОР ОПЕРАЦИОННЫХ ИЗМЕНЕНИЙ</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-grid mt-24">
+      <div class="card">
+        <div class="card__label">BlackRock 2026</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-green)">Overweight США</div>
+        <div class="card__note">ИИ-расширение; частные рынки: жильё и индустриальная недвижимость</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Vanguard 2026</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-gold)">Осторожность</div>
+        <div class="card__note">Чрезмерная оценка технологий; Overweight высококачественные облигации (цель 4%)</div>
+      </div>
+      <div class="card">
+        <div class="card__label">13F Deadline</div>
+        <div class="card__value" style="font-size:16px;color:var(--color-red)">17 фев. 2026</div>
+        <div class="card__note">Q4 2025 отчёты раскроют крупнейшие портфельные изменения. Событие высокой важности</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SECTION 8: MACRO
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>VIII. Макроэкономический контекст</h2>
+      <span class="agent-tag">Macro-Financial Strategist Agent</span>
+    </div>
+
+    <p class="prose">
+      Макро-индикаторы рисуют картину завышенных оценок при нарастающих рисках замедления. CAPE 40,38 &mdash; исторически второй по величине показатель (после пика «Дот-ком»). Крипто-капитуляция и слабость рынка труда создают классический «предкризисный» сценарий, требующий повышенной осторожности.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Индикатор</th>
+            <th>Текущее значение</th>
+            <th>Сигнал</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>CAPE Ratio (Shiller P/E)</strong></td>
+            <td class="td-red">40,38</td>
+            <td><span class="regime-badge badge--warning">ЭКСТРЕМАЛЬНО ЗАВЫШЕН &mdash; +135% от среднего</span></td>
+          </tr>
+          <tr>
+            <td><strong>Fear &amp; Greed (акции)</strong></td>
+            <td>44&ndash;49</td>
+            <td><span class="regime-badge badge--neutral">НЕЙТРАЛЬНЫЙ &mdash; Риск самоуспокоенности</span></td>
+          </tr>
+          <tr>
+            <td><strong>Fear &amp; Greed (крипто)</strong></td>
+            <td class="td-red">9</td>
+            <td><span class="regime-badge badge--risk-off">ЭКСТРЕМАЛЬНЫЙ СТРАХ &mdash; Зона капитуляции</span></td>
+          </tr>
+          <tr>
+            <td><strong>Спред 10Y-2Y</strong></td>
+            <td class="td-green">+0,72%</td>
+            <td><span class="regime-badge badge--positive">ПОЗИТИВНЫЙ &mdash; Сигнал расширения</span></td>
+          </tr>
+          <tr>
+            <td><strong>Ставка ФРС</strong></td>
+            <td>3,50&ndash;3,75%</td>
+            <td><span class="regime-badge badge--hold">ПАУЗА &mdash; Следующее снижение июнь 2026</span></td>
+          </tr>
+          <tr>
+            <td><strong>Безработица (прогноз)</strong></td>
+            <td>4,4%</td>
+            <td><span class="regime-badge badge--neutral">СТАБИЛИЗАЦИЯ</span></td>
+          </tr>
+          <tr>
+            <td><strong>Рост прибыли S&amp;P 500 (2026)</strong></td>
+            <td class="td-green">+14,1%</td>
+            <td><span class="regime-badge badge--positive">ПОЗИТИВНЫЙ &mdash; ИИ-CapEx поддерживает</span></td>
+          </tr>
+          <tr>
+            <td><strong>ИИ-капвложения (2026)</strong></td>
+            <td>$527 млрд</td>
+            <td><span class="regime-badge badge--structural">УСКОРЕНИЕ</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- CRITICAL RISKS -->
+    <div class="mt-24">
+      <p class="section-label">Критические риски &mdash; Приоритет действий</p>
+      <div class="risk-grid">
+        <div class="risk-item">
+          <div class="risk-item__priority">ПРИОРИТЕТ 1 &mdash; НАИВЫСШИЙ</div>
+          <h4>Разрыв оценок</h4>
+          <p>CAPE 40,38 предполагает вечный рост прибыли +14,1%. Разрыв между подразумеваемым и реализованным ростом &mdash; наибольший единственный риск просадки.</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-item__priority">ПРИОРИТЕТ 2 &mdash; 2&ndash;6 НЕДЕЛЬ</div>
+          <h4>Крипто-капитуляция как опережающий индикатор</h4>
+          <p>Crypto Fear 9 vs Equity Fear 44. Историческая точность: 75%. Когда крипто капитулирует ниже 15 при спокойных акциях, коррекция акций следует за 2&ndash;6 недели.</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-item__priority">ПРИОРИТЕТ 3 &mdash; РАННИЙ СИГНАЛ</div>
+          <h4>Рынок труда даёт трещину</h4>
+          <p>108 435 увольнений в январе &mdash; максимум с 2008 года. Если январские Nonfarm Payrolls ниже 100K или безработица растёт до 4,6%+, вероятность рецессии удваивается.</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-item__priority">ПРИОРИТЕТ 4 &mdash; СЛЕДИТЬ</div>
+          <h4>Повторный разгон инфляции</h4>
+          <p>CPI прекратил снижаться. Если февральский отчёт (13 февраля) покажет MoM >0,3% (аннуализируется до 3,6%), ФРС продлит паузу.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- RECESSION PROBABILITY -->
+    <div class="card-grid mt-24">
+      <div class="card">
+        <div class="card__label">J.P. Morgan (12 мес.)</div>
+        <div class="card__value" style="color:var(--color-orange)">35%</div>
+        <div class="card__note">Вероятность рецессии; умеренно-повышенная</div>
+      </div>
+      <div class="card">
+        <div class="card__label">RSM Economic Research</div>
+        <div class="card__value" style="color:var(--color-orange)">30%</div>
+        <div class="card__note">12-месячная вероятность рецессии</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Исторически (CAPE &gt;38)</div>
+        <div class="card__value" style="color:var(--color-orange)">28%</div>
+        <div class="card__note">Медианная вероятность рецессии при CAPE выше 38 в следующие 12 месяцев</div>
+      </div>
+    </div>
+
+    <!-- DATA CALENDAR -->
+    <div class="mt-24">
+      <p class="section-label">Ключевые события &mdash; Календарь данных</p>
+      <div class="calendar-grid">
+        <div class="calendar-item">
+          <div class="calendar-item__date">11 ФЕВ</div>
+          <div class="calendar-item__desc">
+            <strong>Отчёт по труду (январь)</strong>
+            Nonfarm Payrolls; безработица <span class="priority-badge priority-badge--critical">КРИТИЧНО</span>
+          </div>
+        </div>
+        <div class="calendar-item">
+          <div class="calendar-item__date">13 ФЕВ</div>
+          <div class="calendar-item__desc">
+            <strong>CPI (январь)</strong>
+            Ключевой инфляционный отчёт <span class="priority-badge priority-badge--critical">КРИТИЧНО</span>
+          </div>
+        </div>
+        <div class="calendar-item">
+          <div class="calendar-item__date">17 ФЕВ</div>
+          <div class="calendar-item__desc">
+            <strong>13F-отчёты</strong>
+            Портфели Q4 2025 крупных фондов <span class="priority-badge priority-badge--high">ВЫСОКИЙ</span>
+          </div>
+        </div>
+        <div class="calendar-item">
+          <div class="calendar-item__date">18&ndash;22 ФЕВ</div>
+          <div class="calendar-item__desc">
+            <strong>Отчётность Magnificent 7</strong>
+            Nvidia 25 фев &mdash; ключевое событие <span class="priority-badge priority-badge--high">ВЫСОКИЙ</span>
+          </div>
+        </div>
+        <div class="calendar-item">
+          <div class="calendar-item__date">15 МАЯ</div>
+          <div class="calendar-item__desc">
+            <strong>Истечение полномочий Пауэлла</strong>
+            Смена председателя ФРС <span class="priority-badge priority-badge--high">ВЫСОКИЙ</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       INVESTMENT RECOMMENDATIONS TABLE
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>IX. Сводная таблица инвестиционных рекомендаций</h2>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Класс активов</th>
+            <th>Инструмент</th>
+            <th>Рекомендация</th>
+            <th>Горизонт</th>
+            <th>Катализатор</th>
+            <th>Ключевой риск</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Сырьё</strong></td>
+            <td>Золото ($5 031)</td>
+            <td><span class="rec-tag rec-tag--overweight">Overweight</span></td>
+            <td>6&ndash;12 мес.</td>
+            <td class="td-muted">Закупки ЦБ; ослабление $; геополитика</td>
+            <td class="td-red">Сильный $ при сюрпризе от ФРС</td>
+          </tr>
+          <tr>
+            <td><strong>Облигации</strong></td>
+            <td>US Treasury 5&ndash;10Y</td>
+            <td><span class="rec-tag rec-tag--overweight">Overweight</span></td>
+            <td>6&ndash;18 мес.</td>
+            <td class="td-muted">Пауза ФРС; слабый рынок труда</td>
+            <td class="td-red">Инфляционный сюрприз выше 3,6%</td>
+          </tr>
+          <tr>
+            <td><strong>Облигации</strong></td>
+            <td>Municipal Bonds</td>
+            <td><span class="rec-tag rec-tag--overweight">Overweight</span></td>
+            <td>12&ndash;24 мес.</td>
+            <td class="td-muted">Налоговые преимущества; сильные технические</td>
+            <td class="td-red">Снижение налоговых ставок</td>
+          </tr>
+          <tr>
+            <td><strong>Акции</strong></td>
+            <td>Японские акции / ETF</td>
+            <td><span class="rec-tag rec-tag--accumulate">Accumulate</span></td>
+            <td>12&ndash;24 мес.</td>
+            <td class="td-muted">Победа Такаити; реформы корпоративного управления</td>
+            <td class="td-red">Укрепление иены; глобальный risk-off</td>
+          </tr>
+          <tr>
+            <td><strong>Акции</strong></td>
+            <td>Малая/средняя кап. США</td>
+            <td><span class="rec-tag rec-tag--accumulate">Accumulate</span></td>
+            <td>6&ndash;18 мес.</td>
+            <td class="td-muted">Ротация от Mag-7; расширение рыночного лидерства</td>
+            <td class="td-red">Рецессия; кредитный кризис</td>
+          </tr>
+          <tr>
+            <td><strong>Сырьё</strong></td>
+            <td>Медь ($5,87/фунт)</td>
+            <td><span class="rec-tag rec-tag--accumulate">Accumulate</span></td>
+            <td>12&ndash;36 мес.</td>
+            <td class="td-muted">Энергопереход; ЦОД ИИ; JPM цель $12 500/т</td>
+            <td class="td-red">Замедление Китая</td>
+          </tr>
+          <tr>
+            <td><strong>Крипто</strong></td>
+            <td>Bitcoin (~$70K)</td>
+            <td><span class="rec-tag rec-tag--accumulate">Accumulate</span></td>
+            <td>12&ndash;24 мес.</td>
+            <td class="td-muted">ETF-зрелость; регуляторная ясность; цель Bernstein $150K</td>
+            <td class="td-red">Расширенный медвежий рынок</td>
+          </tr>
+          <tr>
+            <td><strong>Крипто</strong></td>
+            <td>Ethereum (ATH сети)</td>
+            <td><span class="rec-tag rec-tag--accumulate">Accumulate</span></td>
+            <td>12&ndash;24 мес.</td>
+            <td class="td-muted">Стоимостной разрыв: -62% цена, ATH использование</td>
+            <td class="td-red">Конкуренция Layer-1; регуляторный риск</td>
+          </tr>
+          <tr>
+            <td><strong>Акции</strong></td>
+            <td>European Equities (DAX)</td>
+            <td><span class="rec-tag rec-tag--selective">Selective</span></td>
+            <td>6&ndash;12 мес.</td>
+            <td class="td-muted">Ротационные потоки из США; оценки привлекательны</td>
+            <td class="td-red">Энергетический кризис; геополитика</td>
+          </tr>
+          <tr>
+            <td><strong>Украина</strong></td>
+            <td>Критические минералы</td>
+            <td><span class="rec-tag rec-tag--selective">Selective</span></td>
+            <td>24&ndash;60 мес.</td>
+            <td class="td-muted">Запасы Ti/Li; US-Ukraine Reconstruction Fund</td>
+            <td class="td-red">Продолжение конфликта</td>
+          </tr>
+          <tr>
+            <td><strong>Акции</strong></td>
+            <td>Качественный tech (hold)</td>
+            <td><span class="rec-tag rec-tag--hold">Hold</span></td>
+            <td>3&ndash;6 мес.</td>
+            <td class="td-muted">Дождаться отчётности Nvidia 25 фев.; Q1 подтверждение</td>
+            <td class="td-red">ИИ-разочарование; сжатие CAPE</td>
+          </tr>
+          <tr>
+            <td><strong>Крипто</strong></td>
+            <td>BNB / SOL / XRP</td>
+            <td><span class="rec-tag rec-tag--hold">Hold</span></td>
+            <td>Краткосрочно</td>
+            <td class="td-muted">Нет нового сигнала для действий</td>
+            <td class="td-red">Рыночная корреляция с BTC</td>
+          </tr>
+          <tr>
+            <td><strong>Акции</strong></td>
+            <td>Mag-7 (концентрация)</td>
+            <td><span class="rec-tag rec-tag--underweight">Underweight</span></td>
+            <td>3&ndash;6 мес.</td>
+            <td class="td-muted">Разочарование в прибыли; конкуренция ИИ</td>
+            <td class="td-red">&mdash;</td>
+          </tr>
+          <tr>
+            <td><strong>Облигации</strong></td>
+            <td>IG Corporate Bonds</td>
+            <td><span class="rec-tag rec-tag--underweight">Underweight</span></td>
+            <td>6&ndash;12 мес.</td>
+            <td class="td-muted">Спреды на 2-м процентиле; асимметрия вниз</td>
+            <td class="td-red">&mdash;</td>
+          </tr>
+          <tr>
+            <td><strong>Сырьё</strong></td>
+            <td>Нефть WTI ($63,70)</td>
+            <td><span class="rec-tag rec-tag--underweight">Underweight</span></td>
+            <td>12&ndash;24 мес.</td>
+            <td class="td-muted">Структурный избыток; EV-переход в Китае</td>
+            <td class="td-red">Геополитический шок предложения</td>
+          </tr>
+          <tr>
+            <td><strong>Акции</strong></td>
+            <td>Software / SaaS ETF</td>
+            <td><span class="rec-tag rec-tag--avoid">Avoid</span></td>
+            <td>6&ndash;12 мес.</td>
+            <td class="td-muted">ИИ-дезинтермедиация; -28% от максимумов, -17% с начала года</td>
+            <td class="td-red">&mdash;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SCENARIO ANALYSIS
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>X. Сценарный анализ</h2>
+    </div>
+
+    <div class="scenario-grid">
+
+      <!-- OPTIMISTIC -->
+      <div class="scenario-card scenario-card--opt">
+        <div class="scenario-card__prob">Оптимистичный &mdash; 25% вероятность</div>
+        <div class="scenario-card__prob-bar"><div class="fill"></div></div>
+        <h3>Сценарий 1: Мягкая посадка и бычий импульс</h3>
+        <ul>
+          <li>Мирная сделка на Украине к Q2 2026</li>
+          <li>Инфляция стабилизируется ниже 3%</li>
+          <li>ФРС снижает ставку дважды к концу года</li>
+          <li>ИИ-инвестиции подтверждают прогнозы прибыли</li>
+          <li>Рынок труда остаётся устойчивым</li>
+          <li>S&amp;P 500: +15&ndash;20%, цель 7 500&ndash;8 000</li>
+          <li>BTC: $100K+; ETH: $4 000+</li>
+          <li>Золото консолидируется у $4 500&ndash;5 000</li>
+          <li>Украинские ETF: +30%+ дивиденд мира</li>
+        </ul>
+        <div class="scenario-card__positioning">
+          <strong>Позиционирование</strong>
+          Overweight акции (growth), сократить кэш, удлинить дюрацию, накапливать крипто, входить в украинскую инфраструктуру
+        </div>
+      </div>
+
+      <!-- REALISTIC -->
+      <div class="scenario-card scenario-card--real">
+        <div class="scenario-card__prob">Реалистичный &mdash; 50% вероятность</div>
+        <div class="scenario-card__prob-bar"><div class="fill"></div></div>
+        <h3>Сценарий 2: Волатильная консолидация</h3>
+        <ul>
+          <li>Частичное перемирие, но не устойчивый мир</li>
+          <li>Инфляция «lipky» на 3,2&ndash;3,5%</li>
+          <li>Одно снижение ФРС во H2 2026</li>
+          <li>Рост прибыли замедляется до 8&ndash;10%</li>
+          <li>Безработица растёт до 4,6%</li>
+          <li>S&amp;P 500: коррекция -8&ndash;12%, затем 6 600&ndash;7 000</li>
+          <li>BTC: диапазон $60K&ndash;$85K с высокой волатильностью</li>
+          <li>Золото: поддержка $4 800&ndash;5 200</li>
+          <li>Treasury: 4,0&ndash;4,3%; спреды умеренно расширяются</li>
+        </ul>
+        <div class="scenario-card__positioning">
+          <strong>Позиционирование</strong>
+          Сбалансированная аллокация с value-уклоном; кэш 10&ndash;15%; промежуточная дюрация; ETH предпочтительнее; ждать мир в Украине
+        </div>
+      </div>
+
+      <!-- PESSIMISTIC -->
+      <div class="scenario-card scenario-card--pess">
+        <div class="scenario-card__prob">Пессимистичный &mdash; 25% вероятность</div>
+        <div class="scenario-card__prob-bar"><div class="fill"></div></div>
+        <h3>Сценарий 3: Стагфляция и рецессия</h3>
+        <ul>
+          <li>Переговоры о мире срываются</li>
+          <li>Инфляция разгоняется выше 4%</li>
+          <li>ФРС вынуждена держать паузу весь 2026</li>
+          <li>ИИ CapEx-цикл разочаровывает (ROI не подтверждён)</li>
+          <li>Безработица растёт до 5%+; рецессия реализуется</li>
+          <li>S&amp;P 500: коррекция -20&ndash;30%; поддержка 5 500&ndash;6 000</li>
+          <li>Техсектор возглавляет падение; Software «апокалипсис» углубляется</li>
+          <li>BTC: тест $50K; ETH: тест $1 500</li>
+          <li>Золото: рост до $6 000+ на спросе на защиту</li>
+          <li>HY-спреды: >500 б.п.; Treasury 3,5% на рецессии</li>
+        </ul>
+        <div class="scenario-card__positioning">
+          <strong>Позиционирование</strong>
+          Защита: кэш 25%+; Overweight золото и Treasuries; Underweight акции; избегать HY и крипто-плечо; отложить Украину
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================================================================
+       INVESTMENT GUIDANCE BY RISK PROFILE
+  ================================================================ -->
+  <div class="report-section">
+    <div class="section-header">
+      <h2>XI. Рекомендации по профилю риска</h2>
+    </div>
+
+    <div class="profile-grid">
+      <div class="profile-card profile-card--conservative">
+        <div class="profile-card__type">Консервативный инвестор</div>
+        <ul>
+          <li>US Treasury 5&ndash;10Y <span>Overweight 40%</span></li>
+          <li>Municipal Bonds <span>20%</span></li>
+          <li>Золото / GLD <span>15%</span></li>
+          <li>Качественные акции (Div.) <span>15%</span></li>
+          <li>Кэш / T-Bills <span>10%</span></li>
+          <li>Крипто <span>0%</span></li>
+        </ul>
+      </div>
+      <div class="profile-card profile-card--balanced">
+        <div class="profile-card__type">Сбалансированный инвестор</div>
+        <ul>
+          <li>US Treasury 5&ndash;10Y <span>25%</span></li>
+          <li>Акции (value+intl.) <span>30%</span></li>
+          <li>Золото / медь <span>15%</span></li>
+          <li>BTC / ETH <span>10%</span></li>
+          <li>Малая/средняя кап. США <span>10%</span></li>
+          <li>Кэш <span>10%</span></li>
+        </ul>
+      </div>
+      <div class="profile-card profile-card--aggressive">
+        <div class="profile-card__type">Агрессивный инвестор</div>
+        <ul>
+          <li>Акции (growth + small) <span>40%</span></li>
+          <li>BTC / ETH / Крипто <span>20%</span></li>
+          <li>Золото / медь <span>10%</span></li>
+          <li>Украина (спекулятивно) <span>10%</span></li>
+          <li>Японские акции <span>10%</span></li>
+          <li>Кэш <span>10%</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="alert alert--danger mt-24">
+      <strong>Универсальное предупреждение для всех профилей риска</strong>
+      При CAPE 40,38 и Crypto Fear Index 9 исторические данные настоятельно рекомендуют повышенный уровень кэша относительно долгосрочного таргета. Критически важно дождаться данных по занятости и CPI за январь 2026 года перед принятием крупных позиций. Отчётность Nvidia (25 февраля) станет ключевым индикатором для ИИ-тезиса.
+    </div>
+  </div>
+
+  <!-- ================================================================
+       CONCLUSION
+  ================================================================ -->
+  <div class="conclusion">
+    <div class="section-label">Заключение</div>
+    <h2>Итоговая оценка: сохранять бдительность</h2>
+    <p>
+      Рынки находятся в критической точке перелома, характеризующейся экстремальными оценками, структурными секторальными ротациями и дивергентными сигналами по классам активов. Коэффициент CAPE 40,38 представляет собой наивысшую оценку за 23 года вне пузыря «Дот-ком» и поддерживается исключительно агрессивными допущениями ИИ-капитальных вложений, которые требуют подтверждения в отчётности Q1 2026.
+    </p>
+    <p>
+      Индекс страха на крипторынках на уровне 9 исторически предшествует коррекциям рынка акций на 2&ndash;6 недель, что требует защитного позиционирования вне зависимости от базового сценария. Структурные попутные ветры остаются в золоте (накопления центральных банков), меди (энергетический переход), промежуточных казначейских бумагах США (пауза ФРС) и избирательно &mdash; в реконструкции Украины (в ожидании прогресса в переговорах).
+    </p>
+    <p>
+      Профессиональные инвесторы должны приоритизировать <strong>сохранение капитала</strong> через сокращение концентрации в технологиях, увеличение кэш-позиций и позиционирование в пользу качества, а не импульса &mdash; вплоть до получения ясности из данных февраля (занятость, CPI, 13F-отчёты, отчётность Nvidia).
+    </p>
+  </div>
+
+  <!-- ================================================================
+       METHODOLOGY
+  ================================================================ -->
+  <div class="methodology">
+    <h3>Методология и источники</h3>
+    <p><strong>Составлен:</strong> 14 февраля 2026 | <strong>Покрытие:</strong> Последние 24 часа</p>
+    <ul>
+      <li><strong>Index Analyst Agent</strong> &mdash; Анализ производительности индексов и трендов</li>
+      <li><strong>Market Signal Analyzer Agent</strong> &mdash; Сигналы по акциям/ETF и инвестиционные возможности</li>
+      <li><strong>Crypto Signal Analyzer Agent</strong> &mdash; Анализ рынка криптовалют</li>
+      <li><strong>Commodities Signal Analyzer Agent</strong> &mdash; Аналитика товарного рынка</li>
+      <li><strong>Bonds Treasury Signal Analyzer Agent</strong> &mdash; Анализ фиксированного дохода и казначейских бумаг</li>
+      <li><strong>Ukraine Signal Analyzer Agent</strong> &mdash; Анализ рынка Украины</li>
+      <li><strong>Big Investor Signal Analyzer Agent</strong> &mdash; Анализ позиционирования крупных инвесторов</li>
+      <li><strong>Macro-Financial Strategist Agent</strong> &mdash; Макроэкономический контекст и последствия</li>
+    </ul>
+    <p>
+      <strong>Система фильтрации:</strong> Трёхфакторный анализ (Economic Moat, Macro/Structural, Value vs Price) с пороговым значением уверенности 88%+. Сигналы ниже порога исключены из финального отчёта. Сценарный анализ построен на фактических данных агентов с вероятностями, основанными на исторических прецедентах и текущих индикаторах.
+    </p>
+  </div>
+
+  <!-- ================================================================
+       FOOTER
+  ================================================================ -->
+  <div class="footer">
+    <strong>Global Financial Market Report</strong><br>
+    Дата составления: 14 февраля 2026 &mdash; Тип: Daily Standard Report<br>
+    8 специализированных аналитических агентов &mdash; Порог уверенности: 88%+<br>
+    <br>
+    Данный отчёт носит исключительно информационный характер и не является предложением о покупке или продаже ценных бумаг.
+    Все инвестиции сопряжены с риском потери капитала. Прошлые результаты не гарантируют будущей доходности.
+    Перед принятием инвестиционных решений проконсультируйтесь с лицензированным финансовым советником.
+  </div>
+
+</div><!-- /wrapper -->
+</body>
+</html>
