@@ -88,5 +88,57 @@
 6. **CAPE mean reversion risk** - 40.01 current vs 17.5 historical mean (131% premium)
 
 ---
-*Last Updated: 2026-02-19*
-*Reports Generated: 1*
+
+## Report 2026-02-22: Key Learnings
+
+### Successfully Implemented
+- **Structural transformation narrative** - Tariff asymmetry as central thesis (89.25% confidence ECB validation)
+- **Asset class bifurcation clarity** - Precious metals/copper bullish vs oil/agriculture bearish structure
+- **Ukraine reconstruction timing precision** - 6-9 month window before institutional acceleration (55-60% peace probability)
+- **Professional light theme consistency** - Maintained Georgia serif, white background, institutional readability
+- **Three-scenario framework refinement** - 25% optimistic / 50% realistic / 25% pessimistic (balanced uncertainty)
+- **Portfolio allocation tables by risk profile** - Conservative 40/60, Growth 70/30, Aggressive opportunistic
+- **Critical dates monitoring** - HANetf ETF launch (this week), EU Parliament vote, Q1 procurement orders
+
+### Cross-Asset Correlation Patterns Identified
+- **Tariff policy structural shift** - US multinationals disadvantaged vs international competitors (ECB Panetta confirmation)
+- **Geographic divergence acceleration** - Europe (DAX +0.94%) outperforming US (S&P -0.24%) = capital rotation
+- **Commodity bifurcation persistence** - Gold $4,703 (+72% YoY), Copper structural deficit 330k tons vs Oil surplus 3M bbl/d
+- **Credit market stress emerging** - CLO retail flight, IG spreads 2nd percentile (78 bps OAS)
+- **CAPE valuation extreme maintained** - 40.38 (135% above historical mean) = correction risk persists
+- **Crypto consolidation without signals** - 0 high-confidence signals (88%+) = healthy market maturity
+
+### Russian Language Quality Refinements
+- **Title formula success** - "Структурная трансформация в условиях тарифной неопределенности" captures complexity
+- **Technical precision** - Асимметричное повреждение (asymmetric damage), бифуркация (bifurcation), капитуляция (capitulation)
+- **Action verbs clarity** - Накапливать (accumulate), недовес (underweight), избегать (avoid), следить (monitor)
+- **Scenario headers** - Maintained Russian with probability badges for professional consistency
+
+### File Organization
+- Final saved to: `.claude/agent-memory/article-writer/INVEST/REPORTS/2026-02-22_Структурная_трансформация_в_условиях_тарифной_неопределенности.html`
+- Title pattern: YYYY-MM-DD_DESCRIPTIVE_RUSSIAN_TITLE.html
+- Consistent path: `INVEST/REPORTS/` subdirectory
+
+### Key Data Integration Success
+- **8 sub-agent synthesis** - Index (Feb 9), Stocks (Feb 22), Crypto (Feb 19), Commodities (Feb 19), Bonds (Feb 9), Macro (Feb 9), Big Investors (Feb 9), Ukraine (Feb 22)
+- **High-confidence signals prioritization** - Only 88%+ signals featured (5 total: tariff asymmetry, USMCA risk, gold, oil bearish, copper bullish)
+- **Ukraine reconstruction specificity** - $682B total, $67B energy, 60% capacity, HANetf ETF launch imminent
+- **Macro red flags hierarchy** - CAPE 40.38 (highest priority), crypto divergence (2-4 week lead), labor deterioration
+
+### Areas for Future Enhancement
+- Consider adding visual charts for CAPE historical context (40.38 vs mean 17.3)
+- Expand Ukraine reconstruction section if peace probability crosses 70% threshold
+- Add specific entry/exit price levels for tactical commodity trades (gold $4,600 support, copper $5.50-5.70 accumulation)
+- Create monitoring dashboard for critical dates (Feb 22-28 HANetf launch, Mar 1-15 procurement orders)
+
+### Recurring Themes Across Reports
+1. **Tariff policy structural impact** - NEW: Confirmed asymmetric damage to US corporations (ECB validation)
+2. **CAPE valuation extreme persistence** - 40.38 maintained (was 40.01 Feb 19) = correction risk ongoing
+3. **Crypto consolidation maturity** - 0 high-confidence signals = healthy lack of speculation
+4. **Commodity bifurcation strengthening** - Gold/copper structural tailwinds vs oil/agriculture structural headwinds
+5. **Ukraine ceasefire probability stable** - 55-60% maintained; Q1 procurement acceleration confirmed
+6. **Fed policy trajectory** - 3.50-3.75% hold, 50 bps cuts expected 2026, PCE 3% confirmed
+
+---
+*Last Updated: 2026-02-22*
+*Reports Generated: 2*
