@@ -1286,11 +1286,12 @@ class PortfolioService:
 
             # Calculate metrics
             # Use cost basis for current position, not cumulative cost basis
-            if pos_data['position_hit_zero']:
-                # Position was reset, calculate new average cost from current position
+            # If cost_basis_for_current != buy_cost, position was fully closed and reopened
+            if pos_data['cost_basis_for_current'] != pos_data['buy_cost']:
+                avg_cost_per_share = (pos_data['cost_basis_for_current'] / pos_data['shares']) if pos_data['shares'] > 0 else 0
+            elif pos_data['position_hit_zero']:
                 avg_cost_per_share = (pos_data['cost_basis_for_current'] / pos_data['shares']) if pos_data['shares'] > 0 else 0
             else:
-                # Position has never been fully sold, use traditional calculation
                 avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
             # Total cost of CURRENT shares (not all shares ever bought)
             total_cost = (shares * avg_cost_per_share) if shares > 0 else 0
