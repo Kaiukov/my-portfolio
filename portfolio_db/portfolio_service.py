@@ -1189,6 +1189,8 @@ class PortfolioService:
                     'dividend_income': 0.0,
                     'first_buy_date': date.today(),
                     'last_price_from_trans': None,
+                    'position_hit_zero': False,
+                    'cost_basis_for_current': 0.0,
                 }
             else:
                 positions[symbol]['shares'] = cash_data['balance']
