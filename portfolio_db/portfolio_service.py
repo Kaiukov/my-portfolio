@@ -1066,8 +1066,9 @@ class PortfolioService:
         except Exception:
             pass
 
-        # Build position data by asset (skip cash DEPOSIT and FEE - handled separately)
-        positions = {}
+        # Build position data by asset with proper cost basis tracking
+        # Skip cash DEPOSIT and FEE - they don't create investment positions
+        asset_transactions = {}
         for trans in transactions:
             asset = trans[2]
             action = trans[3].upper()
@@ -1079,32 +1080,85 @@ class PortfolioService:
             if action in ('FEE', 'DEPOSIT', 'EXCHANGE_FROM', 'EXCHANGE_TO'):
                 continue
 
-            if asset not in positions:
-                positions[asset] = {
-                    'symbol': asset,
-                    'shares': 0,
-                    'buy_quantity': 0,
-                    'buy_cost': 0.0,
-                    'sell_quantity': 0,
-                    'sell_proceeds': 0.0,
-                    'dividend_income': 0.0,
-                    'first_buy_date': date_obj,
-                    'last_price_from_trans': None,
-                }
+            if asset not in asset_transactions:
+                asset_transactions[asset] = []
 
-            if action == 'BUY':
-                positions[asset]['shares'] += quantity
-                positions[asset]['buy_quantity'] += quantity
-                if price:
-                    positions[asset]['buy_cost'] += quantity * price
-                    positions[asset]['last_price_from_trans'] = price
-                positions[asset]['first_buy_date'] = min(positions[asset]['first_buy_date'], date_obj)
-            elif action == 'SELL':
-                positions[asset]['shares'] -= quantity
-                positions[asset]['sell_quantity'] += quantity
-                if price:
-                    positions[asset]['sell_proceeds'] += quantity * price
-                    positions[asset]['last_price_from_trans'] = price
+            asset_transactions[asset].append({
+                'date': date_obj,
+                'action': action,
+                'quantity': quantity,
+                'price': price,
+                'cost': quantity * price if price else 0.0
+            })
+
+        # Calculate positions with proper cost basis tracking
+        positions = {}
+        for asset, trans_list in asset_transactions.items():
+            # Sort transactions chronologically
+            trans_list.sort(key=lambda x: x['date'])
+
+            # Initialize position tracking
+            current_shares = 0
+            cumulative_shares = 0
+            cost_basis_for_current = 0.0
+            cost_basis_cumulative = 0.0
+            sell_proceeds = 0.0
+            dividend_income = 0.0
+            
+            # Track when position hits zero to reset cost basis
+            position_hit_zero = False
+            last_zero_date = None
+
+            for trans in trans_list:
+                if trans['action'] == 'BUY':
+                    current_shares += trans['quantity']
+                    cumulative_shares += trans['quantity']
+                    
+                    # Add to cost basis
+                    cost_basis_cumulative += trans['cost']
+                    
+                    # If position was at zero, this is a new position - reset cost basis tracking
+                    if position_hit_zero:
+                        cost_basis_for_current = trans['cost']
+                        position_hit_zero = False
+                    else:
+                        cost_basis_for_current += trans['cost']
+                        
+                    if trans['price']:
+                        last_price = trans['price']
+                        
+                elif trans['action'] == 'SELL':
+                    sell_quantity = trans['quantity']
+                    sell_proceeds += sell_quantity * trans['price'] if trans['price'] else 0.0
+                    
+                    # Determine how many shares to sell from current position
+                    shares_to_sell = min(sell_quantity, current_shares)
+                    current_shares -= shares_to_sell
+                    
+                    # Reduce cost basis proportionally
+                    if current_shares > 0 and cost_basis_for_current > 0:
+                        proportion = shares_to_sell / (current_shares + shares_to_sell)
+                        cost_basis_for_current *= (1 - proportion)
+                    
+                    # Check if position hit zero
+                    if current_shares == 0:
+                        position_hit_zero = True
+                        last_zero_date = trans['date']
+
+            # Initialize position structure
+            positions[asset] = {
+                'symbol': asset,
+                'shares': current_shares,
+                'buy_quantity': cumulative_shares,
+                'buy_cost': cost_basis_cumulative,
+                'sell_quantity': cumulative_shares - current_shares,
+                'sell_proceeds': sell_proceeds,
+                'dividend_income': dividend_income,
+                'first_buy_date': trans_list[0]['date'] if trans_list else date.today(),
+                'last_price_from_trans': last_price if 'last_price' in locals() else None,
+                'cost_basis_for_current': cost_basis_for_current,  # New field for current position cost basis
+                'position_hit_zero': position_hit_zero
+            }
 
         # Use actual cash balances as single source of truth
         actual_cash = self.get_actual_cash_balances()
@@ -1229,7 +1283,13 @@ class PortfolioService:
                     last_price = last_price * eur_rate
 
             # Calculate metrics
-            avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
+            # Use cost basis for current position, not cumulative cost basis
+            if pos_data['position_hit_zero']:
+                # Position was reset, calculate new average cost from current position
+                avg_cost_per_share = (pos_data['cost_basis_for_current'] / pos_data['shares']) if pos_data['shares'] > 0 else 0
+            else:
+                # Position has never been fully sold, use traditional calculation
+                avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
             # Total cost of CURRENT shares (not all shares ever bought)
             total_cost = (shares * avg_cost_per_share) if shares > 0 else 0
             # Market value: for cash, allow negative values; for other assets, only positive
