@@ -2,9 +2,36 @@
 
 import click
 import sys
-from datetime import datetime, date
+import json
+import shutil
+from pathlib import Path
+from datetime import datetime, date, timedelta
 from portfolio_db.portfolio_service import PortfolioService
 from portfolio_db.response import success, error, build_pagination
+
+
+CONFIG_FILE = Path.home() / ".portfolio-config.json"
+CONFIG_KEYS = {"db", "log_dir", "timezone"}
+
+
+def _load_config() -> dict:
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_config(config: dict) -> None:
+    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+
+
+def _resolved_db(db: str) -> str:
+    if db != "portfolio.db":
+        return db
+    cfg = _load_config()
+    return cfg.get("db", db)
 
 
 def _parse_date(value: str, flag: str) -> date:
@@ -36,7 +63,7 @@ def cli():
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def migrate(csv, db):
     """Migrate transactions from CSV to DuckDB."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         service.setup_from_csv(csv)
         count = service.db.get_transaction_count()
@@ -59,7 +86,7 @@ def report(limit, offset, start_date, end_date, db):
     """Show daily returns report."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         data, total = service.get_daily_returns_paginated(limit, offset, sd, ed)
         pagination = build_pagination(limit, offset, total)
@@ -82,7 +109,7 @@ def transactions(limit, offset, start_date, end_date, db):
     """List transactions."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         data, total = service.get_transactions_paginated(limit, offset, sd, ed)
         pagination = build_pagination(limit, offset, total)
@@ -99,7 +126,7 @@ def transactions(limit, offset, start_date, end_date, db):
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def status(db):
     """Show portfolio status."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         trans_count = service.db.get_transaction_count()
         stats = service.get_performance_stats()
@@ -136,7 +163,7 @@ def status(db):
 def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
     """Add a transaction and auto-recalculate returns."""
     date_obj = _parse_legacy_date(date_str, "--date")
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         result = service.add_transaction(
             date_obj=date_obj,
@@ -170,7 +197,7 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
 @click.option("--db", default="portfolio.db")
 def verify_prices(db):
     """Verify prices table structure and storage."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         info = service.verify_prices_storage()
         stats = info.get("statistics", {})
@@ -200,7 +227,7 @@ def verify_prices(db):
 def recalculate(force, from_date, db):
     """Recalculate portfolio returns."""
     from_date_obj = _parse_legacy_date(from_date, "--from-date") if from_date else None
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         result = service.recalculate(from_date=from_date_obj, force=force)
         if result.get("status") == "success":
@@ -227,7 +254,7 @@ def recalculate(force, from_date, db):
 @click.option("--db", default="portfolio.db")
 def allocation(allocation_type, db):
     """Show portfolio allocation breakdown."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         data = service.get_allocation(allocation_type=allocation_type)
         success("allocation", data)
@@ -243,7 +270,7 @@ def allocation(allocation_type, db):
 @click.option("--db", default="portfolio.db")
 def cash(db):
     """Show actual cash balances (converted to USD)."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         cash_balances = service.get_actual_cash_balances()
 
@@ -317,7 +344,7 @@ def cash(db):
 @click.option("--db", default="portfolio.db")
 def delete(trans_id, confirm, db):
     """Delete a transaction by ID and auto-recalculate returns."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         trans = service.db.con.execute(
             "SELECT id, date, asset, action, quantity, price FROM transactions WHERE id = ?",
@@ -350,7 +377,7 @@ def delete(trans_id, confirm, db):
 @click.option("--db", default="portfolio.db")
 def performance(db):
     """Show performance metrics."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         stats = service.get_performance_stats()
         concentration = service.get_concentration_metrics()
@@ -421,7 +448,7 @@ def performance(db):
 @click.option("--db", default="portfolio.db")
 def summary(position_filter, db):
     """Show portfolio position summary with gains/losses."""
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         include_closed = position_filter == "all"
         positions = service.get_position_summary(include_closed=include_closed)
@@ -444,7 +471,7 @@ def summary(position_filter, db):
 def exchange(date_str, from_asset, to_asset, quantity, rate, db):
     """Exchange one currency for another."""
     date_obj = _parse_legacy_date(date_str, "--date")
-    service = PortfolioService(db)
+    service = PortfolioService(_resolved_db(db))
     try:
         result = service.exchange_currency(
             date_obj=date_obj,
@@ -465,6 +492,355 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
         error("exchange", "DB_ERROR", str(e))
     finally:
         service.close()
+
+
+# ─── init ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--db", default="portfolio.db", help="Path to database file")
+@click.option("--csv", default=None, help="Optional CSV file to migrate after DB init")
+def init(db, csv):
+    """Initialize database schema, optionally importing CSV data."""
+    db_path = _resolved_db(db)
+    service = PortfolioService(db_path)
+    try:
+        data = {"db": db_path, "initialized": True, "imported": False}
+        if csv:
+            service.setup_from_csv(csv)
+            data["imported"] = True
+            data["rows_imported"] = service.db.get_transaction_count()
+            data["source"] = csv
+        success("init", data)
+    except Exception as e:
+        error("init", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── health ───────────────────────────────────────────────────────────────────
+
+@cli.command(name="health")
+@click.option("--db", default="portfolio.db", help="Path to database file")
+def health_check(db):
+    """Run operational health checks."""
+    db_path = _resolved_db(db)
+    service = PortfolioService(db_path)
+    try:
+        tx_count = service.db.get_transaction_count()
+        prices_info = service.db.get_prices_table_info()
+        max_price_date = prices_info.get("max_date")
+        stale_days = None
+        if max_price_date:
+            stale_days = (date.today() - max_price_date).days
+
+        yfinance_ok = True
+        yfinance_error = None
+        try:
+            import yfinance as yf
+            end = date.today()
+            start = end - timedelta(days=7)
+            hist = yf.Ticker("SPY").history(start=start, end=end)
+            yfinance_ok = not hist.empty
+            if hist.empty:
+                yfinance_error = "No data returned for SPY."
+        except Exception as e:
+            yfinance_ok = False
+            yfinance_error = str(e)
+
+        result = {
+            "db": {
+                "path": db_path,
+                "ok": True,
+                "transactions": tx_count,
+            },
+            "prices": {
+                "ok": prices_info.get("total_records", 0) > 0,
+                "total_records": prices_info.get("total_records", 0),
+                "min_date": str(prices_info.get("min_date") or ""),
+                "max_date": str(max_price_date or ""),
+                "stale_days": stale_days,
+            },
+            "market_data": {
+                "provider": "yfinance",
+                "ok": yfinance_ok,
+                "error": yfinance_error,
+            },
+        }
+        success("health", result)
+    except Exception as e:
+        error("health", "INTERNAL_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── fetch-prices ─────────────────────────────────────────────────────────────
+
+@cli.command(name="fetch-prices")
+@click.option("--db", default="portfolio.db", help="Path to database file")
+@click.option("--start-date", default=None, help="Start date (YYYY-MM-DD)")
+@click.option("--end-date", default=None, help="End date (YYYY-MM-DD)")
+def fetch_prices(db, start_date, end_date):
+    """Fetch and persist market prices for discovered symbols."""
+    db_path = _resolved_db(db)
+    service = PortfolioService(db_path)
+    try:
+        discovered = service.discover_assets_and_currencies()
+        symbols = list(discovered.get("assets", [])) + list(discovered.get("fx_currencies", []))
+        if not symbols:
+            success("fetch-prices", {"symbols": [], "rows_written": 0, "message": "No symbols to fetch"})
+            return
+
+        min_tx, max_tx = service.db.get_date_range()
+        sd = _parse_date(start_date, "--start-date") if start_date else (min_tx or date.today())
+        ed = _parse_date(end_date, "--end-date") if end_date else (max_tx or date.today())
+        if sd > ed:
+            error("fetch-prices", "VALIDATION_ERROR", "--start-date cannot be after --end-date")
+
+        prices = service.price_service.fetch_all_prices(symbols, sd, ed)
+        service._persist_prices_to_db(prices)
+
+        rows = sum(len(v) for v in prices.values())
+        success("fetch-prices", {
+            "symbols": symbols,
+            "rows_written": rows,
+            "start_date": str(sd),
+            "end_date": str(ed),
+        })
+    except Exception as e:
+        error("fetch-prices", "PRICE_FETCH_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── backup/restore ───────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--db", default="portfolio.db", help="Path to database file")
+@click.option("--output", default=None, help="Backup destination file")
+def backup(db, output):
+    """Create a backup copy of DuckDB file."""
+    src = Path(_resolved_db(db))
+    if not src.exists():
+        error("backup", "NOT_FOUND", f"Database not found: {src}")
+    out = Path(output) if output else Path("backups") / f"portfolio-{datetime.now().strftime('%Y%m%d-%H%M%S')}.db"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(src, out)
+        success("backup", {"source": str(src), "backup": str(out), "bytes": out.stat().st_size})
+    except Exception as e:
+        error("backup", "INTERNAL_ERROR", str(e))
+
+
+@cli.command()
+@click.option("--db", default="portfolio.db", help="Destination database file")
+@click.option("--input", "input_file", required=True, help="Backup file to restore from")
+@click.option("--confirm", is_flag=True, help="Required to overwrite destination")
+def restore(db, input_file, confirm):
+    """Restore DuckDB file from backup."""
+    dest = Path(_resolved_db(db))
+    src = Path(input_file)
+    if not src.exists():
+        error("restore", "NOT_FOUND", f"Backup not found: {src}")
+    if dest.exists() and not confirm:
+        error("restore", "VALIDATION_ERROR", "Pass --confirm to overwrite existing DB")
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        success("restore", {"input": str(src), "db": str(dest), "bytes": dest.stat().st_size})
+    except Exception as e:
+        error("restore", "INTERNAL_ERROR", str(e))
+
+
+# ─── export/import ────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--kind", type=click.Choice(["transactions", "returns"], case_sensitive=False), required=True)
+@click.option("--output", required=True, help="Output JSON file")
+@click.option("--db", default="portfolio.db", help="Path to database file")
+def export(kind, output, db):
+    """Export transactions or returns to JSON."""
+    service = PortfolioService(_resolved_db(db))
+    try:
+        kind = kind.lower()
+        if kind == "transactions":
+            service.export_transactions_json(output)
+        else:
+            service.export_returns_json(output)
+        success("export", {"kind": kind, "output": output})
+    except Exception as e:
+        error("export", "INTERNAL_ERROR", str(e))
+    finally:
+        service.close()
+
+
+@cli.command(name="import")
+@click.option("--csv", "csv_path", required=True, help="CSV source file")
+@click.option("--db", default="portfolio.db", help="Path to database file")
+def import_cmd(csv_path, db):
+    """Import CSV transactions and recalculate portfolio."""
+    service = PortfolioService(_resolved_db(db))
+    try:
+        service.setup_from_csv(csv_path)
+        success("import", {"source": csv_path, "rows_imported": service.db.get_transaction_count()})
+    except Exception as e:
+        error("import", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── cron ─────────────────────────────────────────────────────────────────────
+
+@cli.group()
+def cron():
+    """Manage production crontab entries."""
+    pass
+
+
+@cron.command(name="install")
+def cron_install():
+    """Install portfolio cron schedule."""
+    try:
+        import shutil as _sh
+        if _sh.which("crontab") is None:
+            success("cron-install", {"installed": False, "message": "crontab binary not found"})
+            return
+        from pathlib import Path as _Path
+        project = _Path.cwd()
+        logs = project / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        block = f"""# ── portfolio auto-refresh ──
+SHELL=/bin/bash
+PROJECT={project}
+LOG={logs}
+DB={project / 'portfolio.db'}
+UV=uv
+30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
+0 10 * * 6     cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
+0 3 * * 0      cd $PROJECT && $UV run portfolio recalculate --force --db $DB >> $LOG/recalc-full.log 2>&1
+0 7 * * *      cd $PROJECT && $UV run portfolio verify-prices --db $DB >> $LOG/verify-prices.log 2>&1
+0 9 * * 1-5    cd $PROJECT && $UV run portfolio status --db $DB >> $LOG/status.log 2>&1
+0 6 1 * *      cd $PROJECT && $UV run portfolio performance --db $DB > $LOG/performance-$(date +\\%Y-\\%m).log 2>&1
+# ── end portfolio auto-refresh ──
+"""
+        import subprocess
+        current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        content = current.stdout if current.returncode == 0 else ""
+        if "# ── portfolio auto-refresh ──" in content:
+            success("cron-install", {"installed": False, "message": "Already installed"})
+            return
+        new_content = (content.strip() + "\n\n" + block).strip() + "\n"
+        proc = subprocess.run(["crontab", "-"], input=new_content, text=True, capture_output=True)
+        if proc.returncode != 0:
+            error("cron-install", "INTERNAL_ERROR", proc.stderr.strip() or "Failed to install crontab")
+        success("cron-install", {"installed": True, "project": str(project)})
+    except Exception as e:
+        error("cron-install", "INTERNAL_ERROR", str(e))
+
+
+@cron.command(name="remove")
+def cron_remove():
+    """Remove portfolio cron schedule."""
+    try:
+        import shutil as _sh
+        if _sh.which("crontab") is None:
+            success("cron-remove", {"removed": False, "message": "crontab binary not found"})
+            return
+        import subprocess
+        current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if current.returncode != 0:
+            success("cron-remove", {"removed": False, "message": "No crontab configured"})
+            return
+        lines = current.stdout.splitlines()
+        out = []
+        skipping = False
+        for line in lines:
+            if line.strip() == "# ── portfolio auto-refresh ──":
+                skipping = True
+                continue
+            if line.strip() == "# ── end portfolio auto-refresh ──":
+                skipping = False
+                continue
+            if not skipping:
+                out.append(line)
+        new_content = "\n".join(out).strip() + "\n"
+        proc = subprocess.run(["crontab", "-"], input=new_content, text=True, capture_output=True)
+        if proc.returncode != 0:
+            error("cron-remove", "INTERNAL_ERROR", proc.stderr.strip() or "Failed to update crontab")
+        success("cron-remove", {"removed": True})
+    except Exception as e:
+        error("cron-remove", "INTERNAL_ERROR", str(e))
+
+
+@cron.command(name="status")
+def cron_status():
+    """Show installed portfolio cron entries."""
+    try:
+        import shutil as _sh
+        if _sh.which("crontab") is None:
+            success("cron-status", {"installed": False, "entries": [], "message": "crontab binary not found"})
+            return
+        import subprocess
+        current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if current.returncode != 0:
+            success("cron-status", {"installed": False, "entries": []})
+            return
+        lines = current.stdout.splitlines()
+        entries = []
+        capture = False
+        for line in lines:
+            if line.strip() == "# ── portfolio auto-refresh ──":
+                capture = True
+                continue
+            if line.strip() == "# ── end portfolio auto-refresh ──":
+                capture = False
+                continue
+            if capture and line.strip():
+                entries.append(line)
+        success("cron-status", {"installed": len(entries) > 0, "entries": entries}, count=len(entries))
+    except Exception as e:
+        error("cron-status", "INTERNAL_ERROR", str(e))
+
+
+# ─── version ──────────────────────────────────────────────────────────────────
+
+@cli.command()
+def version():
+    """Show CLI and package version."""
+    try:
+        from importlib.metadata import version as _v
+        pkg_version = _v("portfolyahoo")
+    except Exception:
+        pkg_version = "0.1.0"
+    success("version", {"package": "portfolyahoo", "version": pkg_version})
+
+
+# ─── config ───────────────────────────────────────────────────────────────────
+
+@cli.group()
+def config():
+    """Manage CLI runtime configuration."""
+    pass
+
+
+@config.command(name="show")
+def config_show():
+    """Show current config values."""
+    cfg = _load_config()
+    success("config-show", {"path": str(CONFIG_FILE), "config": cfg})
+
+
+@config.command(name="set")
+@click.option("--key", required=True, type=click.Choice(sorted(CONFIG_KEYS), case_sensitive=False))
+@click.option("--value", required=True)
+def config_set(key, value):
+    """Set a config value."""
+    cfg = _load_config()
+    key = key.lower()
+    cfg[key] = value
+    _save_config(cfg)
+    success("config-set", {"path": str(CONFIG_FILE), "key": key, "value": value})
+
+
 
 
 if __name__ == "__main__":
