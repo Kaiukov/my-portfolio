@@ -32,10 +32,10 @@ dev = [
 ]
 
 [project.scripts]
-portfolio = "src.cli:main"
+portfolio = "portfolio_db.cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["portfolio_db"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
