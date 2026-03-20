@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from portfolio_db.domain import is_cash_like
+import portfolio_db.logger as log
 
 
 class TransactionService:
@@ -108,6 +109,7 @@ class TransactionService:
         recalculate_fn(from_date=from_date, force=False)
 
         recalc_type = 'full' if is_full_recalc else 'partial'
+        log.transaction_add(trans_id, asset, action, float(quantity), date_obj, recalc_type)
         return {
             'status': 'success',
             'recalc_type': recalc_type,
@@ -166,6 +168,8 @@ class TransactionService:
         )
         mark_price_data_stale_fn()
         recalc_result = recalculate_fn(from_date=recalc_from, force=True)
+        changed_fields = [k for k, v in changes.items() if v is not None]
+        log.transaction_edit(transaction_id, changed_fields, recalc_from, recalc_result.get('recalc_type', 'full'))
         return {
             'status': 'success',
             'recalc_type': recalc_result.get('recalc_type', 'full'),
@@ -195,6 +199,7 @@ class TransactionService:
 
         # Recalculate from that date
         recalc_result = recalculate_fn(from_date=trans_date)
+        log.transaction_delete(trans[0], trans[2], trans[3], trans[1], recalc_result.get('recalc_type', 'full'))
 
         return {
             'transaction_id': trans[0],

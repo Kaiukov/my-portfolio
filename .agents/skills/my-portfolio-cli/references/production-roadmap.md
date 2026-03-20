@@ -1,32 +1,43 @@
 # Production Roadmap
 
-Canonical source:
+Canonical source: `docs/production-ready-plan.md`
+Skill reference: this file (summary for agent context)
 
-- `/Users/oleksandrkaiukov/Code/my-portfolio/.agents/skills/my-portfolio-cli/references/production-roadmap.md`
+## Completed
 
-This roadmap tracks production hardening in the skill package.
+- **Product Baseline** — domain model, JSON contract frozen, workflows documented
+- **Data Integrity** — single price pipeline, strict validation, explicit failures, stale/refresh state
+- **Transaction Engine** — all actions normalized, validation per action, edit flow, audit columns
+- **Reporting Consistency** — single snapshot builder, `--as-of-date` on all read commands
+- **CLI and UX** — symmetric command set, error codes, `--dry-run` (edit/repair_prices/recalculate), snake_case
+- **Testing** — unit + integration + golden snapshot tests (30 tests, deterministic fixture DBs)
+- **Packaging** — `pyproject.toml`, console script entrypoint (`portfolio = "portfolio_db.cli:cli"`)
+- **Health command** — DB reachable, price coverage, recalc freshness, stale tickers
+- **Structured logs** — JSON lines to `logs/portfolio.log` (configurable via `PORTFOLIO_LOG_PATH`)
+  - Events: `price_refresh`, `price_refresh_skipped`, `price_coverage_failure`, `recalc_start`, `recalc_done`, `recalc_failure`, `transaction_add`, `transaction_edit`, `transaction_delete`, `failure`
+- **Bootstrap** — `init` command (idempotent DB init), `.env.example`
 
-## Step 1. Product Baseline
+## In Progress — Milestone 2: Operator Readiness
 
-Status: completed in the skill docs.
+- [ ] backup strategy (DB snapshot + restore procedure)
+- [ ] structured log rotation / retention policy
 
-Deliverables:
+## Remaining — Milestone 3: Deployment Readiness
 
-- `architecture.md`
-- `api-contract.md`
-- `operations.md`
+- [ ] `uv sync` bootstrap documentation
+- [ ] CI setup (GitHub Actions)
+- [ ] import isolation verification
 
-Baseline scope:
+## Remaining — Milestone 3+
 
-- freeze supported transaction semantics
-- freeze reporting `as_of_date` rules
-- freeze DuckDB cached prices as read-path source of truth
-- freeze TWR as the primary return metric
+- [ ] `TRANSFER` semantics (account dimension, internal vs external)
+- [ ] `delete --dry-run`
+- [ ] missing FX coverage regression fixtures
+- [ ] MWR/IRR, benchmark reports (Milestone 4)
 
-## Next Priorities
+## Next Sprint
 
-- Step 2: data integrity and deterministic valuation failures
-- Status: documented and partially implemented
-- Step 3: transaction engine normalization and validation
-- Step 4: reporting consistency and shared snapshot adoption everywhere
-- Step 5+: CLI polish, tests, packaging, observability, and safety
+1. backup strategy
+2. CI (GitHub Actions)
+3. `TRANSFER` semantics
+4. `delete --dry-run`

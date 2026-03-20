@@ -5,6 +5,7 @@ import hashlib
 from datetime import date
 
 from portfolio_db.calculator import DailyReturnCalculator
+import portfolio_db.logger as log
 
 
 class RecalculationService:
@@ -115,11 +116,15 @@ class RecalculationService:
 
         # Check cache if not forcing recalc
         if not force and self._check_cache(from_date):
+            log.price_refresh_skipped("cache_hit")
             return {
                 'status': 'success',
                 'recalc_type': 'cached',
                 'message': 'Using cached results'
             }
+
+        recalc_type_planned = 'full' if (force or from_date is None) else 'partial'
+        log.recalc_start(from_date, recalc_type_planned, force)
 
         # Determine recalc scope
         calc_start_date = transactions[0][1]
@@ -157,6 +162,7 @@ class RecalculationService:
             results = calculator.calculate_all_returns()
         except ValueError as exc:
             set_stale_fn(True)
+            log.recalc_failure(str(exc), from_date)
             raise price_data_unavailable_error_cls(str(exc)) from exc
 
         # Filter results if partial recalc
@@ -176,9 +182,9 @@ class RecalculationService:
             )
             rows_affected += 1
 
-        # Log refresh event
         recalc_type = 'full' if is_full_recalc else 'partial'
         self.db.log_refresh(recalc_type, rows_affected)
+        log.recalc_done(recalc_type, rows_affected, from_date)
 
         # Update cache after successful recalculation
         self._update_cache()

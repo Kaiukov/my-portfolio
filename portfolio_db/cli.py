@@ -197,8 +197,9 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
 @click.option("--exchange", default=None)
 @click.option("--data-source", default=None)
 @click.option("--account", default=None, help="Account label (e.g. 'broker_a')")
+@click.option("--dry-run", is_flag=True, help="Show what would change without applying")
 @click.option("--db", default="portfolio.db")
-def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, db):
+def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run, db):
     """Edit an existing transaction and recalculate returns."""
     changes = {
         "date": _parse_legacy_date(date_str, "--date") if date_str else None,
@@ -214,6 +215,25 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
     }
     if not any(value is not None for value in changes.values()):
         error("edit", "VALIDATION_ERROR", "Provide at least one field to update")
+
+    if dry_run:
+        service = PortfolioService(db, read_only=True)
+        try:
+            row = service.db.get_transaction_by_id(trans_id)
+            if not row:
+                error("edit", "NOT_FOUND", f"Transaction ID {trans_id} not found")
+            fields = ["id", "date", "asset", "action", "quantity", "asset_type", "price",
+                      "currency", "fees", "exchange", "data_source", "account", "created_at", "updated_at"]
+            current = dict(zip(fields, row))
+            proposed = {k: (str(v) if v is not None else None) for k, v in changes.items() if v is not None}
+            success("edit", {"dry_run": True, "transaction_id": trans_id, "current": current, "proposed_changes": proposed})
+        except SystemExit:
+            raise
+        except Exception as e:
+            error("edit", "DB_ERROR", str(e))
+        finally:
+            service.close()
+        return
 
     service = PortfolioService(db)
     try:
@@ -269,12 +289,30 @@ def verify_prices(db):
 @click.option("--ticker", "tickers", multiple=True, help="Specific ticker(s) to refresh")
 @click.option("--start-date", default=None, help="Refresh from date (YYYY-MM-DD)")
 @click.option("--end-date", default=None, help="Refresh to date (YYYY-MM-DD)")
+@click.option("--dry-run", is_flag=True, help="Show what would be repaired without fetching")
 @click.option("--db", default="portfolio.db")
-def repair_prices(tickers, start_date, end_date, db):
+def repair_prices(tickers, start_date, end_date, dry_run, db):
     """Fetch and cache missing/incomplete price series."""
-    service = PortfolioService(db)
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
+    if dry_run:
+        service = PortfolioService(db, read_only=True)
+        try:
+            coverage = service.analyze_price_coverage(start_date=sd, end_date=ed)
+            issues = coverage.get("issues", [])
+            target = [i["ticker"] for i in issues] if not tickers else list(tickers)
+            success("repair_prices", {
+                "dry_run": True,
+                "would_repair": target,
+                "issues_found": len(issues),
+                "coverage": coverage,
+            })
+        except Exception as e:
+            error("repair_prices", "PRICE_DATA_ERROR", str(e))
+        finally:
+            service.close()
+        return
+    service = PortfolioService(db)
     try:
         result = service.repair_prices(tickers=list(tickers) or None, start_date=sd, end_date=ed)
         success("repair_prices", result)
@@ -291,10 +329,29 @@ def repair_prices(tickers, start_date, end_date, db):
 @cli.command()
 @click.option("--force", is_flag=True)
 @click.option("--from-date", default=None, help="Recalculate from date (DD-MM-YYYY)")
+@click.option("--dry-run", is_flag=True, help="Show what would be recalculated without executing")
 @click.option("--db", default="portfolio.db")
-def recalculate(force, from_date, db):
+def recalculate(force, from_date, dry_run, db):
     """Recalculate portfolio returns."""
     from_date_obj = _parse_legacy_date(from_date, "--from-date") if from_date else None
+    if dry_run:
+        service = PortfolioService(db, read_only=True)
+        try:
+            state = service.get_refresh_state()
+            coverage = service.analyze_price_coverage()
+            success("recalculate", {
+                "dry_run": True,
+                "from_date": str(from_date_obj) if from_date_obj else "beginning",
+                "forced": force,
+                "last_recalc": state.get("last_successful_recalc"),
+                "stale_data": state.get("stale_data"),
+                "price_issues": len(coverage.get("issues", [])),
+            })
+        except Exception as e:
+            error("recalculate", "INTERNAL_ERROR", str(e))
+        finally:
+            service.close()
+        return
     service = PortfolioService(db)
     try:
         result = service.recalculate(from_date=from_date_obj, force=force)
@@ -563,6 +620,53 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
         success("exchange", data)
     except Exception as e:
         error("exchange", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── init ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--db", default="portfolio.db", help="Path to database file to initialize")
+def init(db):
+    """Initialize a new portfolio database (idempotent)."""
+    from pathlib import Path
+    try:
+        service = PortfolioService(db)
+        service.close()
+        success("init", {"db_path": str(Path(db).resolve()), "status": "ready"})
+    except Exception as e:
+        error("init", "DB_ERROR", str(e))
+
+
+# ─── health ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--db", default="portfolio.db")
+def health(db):
+    """Show DB and data health: recalc freshness, price coverage, stale state."""
+    try:
+        service = PortfolioService(db, read_only=True)
+    except Exception as e:
+        error("health", "DB_ERROR", f"Cannot open database: {e}")
+        return
+    try:
+        state = service.get_refresh_state()
+        coverage = service.analyze_price_coverage()
+        issues = coverage.get("issues", [])
+        stale_tickers = [i["ticker"] for i in issues]
+        ok = not state.get("stale_data") and not issues
+        success("health", {
+            "status": "ok" if ok else "degraded",
+            "db_reachable": True,
+            "stale_data": state.get("stale_data", False),
+            "last_successful_price_refresh": state.get("last_successful_price_refresh"),
+            "last_successful_recalc": state.get("last_successful_recalc"),
+            "price_coverage_issues": len(issues),
+            "stale_tickers": stale_tickers,
+        })
+    except Exception as e:
+        error("health", "DB_ERROR", str(e))
     finally:
         service.close()
 

@@ -2,40 +2,49 @@
 
 Current public commands in `portfolio_db/cli.py`:
 
+- `init` — initialize a new portfolio DB (idempotent)
 - `migrate`
 - `report`
 - `transactions`
 - `status`
 - `add`
-- `edit`
+- `edit` — supports `--dry-run`
 - `verify_prices`
-- `repair_prices`
-- `recalculate`
+- `repair_prices` — supports `--dry-run`
+- `recalculate` — supports `--dry-run`
 - `allocation`
 - `cash`
 - `delete`
 - `performance`
 - `summary`
 - `exchange`
+- `health`
 
-Command usage notes:
+## Command notes
 
-- Read/report commands should open the DB in read-only mode.
-- Mutating commands should trigger recalculation only when needed.
+- Read/report commands open the DB in read-only mode.
+- Mutating commands trigger recalculation only when needed.
 - Public command names must match what operators and docs use.
-- `verify_prices` is diagnostic.
-- `repair_prices` is remediation and should fetch/cache missing or incomplete price series.
+- `verify_prices` is diagnostic (read-only).
+- `repair_prices` fetches and caches missing/incomplete price series. Use `--dry-run` to preview without fetching.
+- `edit --dry-run` shows current transaction and proposed changes without writing.
+- `recalculate --dry-run` shows from_date, last_recalc state, and price issues without executing.
+- `health` returns DB reachability, stale state, price coverage issues, and recalc freshness.
+- `init` is idempotent — safe to run on an existing DB.
 
-Important operator expectations:
+## Operator actions supported by `add` / `edit`
 
-- `add` and `edit` support portfolio cash-flow actions, including:
-  - `DEPOSIT`
-  - `WITHDRAW`
-  - `DIVIDEND`
-  - `INTEREST`
-  - `FEE`
-  - `TAX`
-  - `TRANSFER`
-- `recalculate --force` must rebuild full daily returns deterministically.
-- `cash` should expose cash balances and cash-related income/expense metrics.
-- `performance` should expose deposits, withdrawals, net contributions, realized gain, unrealized gain, and income/expense metrics when available.
+- `DEPOSIT` / `WITHDRAW`
+- `DIVIDEND` / `INTEREST`
+- `FEE` / `TAX`
+- `TRANSFER`
+- `BUY` / `SELL`
+- `EXCHANGE_FROM` / `EXCHANGE_TO` (via `exchange` command)
+
+## Flags
+
+- `--db` — path to DuckDB file (default: `portfolio.db`)
+- `--as-of-date` — snapshot date for read commands (`status`, `cash`, `summary`, `allocation`, `performance`)
+- `--dry-run` — preview without mutating state (`edit`, `repair_prices`, `recalculate`)
+- `--confirm` — required for `delete`
+- `--force` — bypass cache check in `recalculate`

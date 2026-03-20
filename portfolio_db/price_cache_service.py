@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from portfolio_db.domain import get_asset_type
+import portfolio_db.logger as log
 
 PRICE_REFRESH_STATE_KEY = 'last_successful_price_refresh'
 RECALC_STATE_KEY = 'last_successful_recalc'
@@ -53,6 +54,7 @@ class PriceCacheService:
         }
         rows_loaded = sum(rows_per_ticker.values())
         self._mark_price_refresh_success()
+        log.price_refresh(tickers, rows_loaded, rows_per_ticker)
         return {'tickers': tickers, 'rows_loaded': rows_loaded, 'rows_per_ticker': rows_per_ticker}
 
     def _required_price_checkpoints(self, transactions, required_end, is_cash_like_fn, normalize_cash_asset_fn, base_currency, validate_action_fn, trade_actions) -> dict:
@@ -125,7 +127,9 @@ class PriceCacheService:
         coverage = self._validate_cached_price_requirements(transactions, required_end, is_cash_like_fn, normalize_cash_asset_fn, base_currency, validate_action_fn, trade_actions)
         if coverage['issues']:
             self._set_stale_data(True)
-            raise price_data_unavailable_error_cls(price_issue_message_fn(coverage['issues'][0]))
+            issue = coverage['issues'][0]
+            log.price_coverage_failure(issue['ticker'], issue['issues'])
+            raise price_data_unavailable_error_cls(price_issue_message_fn(issue))
         return coverage
 
     def _persist_prices_to_db(self, prices_dict: dict):
