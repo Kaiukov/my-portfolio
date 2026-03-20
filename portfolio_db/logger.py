@@ -107,5 +107,10 @@ def transaction_delete(transaction_id: int, asset: str, action: str,
     })
 
 
+def backup_created(source: str, destination: str, size_bytes: int) -> None:
+    _write({"ts": _now(), "event": "backup_created", "level": "info",
+            "source": source, "destination": destination, "size_bytes": size_bytes})
+
+
 def failure(event: str, error: str, **context) -> None:
     _write({"ts": _now(), "event": event, "level": "error", "error": error, **context})

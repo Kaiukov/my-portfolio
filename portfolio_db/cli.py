@@ -1,10 +1,13 @@
 """CLI interface for portfolio_db."""
 
 import click
+import shutil
 import sys
 from datetime import datetime, date
+from pathlib import Path
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
+import portfolio_db.logger as log
 
 USER_ACTION_CHOICES = [
     "BUY",
@@ -153,7 +156,7 @@ def status(as_of_date, db):
 @click.option("--currency", default="USD")
 @click.option("--fees", type=float, default=None)
 @click.option("--exchange", default="")
-@click.option("--account", default=None, help="Account label (e.g. 'broker_a')")
+@click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
 @click.option("--db", default="portfolio.db")
 def add(date_str, asset, action, quantity, price, currency, fees, exchange, account, db):
     """Add a transaction and auto-recalculate returns."""
@@ -196,7 +199,7 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
 @click.option("--fees", default=None, type=float)
 @click.option("--exchange", default=None)
 @click.option("--data-source", default=None)
-@click.option("--account", default=None, help="Account label (e.g. 'broker_a')")
+@click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
 @click.option("--dry-run", is_flag=True, help="Show what would change without applying")
 @click.option("--db", default="portfolio.db")
 def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run, db):
@@ -452,9 +455,34 @@ def cash(as_of_date, db):
 @cli.command()
 @click.option("--id", "trans_id", required=True, type=int)
 @click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
+@click.option("--dry-run", is_flag=True, help="Show what would be deleted without executing")
 @click.option("--db", default="portfolio.db")
-def delete(trans_id, confirm, db):
+def delete(trans_id, confirm, dry_run, db):
     """Delete a transaction by ID and auto-recalculate returns."""
+    if dry_run:
+        service = PortfolioService(db, read_only=True)
+        try:
+            trans = service.db.get_transaction_by_id(trans_id)
+            if not trans:
+                error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
+            success("delete", {
+                "dry_run": True,
+                "transaction_id": trans_id,
+                "would_delete": {
+                    "date": str(trans[1]),
+                    "asset": trans[2],
+                    "action": trans[3],
+                    "quantity": trans[4],
+                },
+            })
+        except SystemExit:
+            raise
+        except Exception as e:
+            error("delete", "DB_ERROR", str(e))
+        finally:
+            service.close()
+        return
+
     service = PortfolioService(db)
     try:
         trans = service.db.con.execute(
@@ -622,6 +650,27 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
         error("exchange", "DB_ERROR", str(e))
     finally:
         service.close()
+
+
+# ─── backup ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--db", default="portfolio.db")
+@click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
+def backup(db, out):
+    """Create a timestamped copy of the portfolio database."""
+    src = Path(db)
+    if out is None:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dst = src.parent / f"{src.stem}.backup-{timestamp}.db"
+    else:
+        dst = Path(out)
+    try:
+        shutil.copy2(src, dst)
+        log.backup_created(str(src), str(dst), dst.stat().st_size)
+        success("backup", {"source": str(src), "backup": str(dst), "size_bytes": dst.stat().st_size})
+    except Exception as e:
+        error("backup", "IO_ERROR", str(e))
 
 
 # ─── init ─────────────────────────────────────────────────────────────────────

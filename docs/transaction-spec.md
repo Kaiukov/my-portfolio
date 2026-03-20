@@ -37,10 +37,12 @@
 - Same rules as EXTERNAL_INFLOW
 
 ### TRANSFER
+- TRANSFER represents an **internal movement between accounts** within the tracked portfolio universe
 - `asset` must be a cash asset
 - `price` must be absent (null)
 - `quantity` must be > 0
-- `account` should be set to identify the source account
+- `account` is **required** — use it to identify the source or destination account (e.g. `broker_a`, `broker_b`)
+- Does NOT count toward `net_contributions`; use `DEPOSIT` for external inflows
 
 ### INCOME (DIVIDEND, INTEREST)
 - `asset` must be a cash asset

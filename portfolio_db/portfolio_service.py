@@ -523,6 +523,9 @@ class PortfolioService:
         Returns:
             {"status": "success", "recalc_type": "partial|full", "from_date": ..., "transaction_id": ...}
         """
+        normalized_action = action.upper() if action else action
+        if normalized_action == 'TRANSFER' and not account:
+            raise ValueError("TRANSFER requires an account label (use --account)")
         return self._transactions.add_transaction(
             date_obj, asset, action, quantity, price, asset_type, currency, fees, exchange, data_source, account,
             validate_action_fn=self.validate_action,
@@ -540,6 +543,17 @@ class PortfolioService:
 
     def edit_transaction(self, transaction_id: int, **changes) -> dict:
         """Edit a transaction and recalculate from the earliest affected date."""
+        # Validate TRANSFER account requirement
+        # We need to check both what's being set and what's already stored
+        new_action = changes.get('action')
+        new_account = changes.get('account')
+        if new_action and new_action.upper() == 'TRANSFER':
+            # Check if account is being set or already exists on the transaction
+            existing = self.db.get_transaction_by_id(transaction_id)
+            existing_account = existing[11] if existing else None  # account is index 11
+            resolved_account = new_account if new_account is not None else existing_account
+            if not resolved_account:
+                raise ValueError("TRANSFER requires an account label (use --account)")
         return self._transactions.edit_transaction(
             transaction_id, changes,
             validate_action_fn=self.validate_action,
