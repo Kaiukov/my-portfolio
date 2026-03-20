@@ -3,7 +3,7 @@
 import click
 import sys
 from datetime import datetime, date
-from portfolio_db.portfolio_service import PortfolioService
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
 
 
@@ -59,7 +59,7 @@ def report(limit, offset, start_date, end_date, db):
     """Show daily returns report."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         data, total = service.get_daily_returns_paginated(limit, offset, sd, ed)
         pagination = build_pagination(limit, offset, total)
@@ -82,7 +82,7 @@ def transactions(limit, offset, start_date, end_date, db):
     """List transactions."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         data, total = service.get_transactions_paginated(limit, offset, sd, ed)
         pagination = build_pagination(limit, offset, total)
@@ -99,7 +99,7 @@ def transactions(limit, offset, start_date, end_date, db):
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def status(db):
     """Show portfolio status."""
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         trans_count = service.db.get_transaction_count()
         stats = service.get_performance_stats()
@@ -108,12 +108,16 @@ def status(db):
             "start_date": stats["start_date"],
             "end_date": stats["end_date"],
             "portfolio_value": stats["end_value"],
-            "total_invested": stats["total_cash_flow"],
-            "total_gain": stats["total_gain"],
+            "total_invested": stats["net_contributions"],
+            "deposits": stats["deposits"],
+            "withdrawals": stats["withdrawals"],
+            "total_gain": stats["net_gain"],
             "total_gain_pct": stats["total_return_pct"],
-            "as_of_date": str(date.today()),
+            "as_of_date": stats["end_date"],
         }
         success("status", data)
+    except PriceDataUnavailableError as e:
+        error("status", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("status", "DB_ERROR", str(e))
     finally:
@@ -126,7 +130,7 @@ def status(db):
 @click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
 @click.option("--asset", required=True, help="Asset symbol")
 @click.option("--action", required=True,
-              type=click.Choice(["BUY", "SELL", "DEPOSIT", "FEE"], case_sensitive=False))
+              type=click.Choice(["BUY", "SELL", "DEPOSIT", "WITHDRAW", "FEE"], case_sensitive=False))
 @click.option("--quantity", required=True, type=float)
 @click.option("--price", type=float, default=None)
 @click.option("--currency", default="USD")
@@ -170,7 +174,7 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
 @click.option("--db", default="portfolio.db")
 def verify_prices(db):
     """Verify prices table structure and storage."""
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         info = service.verify_prices_storage()
         stats = info.get("statistics", {})
@@ -227,10 +231,12 @@ def recalculate(force, from_date, db):
 @click.option("--db", default="portfolio.db")
 def allocation(allocation_type, db):
     """Show portfolio allocation breakdown."""
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         data = service.get_allocation(allocation_type=allocation_type)
         success("allocation", data)
+    except PriceDataUnavailableError as e:
+        error("allocation", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("allocation", "DB_ERROR", str(e))
     finally:
@@ -243,66 +249,36 @@ def allocation(allocation_type, db):
 @click.option("--db", default="portfolio.db")
 def cash(db):
     """Show actual cash balances (converted to USD)."""
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
-        cash_balances = service.get_actual_cash_balances()
-
-        fx_rates = {"EURUSD=X": 1.0, "GBPUSD=X": 1.0}
-        fx_fetch_errors = []  # Track which FX rates failed to fetch
-        try:
-            import yfinance as yf
-            from datetime import timedelta
-            end = date.today()
-            start = end - timedelta(days=7)
-            for ticker in ["EURUSD=X", "GBPUSD=X"]:
-                try:
-                    hist = yf.Ticker(ticker).history(start=start, end=end)
-                    if not hist.empty:
-                        fx_rates[ticker] = float(hist["Close"].iloc[-1])
-                except Exception as e:
-                    # Record failure but continue with default rate
-                    fx_fetch_errors.append(ticker)
-        except Exception:
-            # yfinance not available or import failed
-            fx_fetch_errors.extend(["EURUSD=X", "GBPUSD=X"])
-
+        snapshot = service.build_reporting_snapshot(include_closed=True)
+        cash_balances = snapshot["cash_balances"]
         result = []
-        for currency_key, bal_data in cash_balances.items():
+        for bal_data in cash_balances:
             balance = bal_data["balance"]
             deposits = bal_data["deposits"]
             spent = bal_data["spent"]
             received = bal_data["received"]
+            withdrawals = bal_data["withdrawals"]
 
-            if balance == 0 and deposits == 0 and spent == 0 and received == 0:
+            if balance == 0 and deposits == 0 and withdrawals == 0 and spent == 0 and received == 0:
                 continue
 
-            if currency_key == "EURUSD=X":
-                fx_rate = fx_rates["EURUSD=X"]
-                currency = "EUR"
-            elif currency_key == "GBPUSD=X":
-                fx_rate = fx_rates["GBPUSD=X"]
-                currency = "GBP"
-            else:
-                fx_rate = 1.0
-                currency = currency_key
-
             result.append({
-                "currency": currency,
+                "currency": bal_data["currency"],
                 "balance": round(balance, 6),
-                "usd_value": round(balance * fx_rate, 2),
-                "fx_rate": fx_rate,
-                "fx_rate_is_default": currency_key in fx_fetch_errors,
-                "deposits": round(deposits * fx_rate, 2),
-                "spent": round(spent * fx_rate, 2),
-                "received": round(received * fx_rate, 2),
+                "usd_value": round(bal_data["usd_value"], 2),
+                "fx_rate": bal_data["fx_rate"],
+                "deposits": round(deposits * bal_data["fx_rate"], 2),
+                "withdrawals": round(withdrawals * bal_data["fx_rate"], 2),
+                "spent": round(spent * bal_data["fx_rate"], 2),
+                "received": round(received * bal_data["fx_rate"], 2),
             })
 
-        # Warn about FX rates that couldn't be fetched
-        warnings = []
-        if fx_fetch_errors:
-            warnings.append(f"FX rates defaulted (using 1.0) for: {', '.join(fx_fetch_errors)}")
-
-        success("cash", result, count=len(result), extra_meta={"warnings": warnings} if warnings else None)
+        meta = {"as_of_date": snapshot["as_of_date"]}
+        success("cash", result, count=len(result), extra_meta=meta)
+    except PriceDataUnavailableError as e:
+        error("cash", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("cash", "DB_ERROR", str(e))
     finally:
@@ -350,7 +326,7 @@ def delete(trans_id, confirm, db):
 @click.option("--db", default="portfolio.db")
 def performance(db):
     """Show performance metrics."""
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         stats = service.get_performance_stats()
         concentration = service.get_concentration_metrics()
@@ -369,9 +345,14 @@ def performance(db):
                 "end_value": stats["end_value"],
                 "total_gain": stats["total_gain"],
                 "net_gain": stats["net_gain"],
-                "cash_flow": stats["total_cash_flow"],
+                "deposits": stats["deposits"],
+                "withdrawals": stats["withdrawals"],
+                "net_contributions": stats["net_contributions"],
+                "realized_gain": stats["realized_gain"],
+                "unrealized_gain": stats["unrealized_gain"],
             },
             "returns": {
+                "time_weighted_return_pct": m("total_return_pct", stats["time_weighted_return_pct"]),
                 "total_return_pct": m("total_return_pct", stats["total_return_pct"]),
                 "cagr_pct": m("cagr", stats["cagr"]),
                 "avg_daily_return_pct": m("avg_daily_return", stats["avg_daily_return"]),
@@ -407,6 +388,8 @@ def performance(db):
             },
         }
         success("performance", result)
+    except PriceDataUnavailableError as e:
+        error("performance", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("performance", "DB_ERROR", str(e))
     finally:
@@ -421,11 +404,14 @@ def performance(db):
 @click.option("--db", default="portfolio.db")
 def summary(position_filter, db):
     """Show portfolio position summary with gains/losses."""
-    service = PortfolioService(db)
+    service = PortfolioService(db, read_only=True)
     try:
         include_closed = position_filter == "all"
         positions = service.get_position_summary(include_closed=include_closed)
-        success("summary", positions, count=len(positions))
+        snapshot = service.build_reporting_snapshot(include_closed=include_closed)
+        success("summary", positions, count=len(positions), extra_meta={"as_of_date": snapshot["as_of_date"]})
+    except PriceDataUnavailableError as e:
+        error("summary", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("summary", "DB_ERROR", str(e))
     finally:

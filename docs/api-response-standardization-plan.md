@@ -331,30 +331,42 @@ Rows ordered **ascending by date** within the page.
 ### `status`
 ```json
 {
+  "transactions": 124,
+  "start_date": "2024-07-14",
+  "end_date": "2026-02-16",
   "portfolio_value": 54320.80,
   "total_invested": 48000.00,
+  "deposits": 50000.00,
+  "withdrawals": 2000.00,
   "total_gain": 6320.80,
   "total_gain_pct": 13.17,
-  "as_of_date": "2025-01-13"
+  "as_of_date": "2026-02-16"
 }
 ```
+
+`status.as_of_date` is the canonical reporting snapshot date. It must match `performance.period.end_date`, `allocation.as_of_date`, `summary.meta.as_of_date`, and `cash.meta.as_of_date`.
 
 ### `performance`
 ```json
 {
   "period": {
     "start_date": "2024-07-14",
-    "end_date": "2025-01-13",
-    "total_days": 183
+    "end_date": "2026-02-16",
+    "total_days": 583
   },
   "values": {
     "start_value": 20000.0,
     "end_value": 54320.80,
     "total_gain": 34320.80,
     "net_gain": 31820.80,
-    "cash_flow": 2500.0
+    "deposits": 50000.0,
+    "withdrawals": 2000.0,
+    "net_contributions": 48000.0,
+    "realized_gain": 25000.0,
+    "unrealized_gain": 6820.8
   },
   "returns": {
+    "time_weighted_return_pct": { "value": 171.6,  "assessment": "Excellent" },
     "total_return_pct":      { "value": 171.6,  "assessment": "Excellent" },
     "cagr_pct":              { "value": 89.4,   "assessment": "Excellent" },
     "avg_daily_return_pct":  { "value": 0.24,   "assessment": "Good" },
@@ -391,6 +403,9 @@ Rows ordered **ascending by date** within the page.
 }
 ```
 
+`total_return_pct` is a backward-compatible alias of `time_weighted_return_pct`.
+`total_invested` is a backward-compatible alias of `net_contributions` on the service layer.
+
 ### `summary`
 ```json
 [
@@ -409,22 +424,46 @@ Rows ordered **ascending by date** within the page.
     "total_gain_value": 2000.0,
     "realized_gain_value": 0.0,
     "realized_gain_pct": 0.0
+  },
+  {
+    "symbol": "USD",
+    "status": "OPEN",
+    "shares": 2100.0,
+    "last_price": 1.0,
+    "avg_cost_per_share": 0.0,
+    "total_cost": 0.0,
+    "market_value": 2100.0,
+    "dividend_income": 0.0,
+    "day_gain_pct": 0.0,
+    "day_gain_value": 0.0,
+    "total_gain_pct": 0.0,
+    "total_gain_value": 0.0,
+    "realized_gain_value": 0.0,
+    "realized_gain_pct": 0.0
   }
 ]
 ```
 `meta.count` = number of positions.
+`meta.as_of_date` = reporting snapshot date used for all valuation in this response.
 
 ### `allocation`
 ```json
 {
+  "as_of_date": "2026-02-16",
   "positions": [
     {
       "symbol": "BTC-USD",
       "type": "asset",
       "value": 31000.0,
-      "percentage": 57.1,
-      "original_currency_value": null,
-      "fx_rate": null
+      "percentage": 57.1
+    },
+    {
+      "symbol": "EURUSD=X",
+      "type": "cash",
+      "value": 2220.8,
+      "percentage": 4.1,
+      "original_currency_value": 1200.0,
+      "fx_rate": 1.851
     }
   ],
   "summary": [
@@ -436,14 +475,36 @@ Rows ordered **ascending by date** within the page.
 }
 ```
 
+`allocation.total_value` must equal `performance.values.end_value` for the same `as_of_date`.
+
 ### `cash`
 ```json
 [
-  { "currency": "USD", "balance": 2100.0, "usd_value": 2100.0, "fx_rate": 1.0 },
-  { "currency": "EUR", "balance": 1200.0, "usd_value": 2220.8, "fx_rate": 1.084 }
+  {
+    "currency": "USD",
+    "balance": 2100.0,
+    "usd_value": 2100.0,
+    "fx_rate": 1.0,
+    "deposits": 5000.0,
+    "withdrawals": 500.0,
+    "spent": 2200.0,
+    "received": 0.0
+  },
+  {
+    "currency": "EUR",
+    "balance": 1200.0,
+    "usd_value": 2220.8,
+    "fx_rate": 1.851,
+    "deposits": 1500.0,
+    "withdrawals": 0.0,
+    "spent": 300.0,
+    "received": 0.0
+  }
 ]
 ```
 `meta.count` = number of currencies.
+`meta.as_of_date` = reporting snapshot date used for FX valuation.
+If FX data is unavailable for the snapshot date, the command should return an error instead of defaulting a rate.
 
 ---
 
