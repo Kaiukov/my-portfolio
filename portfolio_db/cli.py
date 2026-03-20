@@ -108,13 +108,15 @@ def transactions(limit, offset, start_date, end_date, db):
 # ─── status ───────────────────────────────────────────────────────────────────
 
 @cli.command()
+@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db", help="Path to database file")
-def status(db):
+def status(as_of_date, db):
     """Show portfolio status."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = PortfolioService(db, read_only=True)
     try:
         trans_count = service.db.get_transaction_count()
-        stats = service.get_performance_stats()
+        stats = service.get_performance_stats(as_of_date=as_of)
         data = {
             "transactions": trans_count,
             "start_date": stats["start_date"],
@@ -151,8 +153,9 @@ def status(db):
 @click.option("--currency", default="USD")
 @click.option("--fees", type=float, default=None)
 @click.option("--exchange", default="")
+@click.option("--account", default=None, help="Account label (e.g. 'broker_a')")
 @click.option("--db", default="portfolio.db")
-def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
+def add(date_str, asset, action, quantity, price, currency, fees, exchange, account, db):
     """Add a transaction and auto-recalculate returns."""
     date_obj = _parse_legacy_date(date_str, "--date")
     service = PortfolioService(db)
@@ -166,9 +169,14 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
             currency=currency,
             fees=fees,
             exchange=exchange,
+            account=account,
         )
         trans = service.db.get_transaction_by_id(result["transaction_id"])
         success("add", {"transaction": service._serialize_transaction_row(trans), "recalculated": True})
+    except PriceDataUnavailableError as e:
+        error("add", "PRICE_DATA_ERROR", str(e))
+    except ValueError as e:
+        error("add", "VALIDATION_ERROR", str(e))
     except Exception as e:
         error("add", "DB_ERROR", str(e))
     finally:
@@ -188,8 +196,9 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
 @click.option("--fees", default=None, type=float)
 @click.option("--exchange", default=None)
 @click.option("--data-source", default=None)
+@click.option("--account", default=None, help="Account label (e.g. 'broker_a')")
 @click.option("--db", default="portfolio.db")
-def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, db):
+def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, db):
     """Edit an existing transaction and recalculate returns."""
     changes = {
         "date": _parse_legacy_date(date_str, "--date") if date_str else None,
@@ -201,6 +210,7 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
         "fees": fees,
         "exchange": exchange,
         "data_source": data_source,
+        "account": account,
     }
     if not any(value is not None for value in changes.values()):
         error("edit", "VALIDATION_ERROR", "Provide at least one field to update")
@@ -209,6 +219,8 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
     try:
         result = service.edit_transaction(trans_id, **changes)
         success("edit", {"transaction": result["transaction"], "recalculated": True, "from_date": result["from_date"]})
+    except PriceDataUnavailableError as e:
+        error("edit", "PRICE_DATA_ERROR", str(e))
     except ValueError as e:
         message = str(e)
         code = "NOT_FOUND" if "not found" in message.lower() else "VALIDATION_ERROR"
@@ -240,6 +252,8 @@ def verify_prices(db):
             "required_range": info.get("coverage", {}).get("required_range", {}),
             "coverage_issues": info.get("coverage", {}).get("issues", []),
             "coverage": info.get("coverage", {}).get("coverage", []),
+            "refresh_state": info.get("refresh_state", {}),
+            "repair_log": info.get("repair_log", []),
             "issues": info.get("optimization_notes", []),
         }
         success("verify_prices", data)
@@ -264,6 +278,8 @@ def repair_prices(tickers, start_date, end_date, db):
     try:
         result = service.repair_prices(tickers=list(tickers) or None, start_date=sd, end_date=ed)
         success("repair_prices", result)
+    except PriceDataUnavailableError as e:
+        error("repair_prices", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("repair_prices", "PRICE_FETCH_ERROR", str(e))
     finally:
@@ -292,6 +308,8 @@ def recalculate(force, from_date, db):
             success("recalculate", data)
         else:
             error("recalculate", "INTERNAL_ERROR", result.get("message", "Unknown error"))
+    except PriceDataUnavailableError as e:
+        error("recalculate", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("recalculate", "INTERNAL_ERROR", str(e))
     finally:
@@ -303,12 +321,14 @@ def recalculate(force, from_date, db):
 @cli.command()
 @click.option("--type", "allocation_type",
               type=click.Choice(["assets", "cash", "all"]), default="all")
+@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db")
-def allocation(allocation_type, db):
+def allocation(allocation_type, as_of_date, db):
     """Show portfolio allocation breakdown."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = PortfolioService(db, read_only=True)
     try:
-        data = service.get_allocation(allocation_type=allocation_type)
+        data = service.get_allocation(allocation_type=allocation_type, as_of_date=as_of)
         success("allocation", data)
     except PriceDataUnavailableError as e:
         error("allocation", "PRICE_DATA_ERROR", str(e))
@@ -321,12 +341,14 @@ def allocation(allocation_type, db):
 # ─── cash ─────────────────────────────────────────────────────────────────────
 
 @cli.command()
+@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db")
-def cash(db):
+def cash(as_of_date, db):
     """Show actual cash balances (converted to USD)."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = PortfolioService(db, read_only=True)
     try:
-        snapshot = service.build_reporting_snapshot(include_closed=True)
+        snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=True)
         cash_balances = snapshot["cash_balances"]
         result = []
         for bal_data in cash_balances:
@@ -406,13 +428,15 @@ def delete(trans_id, confirm, db):
 # ─── performance ──────────────────────────────────────────────────────────────
 
 @cli.command()
+@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db")
-def performance(db):
+def performance(as_of_date, db):
     """Show performance metrics."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = PortfolioService(db, read_only=True)
     try:
-        stats = service.get_performance_stats()
-        concentration = service.get_concentration_metrics()
+        stats = service.get_performance_stats(as_of_date=as_of)
+        concentration = service.get_concentration_metrics(as_of_date=as_of)
 
         def m(name, value):
             return service.evaluate_metric(name, value)
@@ -489,14 +513,16 @@ def performance(db):
 @cli.command()
 @click.option("--filter", "position_filter",
               type=click.Choice(["open", "all"]), default="all")
+@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db")
-def summary(position_filter, db):
+def summary(position_filter, as_of_date, db):
     """Show portfolio position summary with gains/losses."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = PortfolioService(db, read_only=True)
     try:
         include_closed = position_filter == "all"
-        positions = service.get_position_summary(include_closed=include_closed)
-        snapshot = service.build_reporting_snapshot(include_closed=include_closed)
+        snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=include_closed)
+        positions = snapshot["positions"]
         success("summary", positions, count=len(positions), extra_meta={"as_of_date": snapshot["as_of_date"]})
     except PriceDataUnavailableError as e:
         error("summary", "PRICE_DATA_ERROR", str(e))

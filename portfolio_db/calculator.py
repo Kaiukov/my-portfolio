@@ -1,23 +1,22 @@
 """Daily return calculation with separated investment returns vs cash flows."""
 
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 from typing import Dict, List, Tuple
-import yfinance as yf
 
-BASE_CURRENCY = 'USD'
-LEGACY_CASH_TO_FX = {
-    'CASH EUR': 'EURUSD=X',
-    'CASH GBP': 'GBPUSD=X',
-    'CASH UAH': 'UAHUSD=X',
-}
-ASSET_TYPE_TO_CASH = {
-    'stock_eur': 'EURUSD=X',
-    'stock_gbp': 'GBPUSD=X',
-}
-SUPPORTED_FX_TICKERS = ('EURUSD=X', 'GBPUSD=X', 'UAHUSD=X')
-EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT', 'TRANSFER'}
+from portfolio_db.domain import (
+    BASE_CURRENCY,
+    LEGACY_CASH_TO_FX,
+    ASSET_TYPE_TO_CASH,
+    SUPPORTED_FX_TICKERS,
+    get_asset_type as _get_asset_type,
+    fx_ticker_for_asset as _fx_ticker_for_asset,
+    cash_currency_for_asset_type as _cash_currency_for_asset_type,
+)
+
+EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT'}
+TRANSFER_ACTIONS = {'TRANSFER'}
 EXTERNAL_OUTFLOW_ACTIONS = {'WITHDRAW'}
 INCOME_ACTIONS = {'DIVIDEND', 'INTEREST'}
 EXPENSE_ACTIONS = {'FEE', 'TAX'}
@@ -34,18 +33,7 @@ def get_asset_type(ticker: str) -> str:
         - 'stock_eur': German stocks (ends with .DE)
         - 'stock_usd': US stocks and default
     """
-    if ticker == BASE_CURRENCY:
-        return 'cash_base'
-    elif ticker.endswith('USD=X'):
-        return 'cash_fx'
-    elif ticker.endswith('-USD'):
-        return 'crypto'
-    elif ticker.endswith('.L'):
-        return 'stock_gbp'
-    elif ticker.endswith('.DE'):
-        return 'stock_eur'
-    else:
-        return 'stock_usd'
+    return _get_asset_type(ticker)
 
 
 class DailyReturnCalculator:
@@ -63,64 +51,34 @@ class DailyReturnCalculator:
         """
         self.transactions = transactions
         self.prices_dict = prices_dict
-        self.fx_data = {}
-
-        # Fetch FX data if date range provided
-        if min_date and max_date:
-            self._fetch_fx_data(min_date, max_date)
-
-    def _fetch_fx_data(self, min_date, max_date):
-        """Fetch FX data for EUR and GBP and add to prices dict for persistence."""
-        for ticker in SUPPORTED_FX_TICKERS:
-            try:
-                data = yf.download(
-                    ticker,
-                    start=min_date - timedelta(days=10),
-                    end=max_date + timedelta(days=1),
-                    progress=False
-                )
-                if isinstance(data, pd.DataFrame):
-                    rates = data['Close']
-                else:
-                    rates = data['Close']
-                self.fx_data[ticker] = rates.sort_index()
-
-                # Also add to prices_dict so it gets persisted to database
-                self.prices_dict[ticker] = rates.sort_index()
-            except Exception:
-                pass
 
     def _get_fx_rate(self, fx_ticker: str, date_obj) -> float:
         """Get FX rate for a specific date."""
-        price_series = self.fx_data.get(fx_ticker) or self.prices_dict.get(fx_ticker)
+        price_series = self.prices_dict.get(fx_ticker)
         if price_series is None:
-            raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}; try again.")
+            raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}.")
 
         try:
             rate = price_series.asof(pd.Timestamp(date_obj))
             if isinstance(rate, pd.Series):
                 rate = rate.iloc[0] if len(rate) > 0 else None
             if isinstance(rate, float) and np.isnan(rate):
-                raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}; try again.")
+                raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}.")
             if rate is None:
-                raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}; try again.")
+                raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}.")
             return float(rate)
         except Exception:
-            raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}; try again.")
+            raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}.")
 
     @staticmethod
     def _fx_ticker_for_asset(asset: str, asset_type: str = None) -> str | None:
         """Resolve FX ticker for a cash-like asset or regional stock type."""
-        if asset_type == 'cash_fx':
-            return asset
-        if asset_type in ASSET_TYPE_TO_CASH:
-            return ASSET_TYPE_TO_CASH[asset_type]
-        return LEGACY_CASH_TO_FX.get(asset)
+        return _fx_ticker_for_asset(asset, asset_type)
 
     @staticmethod
     def _cash_currency_for_asset_type(asset_type: str) -> str:
         """Resolve cash bucket by asset type."""
-        return ASSET_TYPE_TO_CASH.get(asset_type, BASE_CURRENCY)
+        return _cash_currency_for_asset_type(asset_type)
 
     def _calculate_portfolio_value(self, holdings: Dict, date) -> float:
         """Calculate total portfolio value for given holdings on a date."""
@@ -137,26 +95,8 @@ class DailyReturnCalculator:
                 # USD: direct value
                 asset_value = quantity
             elif asset_type == 'cash_fx':
-                # EURUSD=X, GBPUSD=X: need FX rate from prices
-                if asset in self.prices_dict:
-                    price_series = self.prices_dict[asset]
-                    try:
-                        price_value = price_series.asof(date)
-                        if isinstance(price_value, pd.Series):
-                            price = price_value.iloc[0] if len(price_value) > 0 else None
-                        else:
-                            price = price_value
-                    except Exception:
-                        price = None
-
-                    if price is not None and not (isinstance(price, float) and np.isnan(price)):
-                        asset_value = quantity * float(price)
-                    else:
-                        fx_ticker = self._fx_ticker_for_asset(asset, asset_type)
-                        fx_rate = self._get_fx_rate(fx_ticker, date)
-                        asset_value = quantity * fx_rate
-                else:
-                    asset_value = 0.0
+                fx_rate = self._get_fx_rate(asset, date)
+                asset_value = quantity * fx_rate
             elif asset.startswith('CASH'):
                 # Backwards compatibility: old CASH format (CASH EUR, CASH GBP, CASH USD)
                 fx_ticker = self._fx_ticker_for_asset(asset)
@@ -168,7 +108,7 @@ class DailyReturnCalculator:
             else:
                 # Regular assets: stocks, crypto, etc
                 if asset not in self.prices_dict:
-                    continue
+                    raise ValueError(f"Price unavailable for {asset} as of {date.date()}.")
 
                 price_series = self.prices_dict[asset]
 
@@ -182,7 +122,7 @@ class DailyReturnCalculator:
                     price = None
 
                 if price is None or (isinstance(price, float) and np.isnan(price)):
-                    continue
+                    raise ValueError(f"Price unavailable for {asset} as of {date.date()}.")
 
                 price = float(price)
 
@@ -224,17 +164,14 @@ class DailyReturnCalculator:
                                     if fx_rate is not None and not (isinstance(fx_rate, float) and np.isnan(fx_rate)):
                                         cash_flow += quantity * float(fx_rate)
                                     else:
-                                        # Fallback
                                         fx_ticker = self._fx_ticker_for_asset(asset, asset_type)
                                         fx_rate = self._get_fx_rate(fx_ticker, date_obj)
                                         cash_flow += quantity * fx_rate
                                 except Exception:
-                                    # Fallback
                                     fx_ticker = self._fx_ticker_for_asset(asset, asset_type)
                                     fx_rate = self._get_fx_rate(fx_ticker, date_obj)
                                     cash_flow += quantity * fx_rate
                             else:
-                                # Fallback
                                 fx_ticker = self._fx_ticker_for_asset(asset, asset_type)
                                 fx_rate = self._get_fx_rate(fx_ticker, date_obj)
                                 cash_flow += quantity * fx_rate
@@ -341,7 +278,7 @@ class DailyReturnCalculator:
                         if asset not in holdings[date]:
                             holdings[date][asset] = 0
 
-                        if action in ['BUY'] or action in EXTERNAL_INFLOW_ACTIONS or action in INCOME_ACTIONS:
+                        if action in ['BUY'] or action in EXTERNAL_INFLOW_ACTIONS or action in TRANSFER_ACTIONS or action in INCOME_ACTIONS:
                             holdings[date][asset] += quantity
 
                             # Auto-deduct cash for BUY only

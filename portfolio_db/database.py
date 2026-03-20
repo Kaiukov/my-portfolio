@@ -1,7 +1,7 @@
 """DuckDB database setup and transaction management."""
 
 import duckdb
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import pandas as pd
 from pathlib import Path
 
@@ -23,12 +23,18 @@ class PortfolioDatabase:
         self.con.execute("""
             CREATE SEQUENCE IF NOT EXISTS seq_transaction_id START 1 INCREMENT 1
         """)
+        self.con.execute("""
+            CREATE SEQUENCE IF NOT EXISTS seq_repair_log_id START 1 INCREMENT 1
+        """)
 
         # Migrate existing daily_returns table if needed
         self._migrate_daily_returns_schema()
 
         # Migrate CASH format to Yahoo format
         self._migrate_cash_format()
+
+        # Migrate transactions to add audit/account columns
+        self._migrate_transaction_audit_columns()
 
         # Create transactions table
         self.con.execute("""
@@ -43,7 +49,10 @@ class PortfolioDatabase:
                 currency VARCHAR,
                 fees DOUBLE,
                 exchange VARCHAR,
-                data_source VARCHAR
+                data_source VARCHAR,
+                account VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP
             )
         """)
 
@@ -96,6 +105,29 @@ class PortfolioDatabase:
             )
         """)
 
+        # Create service state table for explicit refresh/recalc freshness
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS service_state (
+                state_key VARCHAR PRIMARY KEY,
+                state_value VARCHAR,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create repair log table for operator visibility
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS repair_log (
+                repair_id INTEGER PRIMARY KEY DEFAULT nextval('seq_repair_log_id'),
+                ticker VARCHAR NOT NULL,
+                start_date DATE,
+                end_date DATE,
+                status VARCHAR NOT NULL,
+                rows_loaded INTEGER DEFAULT 0,
+                message VARCHAR,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         self.con.commit()
 
     def migrate_from_csv(self, csv_path: str):
@@ -133,7 +165,9 @@ class PortfolioDatabase:
     def get_transactions(self):
         """Get all transactions."""
         return self.con.execute(
-            "SELECT * FROM transactions ORDER BY date, id"
+            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+                      account, created_at, updated_at
+               FROM transactions ORDER BY date, id"""
         ).fetchall()
 
     def get_transactions_paginated(self, limit: int, offset: int, start_date=None, end_date=None):
@@ -155,7 +189,9 @@ class PortfolioDatabase:
 
         params_page = params + [limit, offset]
         rows = self.con.execute(
-            f"SELECT * FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?",
+            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+                       account, created_at, updated_at
+                FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?""",
             params_page,
         ).fetchall()
         rows = list(reversed(rows))
@@ -241,6 +277,33 @@ class PortfolioDatabase:
         except Exception:
             # Table might not exist yet on first run - this is expected
             # No action needed - schema will be created by _create_schema()
+            pass
+
+    def _migrate_transaction_audit_columns(self):
+        """Add account, created_at, updated_at columns to transactions if missing."""
+        try:
+            table_exists = self.con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
+            ).fetchone()
+            if not table_exists:
+                return
+
+            columns = self.con.execute("PRAGMA table_info(transactions)").fetchall()
+            existing = {col[1] for col in columns}
+
+            for col_name, col_def in [
+                ('account', 'VARCHAR'),
+                ('created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+                ('updated_at', 'TIMESTAMP'),
+            ]:
+                if col_name not in existing:
+                    try:
+                        self.con.execute(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_def}")
+                    except Exception:
+                        pass
+
+            self.con.commit()
+        except Exception:
             pass
 
     def clear_transactions(self):
@@ -342,7 +405,7 @@ class PortfolioDatabase:
         ).fetchone()
         return result[0] if result and result[0] else None
 
-    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, exchange='', data_source='') -> tuple:
+    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, exchange='', data_source='', account=None) -> tuple:
         """
         Add single transaction and return (transaction_id, is_old_transaction).
         is_old_transaction = True if transaction date < last existing transaction date.
@@ -360,11 +423,11 @@ class PortfolioDatabase:
         result = self.con.execute(
             """
             INSERT INTO transactions
-            (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source, account)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
-            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source],
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account],
         ).fetchone()
         self.con.commit()
         trans_id = result[0] if result else None
@@ -375,7 +438,8 @@ class PortfolioDatabase:
         """Get a single transaction row by id."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+                   account, created_at, updated_at
             FROM transactions
             WHERE id = ?
             """,
@@ -396,19 +460,34 @@ class PortfolioDatabase:
         fees=None,
         exchange='',
         data_source='',
+        account=None,
     ):
         """Update a transaction row and return the refreshed record."""
         self.con.execute(
             """
             UPDATE transactions
             SET date = ?, asset = ?, action = ?, quantity = ?, asset_type = ?, price = ?,
-                currency = ?, fees = ?, exchange = ?, data_source = ?
+                currency = ?, fees = ?, exchange = ?, data_source = ?, account = ?,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, transaction_id],
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account, transaction_id],
         )
         self.con.commit()
         return self.get_transaction_by_id(transaction_id)
+
+    def get_transactions_in_range(self, start_date, end_date):
+        """Get all transactions within an inclusive date range."""
+        return self.con.execute(
+            """
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+                   account, created_at, updated_at
+            FROM transactions
+            WHERE date >= ? AND date <= ?
+            ORDER BY date, id
+            """,
+            [start_date, end_date],
+        ).fetchall()
 
     def get_last_transaction_date(self):
         """Get date of most recent transaction."""
@@ -500,6 +579,36 @@ class PortfolioDatabase:
         ).fetchall()
         return result
 
+    def get_price_coverage(self, ticker: str, start_date=None, end_date=None) -> dict:
+        """Get cached coverage stats for one ticker and date range."""
+        where = ["ticker = ?"]
+        params = [ticker]
+        if start_date is not None:
+            where.append("date >= ?")
+            params.append(start_date)
+        if end_date is not None:
+            where.append("date <= ?")
+            params.append(end_date)
+
+        row = self.con.execute(
+            f"""
+            SELECT
+                COUNT(*) AS row_count,
+                MIN(date) AS first_date,
+                MAX(date) AS last_date
+            FROM prices
+            WHERE {' AND '.join(where)}
+            """,
+            params,
+        ).fetchone()
+
+        return {
+            'ticker': ticker,
+            'row_count': int(row[0]) if row and row[0] is not None else 0,
+            'first_date': row[1] if row else None,
+            'last_date': row[2] if row else None,
+        }
+
     def get_price_series(self, tickers: list[str], start_date=None, end_date=None) -> dict:
         """Load cached prices as per-ticker pandas Series."""
         if not tickers:
@@ -559,6 +668,64 @@ class PortfolioDatabase:
         )
         self.con.commit()
         return True
+
+    def set_service_state(self, state_key: str, state_value):
+        """Store a service state value as a string."""
+        serialized = None if state_value is None else str(state_value)
+        self.con.execute(
+            """
+            INSERT INTO service_state (state_key, state_value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (state_key) DO UPDATE SET
+                state_value = excluded.state_value,
+                updated_at = excluded.updated_at
+            """,
+            [state_key, serialized],
+        )
+        self.con.commit()
+
+    def get_service_state(self, state_key: str):
+        """Get one service state value."""
+        row = self.con.execute(
+            "SELECT state_value, updated_at FROM service_state WHERE state_key = ?",
+            [state_key],
+        ).fetchone()
+        if not row:
+            return None
+        return {'value': row[0], 'updated_at': row[1]}
+
+    def get_all_service_state(self) -> dict:
+        """Get all service state values."""
+        rows = self.con.execute(
+            "SELECT state_key, state_value, updated_at FROM service_state ORDER BY state_key"
+        ).fetchall()
+        return {
+            key: {'value': value, 'updated_at': updated_at}
+            for key, value, updated_at in rows
+        }
+
+    def log_price_repair(self, ticker: str, *, start_date=None, end_date=None, status: str, rows_loaded: int = 0, message: str = None):
+        """Persist one repair attempt."""
+        self.con.execute(
+            """
+            INSERT INTO repair_log (ticker, start_date, end_date, status, rows_loaded, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [ticker, start_date, end_date, status, rows_loaded, message],
+        )
+        self.con.commit()
+
+    def get_latest_repair_logs(self, limit: int = 50):
+        """Return recent repair attempts."""
+        return self.con.execute(
+            """
+            SELECT repair_id, ticker, start_date, end_date, status, rows_loaded, message, timestamp
+            FROM repair_log
+            ORDER BY timestamp DESC, repair_id DESC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
 
     def close(self):
         """Close database connection."""

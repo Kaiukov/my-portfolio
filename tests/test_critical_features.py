@@ -14,7 +14,7 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from portfolio_db.cli import cli
-from portfolio_db.portfolio_service import PortfolioService
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.price_service import PriceService
 
 
@@ -114,3 +114,36 @@ def test_verify_and_repair_prices_detect_and_fill_missing_fx(db_path: Path):
     assert repair["status"] == "success"
     assert "EURUSD=X" in repair["tickers"]
     assert verify_after["coverage"]["issues"] == []
+    assert verify_after["refresh_state"]["last_successful_price_refresh"] is not None
+    assert verify_after["refresh_state"]["stale_data"] is False
+
+
+def test_recalculate_fails_explicitly_when_cached_fx_is_missing(db_path: Path):
+    service = PortfolioService(str(db_path))
+    service.db.add_transaction(
+        pd.Timestamp("2026-01-01").date(),
+        "EURUSD=X",
+        "DEPOSIT",
+        1000.0,
+        asset_type="cash_fx",
+        price=None,
+        currency="EUR",
+        fees=None,
+        exchange="",
+        data_source="",
+    )
+
+    with pytest.raises(PriceDataUnavailableError):
+        service.recalculate(force=True)
+
+    assert service.get_refresh_state()["stale_data"] is True
+    service.close()
+
+
+def test_invalid_buy_without_price_is_rejected(db_path: Path):
+    service = PortfolioService(str(db_path))
+
+    with pytest.raises(ValueError, match="requires a positive price"):
+        service.add_transaction("01-01-2026", "AAPL", "BUY", 1)
+
+    service.close()
