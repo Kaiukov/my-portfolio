@@ -6,6 +6,18 @@ from datetime import datetime, date
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
 
+USER_ACTION_CHOICES = [
+    "BUY",
+    "SELL",
+    "DEPOSIT",
+    "WITHDRAW",
+    "DIVIDEND",
+    "INTEREST",
+    "FEE",
+    "TAX",
+    "TRANSFER",
+]
+
 
 def _parse_date(value: str, flag: str) -> date:
     """Parse YYYY-MM-DD string; call error() and exit on failure."""
@@ -111,6 +123,9 @@ def status(db):
             "total_invested": stats["net_contributions"],
             "deposits": stats["deposits"],
             "withdrawals": stats["withdrawals"],
+            "income": stats["income"],
+            "fees": stats["fees"],
+            "taxes": stats["taxes"],
             "total_gain": stats["net_gain"],
             "total_gain_pct": stats["total_return_pct"],
             "as_of_date": stats["end_date"],
@@ -130,7 +145,7 @@ def status(db):
 @click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
 @click.option("--asset", required=True, help="Asset symbol")
 @click.option("--action", required=True,
-              type=click.Choice(["BUY", "SELL", "DEPOSIT", "WITHDRAW", "FEE"], case_sensitive=False))
+              type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False))
 @click.option("--quantity", required=True, type=float)
 @click.option("--price", type=float, default=None)
 @click.option("--currency", default="USD")
@@ -152,25 +167,61 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, db):
             fees=fees,
             exchange=exchange,
         )
-        trans = service.db.con.execute(
-            "SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source "
-            "FROM transactions WHERE id = ?", [result["transaction_id"]]
-        ).fetchone()
-        col_names = ["id", "date", "asset", "action", "quantity", "asset_type", "price", "currency", "fees", "exchange", "data_source"]
-        trans_dict = {
-            name: (str(value) if name == "date" else value)
-            for name, value in zip(col_names, trans)
-        }
-        success("add", {"transaction": trans_dict, "recalculated": True})
+        trans = service.db.get_transaction_by_id(result["transaction_id"])
+        success("add", {"transaction": service._serialize_transaction_row(trans), "recalculated": True})
     except Exception as e:
         error("add", "DB_ERROR", str(e))
     finally:
         service.close()
 
 
-# ─── verify_prices ────────────────────────────────────────────────────────────
+# ─── edit ─────────────────────────────────────────────────────────────────────
 
 @cli.command()
+@click.option("--id", "trans_id", required=True, type=int)
+@click.option("--date", "date_str", default=None, help="Transaction date (DD-MM-YYYY)")
+@click.option("--asset", default=None, help="Asset symbol")
+@click.option("--action", default=None, type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False))
+@click.option("--quantity", default=None, type=float)
+@click.option("--price", default=None, type=float)
+@click.option("--currency", default=None)
+@click.option("--fees", default=None, type=float)
+@click.option("--exchange", default=None)
+@click.option("--data-source", default=None)
+@click.option("--db", default="portfolio.db")
+def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, db):
+    """Edit an existing transaction and recalculate returns."""
+    changes = {
+        "date": _parse_legacy_date(date_str, "--date") if date_str else None,
+        "asset": asset,
+        "action": action.upper() if action else None,
+        "quantity": quantity,
+        "price": price,
+        "currency": currency,
+        "fees": fees,
+        "exchange": exchange,
+        "data_source": data_source,
+    }
+    if not any(value is not None for value in changes.values()):
+        error("edit", "VALIDATION_ERROR", "Provide at least one field to update")
+
+    service = PortfolioService(db)
+    try:
+        result = service.edit_transaction(trans_id, **changes)
+        success("edit", {"transaction": result["transaction"], "recalculated": True, "from_date": result["from_date"]})
+    except ValueError as e:
+        message = str(e)
+        code = "NOT_FOUND" if "not found" in message.lower() else "VALIDATION_ERROR"
+        error("edit", code, message)
+    except Exception as e:
+        error("edit", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── verify_prices ────────────────────────────────────────────────────────────
+
+@cli.command(name="verify_prices")
 @click.option("--db", default="portfolio.db")
 def verify_prices(db):
     """Verify prices table structure and storage."""
@@ -186,11 +237,35 @@ def verify_prices(db):
                 "start": str(stats.get("min_date", "")),
                 "end": str(stats.get("max_date", "")),
             },
+            "required_range": info.get("coverage", {}).get("required_range", {}),
+            "coverage_issues": info.get("coverage", {}).get("issues", []),
+            "coverage": info.get("coverage", {}).get("coverage", []),
             "issues": info.get("optimization_notes", []),
         }
         success("verify_prices", data)
     except Exception as e:
         error("verify_prices", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── repair_prices ────────────────────────────────────────────────────────────
+
+@cli.command(name="repair_prices")
+@click.option("--ticker", "tickers", multiple=True, help="Specific ticker(s) to refresh")
+@click.option("--start-date", default=None, help="Refresh from date (YYYY-MM-DD)")
+@click.option("--end-date", default=None, help="Refresh to date (YYYY-MM-DD)")
+@click.option("--db", default="portfolio.db")
+def repair_prices(tickers, start_date, end_date, db):
+    """Fetch and cache missing/incomplete price series."""
+    service = PortfolioService(db)
+    sd = _parse_date(start_date, "--start-date") if start_date else None
+    ed = _parse_date(end_date, "--end-date") if end_date else None
+    try:
+        result = service.repair_prices(tickers=list(tickers) or None, start_date=sd, end_date=ed)
+        success("repair_prices", result)
+    except Exception as e:
+        error("repair_prices", "PRICE_FETCH_ERROR", str(e))
     finally:
         service.close()
 
@@ -260,8 +335,12 @@ def cash(db):
             spent = bal_data["spent"]
             received = bal_data["received"]
             withdrawals = bal_data["withdrawals"]
+            dividends = bal_data["dividends"]
+            interest = bal_data["interest"]
+            fees = bal_data["fees"]
+            taxes = bal_data["taxes"]
 
-            if balance == 0 and deposits == 0 and withdrawals == 0 and spent == 0 and received == 0:
+            if balance == 0 and deposits == 0 and withdrawals == 0 and spent == 0 and received == 0 and dividends == 0 and interest == 0 and fees == 0 and taxes == 0:
                 continue
 
             result.append({
@@ -271,6 +350,10 @@ def cash(db):
                 "fx_rate": bal_data["fx_rate"],
                 "deposits": round(deposits * bal_data["fx_rate"], 2),
                 "withdrawals": round(withdrawals * bal_data["fx_rate"], 2),
+                "dividends": round(dividends * bal_data["fx_rate"], 2),
+                "interest": round(interest * bal_data["fx_rate"], 2),
+                "fees": round(fees * bal_data["fx_rate"], 2),
+                "taxes": round(taxes * bal_data["fx_rate"], 2),
                 "spent": round(spent * bal_data["fx_rate"], 2),
                 "received": round(received * bal_data["fx_rate"], 2),
             })
@@ -348,6 +431,11 @@ def performance(db):
                 "deposits": stats["deposits"],
                 "withdrawals": stats["withdrawals"],
                 "net_contributions": stats["net_contributions"],
+                "income": stats["income"],
+                "dividends": stats["dividends"],
+                "interest": stats["interest"],
+                "fees": stats["fees"],
+                "taxes": stats["taxes"],
                 "realized_gain": stats["realized_gain"],
                 "unrealized_gain": stats["unrealized_gain"],
             },

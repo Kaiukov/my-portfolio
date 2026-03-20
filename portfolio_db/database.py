@@ -371,6 +371,45 @@ class PortfolioDatabase:
 
         return (trans_id, is_old)
 
+    def get_transaction_by_id(self, transaction_id: int):
+        """Get a single transaction row by id."""
+        return self.con.execute(
+            """
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source
+            FROM transactions
+            WHERE id = ?
+            """,
+            [transaction_id],
+        ).fetchone()
+
+    def update_transaction(
+        self,
+        transaction_id: int,
+        *,
+        date,
+        asset,
+        action,
+        quantity,
+        asset_type=None,
+        price=None,
+        currency='USD',
+        fees=None,
+        exchange='',
+        data_source='',
+    ):
+        """Update a transaction row and return the refreshed record."""
+        self.con.execute(
+            """
+            UPDATE transactions
+            SET date = ?, asset = ?, action = ?, quantity = ?, asset_type = ?, price = ?,
+                currency = ?, fees = ?, exchange = ?, data_source = ?
+            WHERE id = ?
+            """,
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, transaction_id],
+        )
+        self.con.commit()
+        return self.get_transaction_by_id(transaction_id)
+
     def get_last_transaction_date(self):
         """Get date of most recent transaction."""
         result = self.con.execute(
@@ -460,6 +499,47 @@ class PortfolioDatabase:
             "SELECT ticker, COUNT(*) as record_count FROM prices GROUP BY ticker ORDER BY record_count DESC"
         ).fetchall()
         return result
+
+    def get_price_series(self, tickers: list[str], start_date=None, end_date=None) -> dict:
+        """Load cached prices as per-ticker pandas Series."""
+        if not tickers:
+            return {}
+
+        placeholders = ", ".join(["?"] * len(tickers))
+        params = list(tickers)
+        where = [f"ticker IN ({placeholders})"]
+
+        if start_date is not None:
+            where.append("date >= ?")
+            params.append(start_date)
+        if end_date is not None:
+            where.append("date <= ?")
+            params.append(end_date)
+
+        rows = self.con.execute(
+            f"""
+            SELECT date, ticker, price
+            FROM prices
+            WHERE {' AND '.join(where)}
+            ORDER BY date, ticker
+            """,
+            params,
+        ).fetchall()
+
+        if not rows:
+            return {}
+
+        by_ticker = {}
+        for date_obj, ticker, price in rows:
+            by_ticker.setdefault(ticker, []).append((pd.Timestamp(date_obj), float(price)))
+
+        return {
+            ticker: pd.Series(
+                [value for _, value in entries],
+                index=pd.DatetimeIndex([date_idx for date_idx, _ in entries]),
+            ).sort_index()
+            for ticker, entries in by_ticker.items()
+        }
 
     def delete_transaction_by_id(self, transaction_id: int) -> bool:
         """Delete a transaction by ID."""

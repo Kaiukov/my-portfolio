@@ -1,0 +1,116 @@
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+from click.testing import CliRunner
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+repo_str = str(REPO_ROOT)
+if repo_str not in sys.path:
+    sys.path.insert(0, repo_str)
+for module_name in list(sys.modules):
+    if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
+        del sys.modules[module_name]
+
+from portfolio_db.cli import cli
+from portfolio_db.portfolio_service import PortfolioService
+from portfolio_db.price_service import PriceService
+
+
+def fake_price_fetch(symbols, start_date, end_date):
+    index = pd.date_range(start=start_date, end=end_date, freq="D")
+    prices = {}
+    for symbol in symbols:
+        value = {
+            "EURUSD=X": 1.2,
+            "GBPUSD=X": 1.35,
+            "UAHUSD=X": 0.025,
+        }.get(symbol, 100.0)
+        prices[symbol] = pd.Series([value] * len(index), index=index)
+    return prices
+
+
+@pytest.fixture
+def runner():
+    return CliRunner()
+
+
+@pytest.fixture
+def db_path(tmp_path: Path) -> Path:
+    return tmp_path / "portfolio.db"
+
+
+@pytest.fixture(autouse=True)
+def stub_price_fetch(monkeypatch):
+    monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fake_price_fetch))
+
+
+def test_income_actions_affect_snapshot_not_contributions(db_path: Path):
+    service = PortfolioService(str(db_path))
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    service.add_transaction("02-01-2026", "USD", "DIVIDEND", 50)
+    service.add_transaction("03-01-2026", "USD", "INTEREST", 5)
+    service.add_transaction("04-01-2026", "USD", "TAX", 10)
+    service.add_transaction("05-01-2026", "USD", "FEE", 2)
+
+    snapshot = service.build_reporting_snapshot()
+    service.close()
+
+    assert snapshot["portfolio_value"] == pytest.approx(1043.0)
+    assert snapshot["deposits"] == pytest.approx(1000.0)
+    assert snapshot["withdrawals"] == pytest.approx(0.0)
+    assert snapshot["net_contributions"] == pytest.approx(1000.0)
+    assert snapshot["dividends"] == pytest.approx(50.0)
+    assert snapshot["interest"] == pytest.approx(5.0)
+    assert snapshot["income"] == pytest.approx(55.0)
+    assert snapshot["fees"] == pytest.approx(2.0)
+    assert snapshot["taxes"] == pytest.approx(10.0)
+    assert snapshot["total_profit"] == pytest.approx(43.0)
+
+
+def test_edit_transaction_updates_row_and_recalculates(db_path: Path, runner: CliRunner):
+    service = PortfolioService(str(db_path))
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    service.close()
+
+    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "1300", "--db", str(db_path)])
+    assert result.exit_code == 0, result.output
+
+    service = PortfolioService(str(db_path), read_only=True)
+    transaction = service.db.get_transaction_by_id(1)
+    snapshot = service.build_reporting_snapshot()
+    service.close()
+
+    assert transaction[4] == pytest.approx(1300.0)
+    assert transaction[5] == "cash_base"
+    assert snapshot["portfolio_value"] == pytest.approx(1300.0)
+    assert snapshot["deposits"] == pytest.approx(1300.0)
+
+
+def test_verify_and_repair_prices_detect_and_fill_missing_fx(db_path: Path):
+    service = PortfolioService(str(db_path))
+    service.db.add_transaction(
+        pd.Timestamp("2026-01-01").date(),
+        "EURUSD=X",
+        "DEPOSIT",
+        1000.0,
+        asset_type="cash_fx",
+        price=None,
+        currency="EUR",
+        fees=None,
+        exchange="",
+        data_source="",
+    )
+
+    verify_before = service.verify_prices_storage()
+    assert verify_before["coverage"]["issues"]
+    assert verify_before["coverage"]["issues"][0]["ticker"] == "EURUSD=X"
+
+    repair = service.repair_prices()
+    verify_after = service.verify_prices_storage()
+    service.close()
+
+    assert repair["status"] == "success"
+    assert "EURUSD=X" in repair["tickers"]
+    assert verify_after["coverage"]["issues"] == []

@@ -17,6 +17,10 @@ ASSET_TYPE_TO_CASH = {
     'stock_gbp': 'GBPUSD=X',
 }
 SUPPORTED_FX_TICKERS = ('EURUSD=X', 'GBPUSD=X', 'UAHUSD=X')
+EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT', 'TRANSFER'}
+EXTERNAL_OUTFLOW_ACTIONS = {'WITHDRAW'}
+INCOME_ACTIONS = {'DIVIDEND', 'INTEREST'}
+EXPENSE_ACTIONS = {'FEE', 'TAX'}
 
 
 def get_asset_type(ticker: str) -> str:
@@ -88,11 +92,14 @@ class DailyReturnCalculator:
 
     def _get_fx_rate(self, fx_ticker: str, date_obj) -> float:
         """Get FX rate for a specific date."""
-        if fx_ticker not in self.fx_data:
+        price_series = self.fx_data.get(fx_ticker) or self.prices_dict.get(fx_ticker)
+        if price_series is None:
             raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}; try again.")
 
         try:
-            rate = self.fx_data[fx_ticker].asof(pd.Timestamp(date_obj))
+            rate = price_series.asof(pd.Timestamp(date_obj))
+            if isinstance(rate, pd.Series):
+                rate = rate.iloc[0] if len(rate) > 0 else None
             if isinstance(rate, float) and np.isnan(rate):
                 raise ValueError(f"FX rate unavailable for {fx_ticker} as of {date_obj}; try again.")
             if rate is None:
@@ -204,7 +211,7 @@ class DailyReturnCalculator:
                     asset_type = get_asset_type(asset)
                     is_cash = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
 
-                    if action == 'DEPOSIT' and is_cash:
+                    if action in EXTERNAL_INFLOW_ACTIONS and is_cash:
                         # Convert to USD if needed
                         if asset_type == 'cash_fx':
                             # Get FX rate for this date
@@ -238,7 +245,7 @@ class DailyReturnCalculator:
                         else:
                             # USD or new format
                             cash_flow += quantity
-                    elif action == 'WITHDRAW' and is_cash:
+                    elif action in EXTERNAL_OUTFLOW_ACTIONS and is_cash:
                         # External withdrawal from portfolio cash
                         if asset_type == 'cash_fx':
                             if asset in self.prices_dict:
@@ -334,10 +341,10 @@ class DailyReturnCalculator:
                         if asset not in holdings[date]:
                             holdings[date][asset] = 0
 
-                        if action in ['BUY', 'DEPOSIT']:
+                        if action in ['BUY'] or action in EXTERNAL_INFLOW_ACTIONS or action in INCOME_ACTIONS:
                             holdings[date][asset] += quantity
 
-                            # Auto-deduct cash for BUY (not DEPOSIT, not cash assets)
+                            # Auto-deduct cash for BUY only
                             if action == 'BUY' and not is_cash_asset and price:
                                 cash_currency = get_cash_currency(asset_type)
                                 cash_cost = quantity * price
@@ -356,7 +363,7 @@ class DailyReturnCalculator:
                                     holdings[date][cash_currency] = 0
                                 holdings[date][cash_currency] += cash_proceeds
 
-                        elif action == 'FEE':
+                        elif action in EXPENSE_ACTIONS:
                             # FEE reduces cash holdings without creating position
                             # Use asset as cash currency (USD, EURUSD=X, GBPUSD=X)
                             fee_currency = asset if is_cash_asset else get_cash_currency(asset_type)
@@ -378,7 +385,7 @@ class DailyReturnCalculator:
                                 holdings[date][exchange_currency] = 0
                             holdings[date][exchange_currency] += quantity
 
-                        elif action == 'WITHDRAW':
+                        elif action in EXTERNAL_OUTFLOW_ACTIONS:
                             # WITHDRAW reduces cash holdings but doesn't affect investment
                             holdings[date][asset] -= quantity
 

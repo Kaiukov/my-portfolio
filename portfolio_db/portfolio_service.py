@@ -20,11 +20,25 @@ class PortfolioService:
 
     RISK_FREE_RATE_ANNUAL = 0.02
     BASE_CURRENCY = 'USD'
+    EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT', 'TRANSFER'}
+    EXTERNAL_OUTFLOW_ACTIONS = {'WITHDRAW'}
+    INCOME_ACTIONS = {'DIVIDEND', 'INTEREST'}
+    EXPENSE_ACTIONS = {'FEE', 'TAX'}
+    TRADE_ACTIONS = {'BUY', 'SELL'}
+    SYSTEM_ACTIONS = {'EXCHANGE_FROM', 'EXCHANGE_TO'}
+    SUPPORTED_ACTIONS = tuple(sorted(
+        EXTERNAL_INFLOW_ACTIONS
+        | EXTERNAL_OUTFLOW_ACTIONS
+        | INCOME_ACTIONS
+        | EXPENSE_ACTIONS
+        | TRADE_ACTIONS
+        | SYSTEM_ACTIONS
+    ))
     CASH_FX_SYMBOLS = ('EURUSD=X', 'GBPUSD=X', 'UAHUSD=X')
     CASH_BUCKET_DEFAULTS = {
-        'USD': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0},
-        'EURUSD=X': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0},
-        'GBPUSD=X': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0},
+        'USD': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0, 'dividends': 0.0, 'interest': 0.0, 'fees': 0.0, 'taxes': 0.0},
+        'EURUSD=X': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0, 'dividends': 0.0, 'interest': 0.0, 'fees': 0.0, 'taxes': 0.0},
+        'GBPUSD=X': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0, 'dividends': 0.0, 'interest': 0.0, 'fees': 0.0, 'taxes': 0.0},
     }
     CASH_DISPLAY_CURRENCY = {
         'USD': 'USD',
@@ -64,8 +78,36 @@ class PortfolioService:
         # This avoids issues with price_series iteration
         pass
 
+    def _load_calculation_prices(self, symbols: list[str], start_date, end_date) -> dict:
+        """Load calculation prices by combining live fetch results with cached DB prices."""
+        import pandas as pd
+
+        try:
+            live_prices = self.price_service.fetch_all_prices(symbols, start_date, end_date)
+        except Exception:
+            live_prices = {}
+
+        cached_prices = self.db.get_price_series(symbols, start_date=start_date, end_date=end_date)
+        merged = dict(cached_prices)
+
+        for symbol, series in live_prices.items():
+            cached_series = merged.get(symbol)
+            if cached_series is None or len(cached_series) == 0:
+                merged[symbol] = series
+                continue
+            if series is None or len(series) == 0:
+                continue
+
+            combined = pd.concat([cached_series, series]).sort_index()
+            combined = combined[~combined.index.duplicated(keep='last')]
+            merged[symbol] = combined
+
+        return merged
+
     def _calculate_and_store_returns(self):
         """Calculate and store daily returns."""
+        import pandas as pd
+
         # Get transactions and prices
         transactions = self.db.get_transactions()
         if not transactions:
@@ -89,9 +131,7 @@ class PortfolioService:
         all_symbols = list(assets)
         all_symbols.extend(fx_currencies)
 
-        prices_dict = self.price_service.fetch_all_prices(
-            all_symbols, min_date, max_date
-        )
+        prices_dict = self._load_calculation_prices(all_symbols, min_date, max_date)
 
         # Calculate returns
         calculator = DailyReturnCalculator(transactions, prices_dict, min_date, max_date)
@@ -169,6 +209,49 @@ class PortfolioService:
         ]
         return data, total
 
+    @staticmethod
+    def _serialize_transaction_row(trans) -> dict:
+        """Convert a DB transaction tuple into the standard response shape."""
+        col_names = [
+            'id', 'date', 'asset', 'action', 'quantity',
+            'asset_type', 'price', 'currency', 'fees', 'exchange', 'data_source'
+        ]
+        return {
+            name: (str(value) if name == 'date' else value)
+            for name, value in zip(col_names, trans)
+        }
+
+    @classmethod
+    def _empty_cash_bucket(cls) -> dict:
+        """Return a new mutable cash bucket record."""
+        return {
+            'balance': 0.0,
+            'deposits': 0.0,
+            'withdrawals': 0.0,
+            'spent': 0.0,
+            'received': 0.0,
+            'dividends': 0.0,
+            'interest': 0.0,
+            'fees': 0.0,
+            'taxes': 0.0,
+        }
+
+    @classmethod
+    def validate_action(cls, action: str) -> str:
+        """Normalize and validate a transaction action."""
+        normalized = action.upper()
+        if normalized not in cls.SUPPORTED_ACTIONS:
+            supported = ", ".join(cls.SUPPORTED_ACTIONS)
+            raise ValueError(f"Unsupported action {action!r}. Supported actions: {supported}")
+        return normalized
+
+    @staticmethod
+    def derive_asset_type(asset: str) -> str:
+        """Classify assets using the app's internal ticker rules."""
+        from portfolio_db.calculator import get_asset_type
+
+        return get_asset_type(asset)
+
     def export_returns_json(self, output_path: str):
         """Export daily returns to JSON."""
         returns = self.get_daily_returns()
@@ -234,6 +317,11 @@ class PortfolioService:
             'deposits': 0.0,
             'withdrawals': 0.0,
             'net_contributions': 0.0,
+            'dividends': 0.0,
+            'interest': 0.0,
+            'fees': 0.0,
+            'taxes': 0.0,
+            'income': 0.0,
             'realized_gain': 0.0,
             'unrealized_gain': 0.0,
             'total_profit': 0.0,
@@ -284,10 +372,12 @@ class PortfolioService:
 
     def _get_series_price_asof(self, price_series, valuation_ts):
         """Read price using asof semantics at or before valuation_ts."""
+        import pandas as pd
+
         if price_series is None:
             return None
         try:
-            return self._extract_scalar_price(price_series.asof(valuation_ts))
+            return self._extract_scalar_price(price_series.asof(pd.Timestamp(valuation_ts)))
         except Exception:
             return None
 
@@ -337,11 +427,7 @@ class PortfolioService:
         discovered = self.discover_assets_and_currencies()
         all_symbols = list(discovered['assets'])
         all_symbols.extend(discovered['fx_currencies'])
-
-        try:
-            prices_dict = self.price_service.fetch_all_prices(all_symbols, min_date, as_of_date)
-        except Exception:
-            prices_dict = {}
+        prices_dict = self.db.get_price_series(all_symbols, start_date=min_date, end_date=as_of_date)
 
         returns = [
             row for row in self.get_daily_returns()
@@ -357,7 +443,7 @@ class PortfolioService:
         }
 
     def _get_external_cash_flow_metrics(self, transactions=None, as_of_date=None, fx_prices=None) -> dict:
-        """Calculate deposits, withdrawals, and net contributions in USD."""
+        """Calculate cash-flow and cash-income metrics in USD."""
         from portfolio_db.calculator import get_asset_type
 
         if transactions is None:
@@ -367,6 +453,11 @@ class PortfolioService:
                 'deposits': 0.0,
                 'withdrawals': 0.0,
                 'net_contributions': 0.0,
+                'dividends': 0.0,
+                'interest': 0.0,
+                'fees': 0.0,
+                'taxes': 0.0,
+                'income': 0.0,
                 'cash_flow_events': [],
             }
 
@@ -385,31 +476,48 @@ class PortfolioService:
 
         deposits = 0.0
         withdrawals = 0.0
+        dividends = 0.0
+        interest = 0.0
+        fees = 0.0
+        taxes = 0.0
         cash_flow_events = []
 
         for trans in transactions:
             date_obj = trans[1]
             asset = trans[2]
-            action = trans[3].upper()
+            action = self.validate_action(trans[3])
             quantity = float(trans[4])
             asset_type = get_asset_type(asset)
             is_cash_asset = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
 
-            if not is_cash_asset or action not in {'DEPOSIT', 'WITHDRAW'}:
+            if not is_cash_asset:
                 continue
 
             amount_usd = self._convert_cash_amount_to_usd(asset, quantity, date_obj, fx_prices)
-            if action == 'DEPOSIT':
+            if action in self.EXTERNAL_INFLOW_ACTIONS:
                 deposits += amount_usd
                 cash_flow_events.append({'date': date_obj, 'amount': amount_usd})
-            else:
+            elif action in self.EXTERNAL_OUTFLOW_ACTIONS:
                 withdrawals += amount_usd
                 cash_flow_events.append({'date': date_obj, 'amount': -amount_usd})
+            elif action == 'DIVIDEND':
+                dividends += amount_usd
+            elif action == 'INTEREST':
+                interest += amount_usd
+            elif action == 'FEE':
+                fees += amount_usd
+            elif action == 'TAX':
+                taxes += amount_usd
 
         return {
             'deposits': deposits,
             'withdrawals': withdrawals,
             'net_contributions': deposits - withdrawals,
+            'dividends': dividends,
+            'interest': interest,
+            'fees': fees,
+            'taxes': taxes,
+            'income': dividends + interest,
             'cash_flow_events': cash_flow_events,
         }
 
@@ -457,6 +565,11 @@ class PortfolioService:
             'deposits': 0.0,
             'withdrawals': 0.0,
             'net_contributions': 0.0,
+            'dividends': 0.0,
+            'interest': 0.0,
+            'fees': 0.0,
+            'taxes': 0.0,
+            'income': 0.0,
             'realized_gain': 0.0,
             'unrealized_gain': 0.0,
             'time_weighted_return_pct': 0.0,
@@ -502,6 +615,11 @@ class PortfolioService:
                 'deposits': snapshot['deposits'],
                 'withdrawals': snapshot['withdrawals'],
                 'net_contributions': snapshot['net_contributions'],
+                'dividends': snapshot['dividends'],
+                'interest': snapshot['interest'],
+                'fees': snapshot['fees'],
+                'taxes': snapshot['taxes'],
+                'income': snapshot['income'],
                 'realized_gain': snapshot['realized_gain'],
                 'unrealized_gain': snapshot['unrealized_gain'],
                 'total_cash_flow': snapshot['net_contributions'],
@@ -749,6 +867,11 @@ class PortfolioService:
             'deposits': snapshot['deposits'],
             'withdrawals': snapshot['withdrawals'],
             'net_contributions': snapshot['net_contributions'],
+            'dividends': snapshot['dividends'],
+            'interest': snapshot['interest'],
+            'fees': snapshot['fees'],
+            'taxes': snapshot['taxes'],
+            'income': snapshot['income'],
             'realized_gain': snapshot['realized_gain'],
             'unrealized_gain': snapshot['unrealized_gain'],
             'time_weighted_return_pct': time_weighted_return_pct,
@@ -857,13 +980,14 @@ class PortfolioService:
         # Parse date if string
         if isinstance(date_obj, str):
             date_obj = datetime.strptime(date_obj, '%d-%m-%Y').date()
+        action = self.validate_action(action)
 
         # Get last date BEFORE adding transaction
         last_date_before = self.db.get_last_transaction_date()
 
         # Detect asset_type if not provided
-        if not asset_type:
-            asset_type = self.price_service.detect_asset_type(asset)
+        if not asset_type and action not in self.SYSTEM_ACTIONS:
+            asset_type = self.derive_asset_type(asset)
 
         # Add transaction to database
         trans_id, is_old = self.db.add_transaction(
@@ -896,6 +1020,49 @@ class PortfolioService:
             'recalc_type': recalc_type,
             'from_date': str(from_date),
             'transaction_id': trans_id
+        }
+
+    def edit_transaction(self, transaction_id: int, **changes) -> dict:
+        """Edit a transaction and recalculate from the earliest affected date."""
+        existing = self.db.get_transaction_by_id(transaction_id)
+        if not existing:
+            raise ValueError(f"Transaction ID {transaction_id} not found")
+
+        current = self._serialize_transaction_row(existing)
+        updated = current.copy()
+        updated.update({key: value for key, value in changes.items() if value is not None})
+
+        if isinstance(updated['date'], str):
+            try:
+                updated['date'] = datetime.strptime(updated['date'], '%d-%m-%Y').date()
+            except ValueError:
+                updated['date'] = datetime.strptime(updated['date'], '%Y-%m-%d').date()
+
+        updated['action'] = self.validate_action(updated['action'])
+
+        if updated['action'] not in self.SYSTEM_ACTIONS:
+            updated['asset_type'] = self.derive_asset_type(updated['asset'])
+
+        recalc_from = min(existing[1], updated['date'])
+        updated_row = self.db.update_transaction(
+            transaction_id,
+            date=updated['date'],
+            asset=updated['asset'],
+            action=updated['action'],
+            quantity=updated['quantity'],
+            asset_type=updated.get('asset_type'),
+            price=updated.get('price'),
+            currency=updated.get('currency', 'USD'),
+            fees=updated.get('fees'),
+            exchange=updated.get('exchange', ''),
+            data_source=updated.get('data_source', ''),
+        )
+        recalc_result = self.recalculate(from_date=recalc_from, force=True)
+        return {
+            'status': 'success',
+            'recalc_type': recalc_result.get('recalc_type', 'full'),
+            'from_date': str(recalc_from),
+            'transaction': self._serialize_transaction_row(updated_row),
         }
 
     def exchange_currency(self, date_obj, from_asset: str, to_asset: str, quantity: float, rate: float) -> dict:
@@ -1075,9 +1242,7 @@ class PortfolioService:
 
         # Fetch prices for the full calculation window even during partial
         # recalculation. Results can still be filtered before persistence.
-        prices_dict = self.price_service.fetch_all_prices(
-            all_symbols, calc_start_date, max_date
-        )
+        prices_dict = self._load_calculation_prices(all_symbols, calc_start_date, max_date)
 
         # Calculate returns using calculator
         calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_date)
@@ -1207,10 +1372,99 @@ class PortfolioService:
             # Price persistence is non-critical - calculations use fresh prices
             pass
 
+    def analyze_price_coverage(self, start_date=None, end_date=None) -> dict:
+        """Inspect cached price coverage for all required tickers."""
+        transactions = self.db.get_transactions()
+        if not transactions:
+            return {
+                'required_range': {'start': None, 'end': None},
+                'required_tickers': [],
+                'coverage': [],
+                'issues': [],
+            }
+
+        required_start = start_date or transactions[0][1]
+        required_end = end_date or self._resolve_as_of_date() or transactions[-1][1]
+        discovered = self.discover_assets_and_currencies()
+        required_tickers = sorted({
+            ticker for ticker in (set(discovered['assets']) | set(discovered['fx_currencies']))
+            if ticker != self.BASE_CURRENCY
+        })
+        cached = self.db.get_price_series(required_tickers, start_date=required_start, end_date=required_end)
+
+        coverage = []
+        issues = []
+        for ticker in required_tickers:
+            series = cached.get(ticker)
+            cached_rows = len(series) if series is not None else 0
+            cached_start = series.index[0].date() if series is not None and len(series) else None
+            cached_end = series.index[-1].date() if series is not None and len(series) else None
+            has_start_price = self._get_series_price_asof(series, required_start) is not None
+            has_end_price = self._get_series_price_asof(series, required_end) is not None
+            issue_flags = []
+            if cached_rows == 0:
+                issue_flags.append('missing_series')
+            if not has_start_price:
+                issue_flags.append('missing_start_coverage')
+            if not has_end_price:
+                issue_flags.append('missing_end_coverage')
+            coverage.append({
+                'ticker': ticker,
+                'required_start': str(required_start),
+                'required_end': str(required_end),
+                'cached_start': str(cached_start) if cached_start else None,
+                'cached_end': str(cached_end) if cached_end else None,
+                'cached_rows': cached_rows,
+                'has_required_start_price': has_start_price,
+                'has_required_end_price': has_end_price,
+                'issues': issue_flags,
+            })
+            if issue_flags:
+                issues.append({'ticker': ticker, 'issues': issue_flags})
+
+        return {
+            'required_range': {'start': str(required_start), 'end': str(required_end)},
+            'required_tickers': required_tickers,
+            'coverage': coverage,
+            'issues': issues,
+        }
+
+    def repair_prices(self, tickers=None, start_date=None, end_date=None) -> dict:
+        """Fetch and persist cached prices for missing or requested tickers."""
+        coverage = self.analyze_price_coverage(start_date=start_date, end_date=end_date)
+        required_start = start_date or (
+            datetime.strptime(coverage['required_range']['start'], '%Y-%m-%d').date()
+            if coverage['required_range']['start'] else None
+        )
+        required_end = end_date or (
+            datetime.strptime(coverage['required_range']['end'], '%Y-%m-%d').date()
+            if coverage['required_range']['end'] else None
+        )
+
+        if required_start is None or required_end is None:
+            return {'status': 'skipped', 'tickers': [], 'rows_loaded': 0}
+
+        target_tickers = sorted(set(tickers or [
+            item['ticker'] for item in coverage['coverage'] if item['issues']
+        ]))
+        if not target_tickers:
+            return {'status': 'up_to_date', 'tickers': [], 'rows_loaded': 0}
+
+        prices_dict = self.price_service.fetch_all_prices(target_tickers, required_start, required_end)
+        self._persist_prices_to_db(prices_dict)
+        rows_loaded = sum(len(series) for series in prices_dict.values() if series is not None)
+        return {
+            'status': 'success',
+            'tickers': target_tickers,
+            'rows_loaded': rows_loaded,
+            'range': {'start': str(required_start), 'end': str(required_end)},
+        }
+
     def verify_prices_storage(self) -> dict:
         """Verify and report on prices table structure and optimization."""
         info = self.db.get_prices_table_info()
         ticker_counts = self.db.get_prices_by_ticker_count()
+        coverage = self.analyze_price_coverage()
 
         return {
             'status': 'verified',
@@ -1232,11 +1486,13 @@ class PortfolioService:
                 {'ticker': ticker, 'record_count': count}
                 for ticker, count in ticker_counts
             ],
+            'coverage': coverage,
             'optimization_notes': [
                 'Primary key on (date, ticker) is optimal for lookups',
                 'Index on ticker column enables fast filtering by asset',
                 f'Table contains {len(ticker_counts)} unique tickers',
-                f'Storage is efficient for {info["total_records"]} price records'
+                f'Storage is efficient for {info["total_records"]} price records',
+                f'Price coverage issues detected: {len(coverage["issues"])}',
             ]
         }
 
@@ -1258,33 +1514,41 @@ class PortfolioService:
             asset_type = get_asset_type(asset)
             cash_key = self._get_cash_key_for_asset(asset, asset_type)
 
-            if action == 'DEPOSIT' and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
+            if action in self.EXTERNAL_INFLOW_ACTIONS and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
                 deposit_key = self._normalize_cash_asset(asset, asset_type)
-                cash_balances.setdefault(deposit_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances.setdefault(deposit_key, self._empty_cash_bucket())
                 cash_balances[deposit_key]['deposits'] += quantity
                 cash_balances[deposit_key]['balance'] += quantity
-            elif action == 'WITHDRAW' and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
+            elif action in self.EXTERNAL_OUTFLOW_ACTIONS and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
                 withdraw_key = self._normalize_cash_asset(asset, asset_type)
-                cash_balances.setdefault(withdraw_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances.setdefault(withdraw_key, self._empty_cash_bucket())
                 cash_balances[withdraw_key]['withdrawals'] += quantity
                 cash_balances[withdraw_key]['balance'] -= quantity
+            elif action in self.INCOME_ACTIONS and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
+                income_key = self._normalize_cash_asset(asset, asset_type)
+                cash_balances.setdefault(income_key, self._empty_cash_bucket())
+                metric_key = 'dividends' if action == 'DIVIDEND' else 'interest'
+                cash_balances[income_key][metric_key] += quantity
+                cash_balances[income_key]['balance'] += quantity
             elif action == 'BUY' and price:
                 cash_balances[cash_key]['spent'] += quantity * price
                 cash_balances[cash_key]['balance'] -= quantity * price
             elif action == 'SELL' and price:
                 cash_balances[cash_key]['received'] += quantity * price
                 cash_balances[cash_key]['balance'] += quantity * price
-            elif action == 'FEE':
+            elif action in self.EXPENSE_ACTIONS:
                 fee_key = self._normalize_cash_asset(asset, asset_type) if (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')) else cash_key
-                cash_balances.setdefault(fee_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances.setdefault(fee_key, self._empty_cash_bucket())
+                metric_key = 'fees' if action == 'FEE' else 'taxes'
+                cash_balances[fee_key][metric_key] += quantity
                 cash_balances[fee_key]['balance'] -= quantity
             elif action == 'EXCHANGE_FROM':
                 exchange_key = self._normalize_cash_asset(asset, asset_type) if (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')) else cash_key
-                cash_balances.setdefault(exchange_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances.setdefault(exchange_key, self._empty_cash_bucket())
                 cash_balances[exchange_key]['balance'] += quantity
             elif action == 'EXCHANGE_TO':
                 exchange_key = self._normalize_cash_asset(asset, asset_type) if (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')) else cash_key
-                cash_balances.setdefault(exchange_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances.setdefault(exchange_key, self._empty_cash_bucket())
                 cash_balances[exchange_key]['balance'] += quantity
 
         return cash_balances
@@ -1298,7 +1562,8 @@ class PortfolioService:
         snapshot = []
         for symbol, raw in raw_balances.items():
             fx_rate = 1.0
-            if symbol != self.BASE_CURRENCY:
+            has_activity = any(float(raw[key]) != 0.0 for key in raw)
+            if symbol != self.BASE_CURRENCY and has_activity:
                 fx_rate = self._require_series_price_asof(
                     prices_dict.get(symbol),
                     valuation_ts,
@@ -1318,6 +1583,10 @@ class PortfolioService:
                 'withdrawals': raw['withdrawals'],
                 'spent': raw['spent'],
                 'received': raw['received'],
+                'dividends': raw['dividends'],
+                'interest': raw['interest'],
+                'fees': raw['fees'],
+                'taxes': raw['taxes'],
             })
 
         return snapshot
@@ -1338,7 +1607,7 @@ class PortfolioService:
             price = trans[6]
             date_obj = trans[1]
 
-            if action in ('FEE', 'DEPOSIT', 'EXCHANGE_FROM', 'EXCHANGE_TO', 'WITHDRAW'):
+            if action not in self.TRADE_ACTIONS:
                 continue
 
             if asset not in positions:
@@ -1494,12 +1763,20 @@ class PortfolioService:
             realized_gain += float(position.get('realized_gain_value') or 0.0)
             unrealized_gain += float(position.get('total_gain_value') or 0.0)
 
-        total_profit = realized_gain + unrealized_gain
+        income = cash_flow_metrics['income']
+        fees = cash_flow_metrics['fees']
+        taxes = cash_flow_metrics['taxes']
+        total_profit = realized_gain + unrealized_gain + income - fees - taxes
         return {
             'portfolio_value': portfolio_value,
             'deposits': cash_flow_metrics['deposits'],
             'withdrawals': cash_flow_metrics['withdrawals'],
             'net_contributions': cash_flow_metrics['net_contributions'],
+            'dividends': cash_flow_metrics['dividends'],
+            'interest': cash_flow_metrics['interest'],
+            'fees': fees,
+            'taxes': taxes,
+            'income': income,
             'realized_gain': realized_gain,
             'unrealized_gain': unrealized_gain,
             'total_profit': total_profit,
@@ -1534,6 +1811,11 @@ class PortfolioService:
             'deposits': totals['deposits'],
             'withdrawals': totals['withdrawals'],
             'net_contributions': totals['net_contributions'],
+            'dividends': totals['dividends'],
+            'interest': totals['interest'],
+            'fees': totals['fees'],
+            'taxes': totals['taxes'],
+            'income': totals['income'],
             'realized_gain': totals['realized_gain'],
             'unrealized_gain': totals['unrealized_gain'],
             'total_profit': totals['total_profit'],
