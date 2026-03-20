@@ -9,11 +9,13 @@ from pathlib import Path
 class PortfolioDatabase:
     """DuckDB-based portfolio database."""
 
-    def __init__(self, db_path: str = "portfolio.db"):
+    def __init__(self, db_path: str = "portfolio.db", read_only: bool = False):
         """Initialize database connection."""
         self.db_path = db_path
-        self.con = duckdb.connect(db_path)
-        self._create_schema()
+        self.read_only = read_only
+        self.con = duckdb.connect(db_path, read_only=read_only)
+        if not read_only:
+            self._create_schema()
 
     def _create_schema(self):
         """Create database schema if not exists."""
@@ -355,20 +357,16 @@ class PortfolioDatabase:
         is_old = last_date is not None and date < last_date
 
         # Insert transaction
-        self.con.execute(
+        result = self.con.execute(
             """
             INSERT INTO transactions
             (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source],
-        )
-        self.con.commit()
-
-        # Get the ID of the inserted transaction
-        result = self.con.execute(
-            "SELECT MAX(id) FROM transactions"
         ).fetchone()
+        self.con.commit()
         trans_id = result[0] if result else None
 
         return (trans_id, is_old)

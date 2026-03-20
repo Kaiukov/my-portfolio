@@ -725,16 +725,18 @@ class PortfolioService:
             }
 
         # Determine recalc scope
+        calc_start_date = transactions[0][1]
         if force or from_date is None:
             # Full recalculation
-            min_date = transactions[0][1]
             is_full_recalc = True
             self.db.clear_daily_returns()
         else:
-            # Partial recalculation - delete from this date onwards
+            # Partial recalculation still needs the full historical price context.
+            # The calculator rebuilds holdings from the first transaction, so
+            # fetching prices only from from_date breaks the retained rows'
+            # prev_value / adjusted_base chain.
             is_full_recalc = False
             self.db.delete_daily_returns_from_date(from_date)
-            min_date = from_date
 
         # Discover assets and currencies for price lookup
         discovered_assets = self.discover_assets_and_currencies()
@@ -750,13 +752,14 @@ class PortfolioService:
         all_symbols = list(assets)
         all_symbols.extend(fx_currencies)
 
-        # Fetch prices for needed date range
+        # Fetch prices for the full calculation window even during partial
+        # recalculation. Results can still be filtered before persistence.
         prices_dict = self.price_service.fetch_all_prices(
-            all_symbols, min_date, max_date
+            all_symbols, calc_start_date, max_date
         )
 
         # Calculate returns using calculator
-        calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_trans_date)
+        calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_date)
         results = calculator.calculate_all_returns()
 
         # Persist prices to database for caching
