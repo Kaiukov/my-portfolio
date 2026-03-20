@@ -17,7 +17,7 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from portfolio_db.cli import cli
-from portfolio_db.portfolio_service import PortfolioService
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.price_service import PriceService
 
 # ── Fixed prices ──────────────────────────────────────────────────────────────
@@ -228,3 +228,94 @@ def test_empty_portfolio_snapshot(tmp_path):
 
     assert snap["portfolio_value"] == pytest.approx(0.0)
     assert snap["deposits"] == pytest.approx(0.0)
+
+
+# ── Regression fixtures ───────────────────────────────────────────────────────
+
+def test_missing_fx_coverage_raises_on_recalc(tmp_path):
+    """Recalculate must raise explicitly when required FX prices are absent."""
+    db_path = str(tmp_path / "missing_fx.db")
+    svc = PortfolioService(db_path)
+    # EUR deposit requires EURUSD=X price — do NOT repair prices
+    svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000,
+                           asset_type="cash_fx", currency="EUR")
+
+    with pytest.raises(PriceDataUnavailableError, match="EURUSD=X"):
+        svc.recalculate(force=True)
+
+    # stale_data must be set after the failure
+    assert svc.get_refresh_state()["stale_data"] is True
+    svc.close()
+
+
+def test_missing_fx_coverage_health_shows_degraded(tmp_path, runner):
+    """health command reports degraded when FX prices are missing."""
+    db_path = str(tmp_path / "missing_fx_health.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000,
+                           asset_type="cash_fx", currency="EUR")
+    svc.close()
+
+    result = runner.invoke(cli, ["health", "--db", db_path])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["ok"] is True
+    assert data["data"]["status"] == "degraded"
+    assert data["data"]["price_coverage_issues"] > 0
+
+
+def test_stale_data_cleared_after_repair_and_recalc(tmp_path):
+    """stale_data must be False after successful repair + recalculate."""
+    db_path = str(tmp_path / "stale.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000,
+                           asset_type="cash_fx", currency="EUR")
+
+    # Attempt recalc — marks stale
+    with pytest.raises(PriceDataUnavailableError):
+        svc.recalculate(force=True)
+    assert svc.get_refresh_state()["stale_data"] is True
+
+    # Repair then recalc — clears stale
+    svc.repair_prices()
+    svc.recalculate(force=True)
+    state = svc.get_refresh_state()
+    svc.close()
+
+    assert state["stale_data"] is False
+    assert state["last_successful_price_refresh"] is not None
+    assert state["last_successful_recalc"] is not None
+
+
+def test_backup_command(golden_db, runner, tmp_path):
+    """backup command creates a copy and returns correct envelope."""
+    out = str(tmp_path / "backup.db")
+    result = runner.invoke(cli, ["backup", "--db", golden_db, "--out", out])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+
+    assert data["ok"] is True
+    assert data["command"] == "backup"
+    assert data["data"]["backup"] == out
+    assert data["data"]["size_bytes"] > 0
+    assert Path(out).exists()
+
+
+def test_delete_dry_run(golden_db, runner):
+    """delete --dry-run shows would_delete without removing the transaction."""
+    result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run", "--db", golden_db])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+
+    assert data["ok"] is True
+    body = data["data"]
+    assert body["dry_run"] is True
+    assert body["transaction_id"] == 1
+    assert "would_delete" in body
+    assert body["would_delete"]["action"] == "DEPOSIT"
+
+    # Transaction must still exist
+    svc = PortfolioService(golden_db, read_only=True)
+    row = svc.db.get_transaction_by_id(1)
+    svc.close()
+    assert row is not None

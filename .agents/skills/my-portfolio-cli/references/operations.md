@@ -8,9 +8,14 @@ Operator workflows supported by the current production baseline:
 
 ## Bootstrap
 
-- install dependencies with `uv sync`
-- initialize or migrate the database with `portfolio migrate`
-- keep one explicit DB path per environment
+```bash
+uv sync                                  # install dependencies
+portfolio init --db portfolio.db         # create and verify DB schema (idempotent)
+cp .env.example .env                     # configure DB path and log path
+```
+
+- `init` is safe to run repeatedly — it creates schema if missing, no-op otherwise
+- keep one explicit `--db` path per environment
 
 ## Import And Migrate
 
@@ -50,3 +55,34 @@ Operator workflows supported by the current production baseline:
 - `status`, `cash`, `summary`, `allocation`, and `performance` are read/reporting commands
 - these commands must be interpreted as views over one reporting snapshot and one `as_of_date`
 - operators should expect equal total portfolio value across those commands for the same snapshot date
+
+## Health Check
+
+```bash
+portfolio health --db portfolio.db
+```
+
+Returns: `status` (ok/degraded), `stale_data`, `last_successful_price_refresh`,
+`last_successful_recalc`, `price_coverage_issues`, `stale_tickers`.
+
+## Backup
+
+```bash
+portfolio backup --db portfolio.db                        # timestamped copy in same dir
+portfolio backup --db portfolio.db --out /backups/p.db    # explicit path
+```
+
+Recommended: run before destructive operations (bulk delete, migration).
+Backup events are logged to `logs/portfolio.log`.
+
+## Structured Logs
+
+All mutations and key events emit JSON lines to `logs/portfolio.log` (configurable via `PORTFOLIO_LOG_PATH`).
+
+```bash
+# Monitor errors in real time
+tail -f logs/portfolio.log | jq 'select(.level == "error")'
+
+# All recalc events today
+grep '"event":"recalc_done"' logs/portfolio.log | jq .
+```

@@ -24,7 +24,10 @@ mkdir -p /home/user/my-portfolio/logs
 | `recalculate` | Mon–Fri 18:30 | After US market close (16:00 ET) | Refresh daily returns with latest closing prices |
 | `recalculate` | Sat 10:00 | Weekend morning | Catch any late Friday settlement data |
 | `recalculate --force` | Sun 03:00 | Weekly deep refresh | Full recalc — clears cache, rebuilds all rows |
+| `repair_prices` | Sun 02:30 | Before weekly recalc | Backfill any missing price coverage |
 | `verify_prices` | Daily 07:00 | Before market open | Detect missing/stale price data early |
+| `health` | Daily 07:05 | After verify | Confirm DB reachable and recalc fresh |
+| `backup` | Daily 02:00 | Nightly | Timestamped DB snapshot before daily operations |
 | `status` | Mon–Fri 09:00 | Morning briefing | Snapshot portfolio value to log |
 | `performance` | 1st of month 06:00 | Monthly | Persist monthly performance report to file |
 
@@ -40,17 +43,26 @@ LOG=$PROJECT/logs
 DB=$PROJECT/portfolio.db
 UV=uv
 
+# ─── NIGHTLY: backup DB before daily operations (02:00) ──────────────────────
+0 2  * * *    cd $PROJECT && $UV run portfolio backup --db $DB >> $LOG/backup.log 2>&1
+
+# ─── SUNDAY: repair missing prices before weekly recalc (02:30) ──────────────
+30 2 * * 0    cd $PROJECT && $UV run portfolio repair_prices --db $DB >> $LOG/repair-prices.log 2>&1
+
+# ─── SUNDAY: full forced recalculation (weekly deep refresh) (03:00) ─────────
+0 3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force --db $DB >> $LOG/recalc-full.log 2>&1
+
 # ─── WEEKDAY: recalculate after US market close (Mon–Fri 18:30) ─────────────
 30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
 
 # ─── SATURDAY: catch late Friday settlement data ─────────────────────────────
 0 10 * * 6    cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
 
-# ─── SUNDAY: full forced recalculation (weekly deep refresh) ─────────────────
-0 3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force --db $DB >> $LOG/recalc-full.log 2>&1
-
 # ─── DAILY: verify price data integrity at 07:00 ─────────────────────────────
 0 7  * * *    cd $PROJECT && $UV run portfolio verify_prices --db $DB >> $LOG/verify-prices.log 2>&1
+
+# ─── DAILY: health check after verify (07:05) ────────────────────────────────
+5 7  * * *    cd $PROJECT && $UV run portfolio health --db $DB >> $LOG/health.log 2>&1
 
 # ─── WEEKDAY MORNING: portfolio status snapshot at 09:00 ─────────────────────
 0 9  * * 1-5  cd $PROJECT && $UV run portfolio status --db $DB >> $LOG/status.log 2>&1
@@ -103,9 +115,13 @@ crontab -l | grep portfolio
 
 | File | Updated by |
 |---|---|
+| `logs/portfolio.log` | All mutations and key events (structured JSON lines) |
+| `logs/backup.log` | Nightly backup |
+| `logs/repair-prices.log` | Sunday price repair |
 | `logs/recalc.log` | Weekday + Saturday recalculate |
 | `logs/recalc-full.log` | Sunday forced recalculate |
 | `logs/verify-prices.log` | Daily price integrity check |
+| `logs/health.log` | Daily health check |
 | `logs/status.log` | Weekday morning status snapshot |
 | `logs/performance-YYYY-MM.log` | Monthly performance report (one file per month) |
 
