@@ -33,4 +33,7 @@ Use this skill when changing or reasoning about the `my-portfolio` app CLI and r
 - Run CLI smoke checks for affected commands.
 - When changing accounting, reporting, or price-repair logic, run pytest using:
   `PYTHONPATH=/Users/oleksandrkaiukov/Code/my-portfolio /Users/oleksandrkaiukov/Code/.venv/bin/python -m pytest -q`
+  (`pythonpath = ["."]` is set in `pyproject.toml` so the local package always wins over the sibling)
 - Keep imports pinned to the local workspace package, not the sibling `/Users/oleksandrkaiukov/Code/portfolio_db`.
+  The local package carries `portfolio_db._WORKSPACE = "my-portfolio"` as a sentinel.
+  `tests/test_import_isolation.py` guards against accidental sibling import regressions.

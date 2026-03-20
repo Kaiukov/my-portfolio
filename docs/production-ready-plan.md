@@ -181,9 +181,10 @@ Deliverable:
 - [x] Add reproducible bootstrap:
   - [ ] `uv sync` documented
   - [x] `init` command — idempotent DB initialization
-- [ ] Fix import hygiene:
-  - [ ] local package isolation
-  - [ ] no accidental imports from sibling repos
+- [x] Fix import hygiene:
+  - [x] local package isolation (`pythonpath = ["."]` in pyproject.toml)
+  - [x] `_WORKSPACE` sentinel in `portfolio_db/__init__.py`
+  - [x] `tests/test_import_isolation.py` guards against sibling repo shadowing
 
 Deliverable:
 
@@ -243,11 +244,12 @@ Deliverable:
 - [x] backup strategy (`backup` command)
 - [x] stable CLI contract
 
-### Milestone 3: Deployment Readiness ⚠️ IN PROGRESS
+### Milestone 3: Deployment Readiness ✅ DONE
 
 - [x] packaging (`pyproject.toml` + console script)
 - [x] clean install (`init` command + `.env.example`)
-- [ ] cron/automation docs
+- [x] cron/automation docs (`docs/crontab-schedule.md`)
+- [x] import isolation (`pythonpath` + sentinel + test)
 - [x] CI (`.github/workflows/ci.yml`)
 
 ### Milestone 4: Portfolio Intelligence ⚠️ PARTIAL
@@ -257,9 +259,9 @@ Deliverable:
 - [ ] benchmark reports
 - [ ] rebalancing/account layer
 
-## Recommended Immediate Next Sprint
+## Recommended Immediate Next Sprint (Milestone 4)
 
-- [ ] missing FX coverage + stale cached prices regression fixtures
-- [ ] cron/automation docs (`docs/operations.md` update)
-- [ ] import isolation verification (`uv sync` clean install test)
-- [ ] MWR/IRR (Milestone 4)
+- [ ] MWR/IRR calculation
+- [ ] benchmark comparison (vs SPY)
+- [ ] contribution by position
+- [ ] rebalancing / account layer
