@@ -83,10 +83,10 @@ Second critical area.
   - [x] safe edit by id
   - [x] recompute from earliest affected date
   - [x] audit metadata
-- [ ] Resolve `TRANSFER` semantics:
-  - [ ] either external contribution
-  - [ ] or internal account transfer
-  - [ ] preferred: add `account` dimension and treat transfer as internal
+- [x] Resolve `TRANSFER` semantics:
+  - [x] treated as internal account movement (not net_contributions)
+  - [x] `--account` required for TRANSFER
+  - [x] documented in `docs/transaction-spec.md`
 
 Deliverable:
 
@@ -125,7 +125,7 @@ Deliverable:
   - [x] `recalculate`
 - [x] Add `--dry-run` where useful:
   - [x] `edit`
-  - [ ] `delete`
+  - [x] `delete`
   - [x] `repair_prices`
   - [x] `recalculate`
 - [x] Add stronger error codes:
@@ -235,20 +235,20 @@ Deliverable:
 - [x] finish snapshot consistency
 - [x] full regression tests (basic coverage)
 
-### Milestone 2: Operator Readiness ⚠️ IN PROGRESS
+### Milestone 2: Operator Readiness ✅ DONE
 
 - [x] verify/repair prices
 - [x] health/status checks
 - [x] structured logs (`logger.py`)
-- [ ] backup strategy
+- [x] backup strategy (`backup` command)
 - [x] stable CLI contract
 
 ### Milestone 3: Deployment Readiness ⚠️ IN PROGRESS
 
 - [x] packaging (`pyproject.toml` + console script)
-- [ ] clean install (`uv sync` + DB init)
+- [x] clean install (`init` command + `.env.example`)
 - [ ] cron/automation docs
-- [ ] import isolation and CI
+- [x] CI (`.github/workflows/ci.yml`)
 
 ### Milestone 4: Portfolio Intelligence ⚠️ PARTIAL
 
@@ -259,9 +259,7 @@ Deliverable:
 
 ## Recommended Immediate Next Sprint
 
-- [ ] backup strategy (DB snapshot + restore)
-- [ ] CI setup (GitHub Actions)
-- [ ] resolve `TRANSFER` semantics (account dimension)
-- [ ] `delete --dry-run`
 - [ ] missing FX coverage + stale cached prices regression fixtures
-- [ ] `uv sync` bootstrap documentation
+- [ ] cron/automation docs (`docs/operations.md` update)
+- [ ] import isolation verification (`uv sync` clean install test)
+- [ ] MWR/IRR (Milestone 4)
