@@ -10,10 +10,12 @@ Use this skill when changing or reasoning about the `my-portfolio` app CLI and r
 ## Workflow
 
 1. Read the canonical docs map in [references/docs-map.md](references/docs-map.md).
-2. If the task is about JSON response shapes, pagination, command payloads, or error envelopes, read [references/api-contract.md](references/api-contract.md).
-3. If the task is about available commands or how to invoke them, read [references/cli-commands.md](references/cli-commands.md).
-4. If the task is about roadmap or hardening the app for production, read [references/production-roadmap.md](references/production-roadmap.md).
-5. Treat the project docs in `/Users/oleksandrkaiukov/Code/my-portfolio/docs/` as the canonical source. Update those docs when behavior changes.
+2. If the task is about valuation rules, transaction semantics, or reporting invariants, read [references/architecture.md](references/architecture.md).
+3. If the task is about JSON response shapes, pagination, command payloads, or error envelopes, read [references/api-contract.md](references/api-contract.md).
+4. If the task is about price validation, coverage, repair, or deterministic valuation failures, read [references/data-integrity.md](references/data-integrity.md).
+5. If the task is about available commands or how to invoke them, read [references/cli-commands.md](references/cli-commands.md).
+6. If the task is about roadmap or hardening the app for production, read [references/production-roadmap.md](references/production-roadmap.md).
+7. Treat `/Users/oleksandrkaiukov/Code/my-portfolio/.agents/skills/my-portfolio-cli/` as the canonical documentation source. Update the relevant files in `references/` when behavior changes.
 
 ## Rules
 
