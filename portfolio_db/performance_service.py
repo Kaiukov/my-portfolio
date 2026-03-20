@@ -6,6 +6,52 @@ class PerformanceService:
         self.db = db
         self.reporting = reporting
 
+    @staticmethod
+    def calculate_xirr(cash_flows: list) -> float:
+        """Calculate XIRR using Newton-Raphson.
+
+        cash_flows: list of {'date': date, 'amount': float}
+          Negative amounts = outflows (investor deposits).
+          Positive amounts = inflows (withdrawals + terminal portfolio value).
+        Returns annual rate as a decimal (0.10 = 10%). Returns 0.0 on failure.
+        """
+        if not cash_flows or len(cash_flows) < 2:
+            return 0.0
+        amounts = [cf['amount'] for cf in cash_flows]
+        if all(a <= 0 for a in amounts) or all(a >= 0 for a in amounts):
+            return 0.0
+        ref_date = cash_flows[0]['date']
+        days = [(cf['date'] - ref_date).days for cf in cash_flows]
+
+        def npv(rate):
+            return sum(a / ((1 + rate) ** (d / 365.25)) for a, d in zip(amounts, days))
+
+        def dnpv(rate):
+            return sum(
+                -d / 365.25 * a / ((1 + rate) ** (d / 365.25 + 1))
+                for a, d in zip(amounts, days)
+            )
+
+        rate = 0.1  # initial guess 10%
+        for _ in range(200):
+            f = npv(rate)
+            df = dnpv(rate)
+            if abs(df) < 1e-12:
+                break
+            new_rate = rate - f / df
+            if new_rate <= -1:
+                new_rate = -0.9999
+            if abs(new_rate - rate) < 1e-7:
+                rate = new_rate
+                break
+            rate = new_rate
+        try:
+            if abs(npv(rate)) < 1.0:
+                return round(float(rate), 8)
+        except Exception:
+            pass
+        return 0.0
+
     def get_performance_stats(self, as_of_date, get_daily_returns_fn, build_snapshot_fn, risk_free_rate_annual) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         import math
@@ -59,6 +105,10 @@ class PerformanceService:
             'max_drawdown': 0.0,
             'avg_drawdown': 0.0,
             'avg_drawdown_duration': 0.0,
+            'spy_twr_pct': 0.0,
+            'spy_cagr_pct': 0.0,
+            'up_capture_ratio': 0.0,
+            'down_capture_ratio': 0.0,
         }
 
         if as_of_date is None:
@@ -228,8 +278,11 @@ class PerformanceService:
         # Tracking Error = std dev of (portfolio return - benchmark return)
         information_ratio = 0.0
         spy_cagr = 0.0  # Market (SPY) CAGR for Jensen's Alpha
+        spy_twr_pct = 0.0  # SPY total return over the same period (not annualized)
         tracking_error = 0.0  # Annualized tracking error for benchmark comparison
         relative_return = 0.0  # Portfolio return minus benchmark return
+        up_capture = 0.0
+        down_capture = 0.0
         try:
             min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
             max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
@@ -249,10 +302,11 @@ class PerformanceService:
                     if prev_val > 0:
                         spy_returns.append((curr_val - prev_val) / prev_val * 100)
 
-                # Calculate SPY CAGR
+                # Calculate SPY CAGR and TWR
                 spy_start = float(spy_series.iloc[0])
                 spy_end = float(spy_series.iloc[-1])
                 spy_total_return = (spy_end - spy_start) / spy_start
+                spy_twr_pct = spy_total_return * 100
                 spy_cagr = (((1 + spy_total_return) ** (1 / years) - 1)) if spy_total_return > -1 and years > 0 else 0.0
 
                 # Relative Return = Portfolio CAGR - Benchmark CAGR
@@ -278,6 +332,14 @@ class PerformanceService:
 
                     # Information Ratio
                     information_ratio = (avg_excess_annual / tracking_error_annual) if tracking_error_annual > 0 else 0.0
+
+                    # Up/Down capture ratios
+                    up_spy = [s for s in spy_returns if s > 0]
+                    up_port = [p for p, s in zip(portfolio_returns, spy_returns) if s > 0]
+                    down_spy = [s for s in spy_returns if s < 0]
+                    down_port = [p for p, s in zip(portfolio_returns, spy_returns) if s < 0]
+                    up_capture = (sum(up_port) / sum(up_spy)) if up_spy and sum(up_spy) != 0 else 0.0
+                    down_capture = (sum(down_port) / sum(down_spy)) if down_spy and sum(down_spy) != 0 else 0.0
         except Exception:
             spy_cagr = 0.0
 
@@ -360,6 +422,10 @@ class PerformanceService:
             'max_drawdown': max_drawdown,
             'avg_drawdown': avg_drawdown,
             'avg_drawdown_duration': avg_drawdown_duration,
+            'spy_twr_pct': spy_twr_pct,
+            'spy_cagr_pct': spy_cagr * 100,
+            'up_capture_ratio': up_capture,
+            'down_capture_ratio': down_capture,
         }
 
     def evaluate_metric(self, metric_name: str, value: float) -> str:
@@ -418,3 +484,38 @@ class PerformanceService:
             'weighted_avg_exposure': weighted_avg_exposure,
             'num_positions': len(positions),
         }
+
+    def get_contribution_by_position(self, as_of_date, build_snapshot_fn) -> list:
+        """Return per-position contribution to portfolio total gain.
+
+        For each position returns:
+          - symbol, status, market_value, weight_pct
+          - total_gain_value (unrealized + realized)
+          - contribution_to_gain_pct: position gain / net_contributions * 100
+        """
+        snapshot = build_snapshot_fn(as_of_date=as_of_date)
+        positions = snapshot['positions']
+        total_invested = snapshot['net_contributions']
+        portfolio_value = snapshot['portfolio_value']
+
+        result = []
+        for pos in positions:
+            symbol = pos['symbol']
+            market_value = pos.get('market_value') or 0.0
+            unrealized = pos.get('total_gain_value') or 0.0
+            realized = pos.get('realized_gain_value') or 0.0
+            total_gain = unrealized + realized
+            weight_pct = (market_value / portfolio_value * 100) if portfolio_value > 0 else 0.0
+            contribution_pct = (total_gain / total_invested * 100) if total_invested > 0 else 0.0
+            result.append({
+                'symbol': symbol,
+                'status': pos.get('status', 'OPEN'),
+                'market_value': market_value,
+                'weight_pct': round(weight_pct, 4),
+                'unrealized_gain': unrealized,
+                'realized_gain': realized,
+                'total_gain': total_gain,
+                'contribution_to_gain_pct': round(contribution_pct, 4),
+            })
+        result.sort(key=lambda x: abs(x['total_gain']), reverse=True)
+        return result

@@ -583,7 +583,24 @@ def performance(as_of_date, db):
                 "weighted_avg_exposure": m("weighted_avg_exposure", concentration["weighted_avg_exposure"]),
                 "num_positions": concentration["num_positions"],
             },
+            "benchmark": {
+                "spy_twr_pct": stats["spy_twr_pct"],
+                "spy_cagr_pct": stats["spy_cagr_pct"],
+                "relative_return_pct": m("relative_return", stats["relative_return"]),
+                "tracking_error_pct": m("tracking_error", stats["tracking_error"]),
+                "information_ratio": m("information_ratio", stats["information_ratio"]),
+                "jensens_alpha": m("jensens_alpha", stats["jensens_alpha"]),
+                "up_capture_ratio": stats["up_capture_ratio"],
+                "down_capture_ratio": stats["down_capture_ratio"],
+            },
         }
+        mwr = service.get_mwr_irr(as_of_date=as_of)
+        result["mwr_irr"] = {
+            "mwr_pct": round(mwr * 100, 4),
+            "note": "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
+        }
+        contributions = service.get_contribution_by_position(as_of_date=as_of)
+        result["contribution_by_position"] = contributions
         success("performance", result)
     except PriceDataUnavailableError as e:
         error("performance", "PRICE_DATA_ERROR", str(e))

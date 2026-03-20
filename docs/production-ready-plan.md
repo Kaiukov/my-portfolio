@@ -255,13 +255,13 @@ Deliverable:
 ### Milestone 4: Portfolio Intelligence ⚠️ PARTIAL
 
 - [x] `--as-of-date`
-- [ ] MWR/IRR
-- [ ] benchmark reports
+- [x] MWR/IRR (XIRR via Newton-Raphson, `get_mwr_irr()`)
+- [x] benchmark comparison (spy_twr_pct, spy_cagr_pct, up/down capture, relative return)
+- [x] contribution by position (`get_contribution_by_position()`)
 - [ ] rebalancing/account layer
 
-## Recommended Immediate Next Sprint (Milestone 4)
+## Recommended Immediate Next Sprint (Milestone 5)
 
-- [ ] MWR/IRR calculation
-- [ ] benchmark comparison (vs SPY)
-- [ ] contribution by position
 - [ ] rebalancing / account layer
+- [ ] MWR/IRR: `--as-of-date` support in dedicated `mwr` command
+- [ ] benchmark: configurable benchmark ticker (not just SPY)

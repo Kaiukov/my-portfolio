@@ -504,6 +504,58 @@ class PortfolioService:
             get_allocation_fn=self.get_allocation,
         )
 
+    def get_mwr_irr(self, as_of_date=None) -> float:
+        """Calculate Money-Weighted Return (IRR/XIRR) as annual decimal.
+
+        Uses dated cash flow events (deposits and withdrawals) plus
+        the terminal portfolio value to solve for the internal rate of return.
+        Returns 0.0 if not enough data.
+        """
+        snapshot = self.build_reporting_snapshot(as_of_date=as_of_date)
+        as_of = snapshot['as_of_date']
+        if not as_of:
+            return 0.0
+
+        transactions = self.db.get_transactions()
+        if as_of:
+            from datetime import datetime as _dt
+            as_of_d = _dt.strptime(as_of, '%Y-%m-%d').date() if isinstance(as_of, str) else as_of
+            transactions = [t for t in transactions if t[1] <= as_of_d]
+
+        cash_flow_metrics = self._reporting._get_external_cash_flow_metrics(
+            transactions=transactions,
+            as_of_date=as_of_d if as_of else None,
+            fx_prices=None,
+            external_inflow_actions=self.EXTERNAL_INFLOW_ACTIONS,
+            transfer_actions=self.TRANSFER_ACTIONS,
+            external_outflow_actions=self.EXTERNAL_OUTFLOW_ACTIONS,
+            validate_action_fn=lambda a: a.upper(),
+            price_data_unavailable_error_cls=PriceDataUnavailableError,
+        )
+        events = cash_flow_metrics.get('cash_flow_events', [])
+        if not events:
+            return 0.0
+
+        from datetime import datetime as _dt2
+        # XIRR convention: outflows (deposits) are negative, inflows positive
+        # events: deposits = +amount, withdrawals = -amount
+        # flip sign for XIRR
+        xirr_flows = [{'date': e['date'], 'amount': -e['amount']} for e in events]
+
+        # Add terminal cash flow: current portfolio value is a final inflow
+        end_date = as_of_d
+        xirr_flows.append({'date': end_date, 'amount': snapshot['portfolio_value']})
+        xirr_flows.sort(key=lambda x: x['date'])
+
+        return self._performance.calculate_xirr(xirr_flows)
+
+    def get_contribution_by_position(self, as_of_date=None) -> list:
+        """Return per-position contribution to total portfolio gain."""
+        return self._performance.get_contribution_by_position(
+            as_of_date=as_of_date,
+            build_snapshot_fn=self.build_reporting_snapshot,
+        )
+
     def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, exchange: str = '', data_source: str = '', account: str = None) -> dict:
         """
         Add transaction and auto-trigger smart recalculation.
