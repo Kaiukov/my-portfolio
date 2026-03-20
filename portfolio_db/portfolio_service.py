@@ -10,12 +10,37 @@ from portfolio_db.price_service import PriceService
 from portfolio_db.calculator import DailyReturnCalculator
 
 
+class PriceDataUnavailableError(ValueError):
+    """Raised when required price or FX data is unavailable for valuation."""
+    pass
+
+
 class PortfolioService:
     """High-level API for portfolio operations."""
 
-    def __init__(self, db_path: str = "portfolio.db"):
+    RISK_FREE_RATE_ANNUAL = 0.02
+    BASE_CURRENCY = 'USD'
+    CASH_FX_SYMBOLS = ('EURUSD=X', 'GBPUSD=X', 'UAHUSD=X')
+    CASH_BUCKET_DEFAULTS = {
+        'USD': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0},
+        'EURUSD=X': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0},
+        'GBPUSD=X': {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0},
+    }
+    CASH_DISPLAY_CURRENCY = {
+        'USD': 'USD',
+        'EURUSD=X': 'EUR',
+        'GBPUSD=X': 'GBP',
+        'UAHUSD=X': 'UAH',
+    }
+    ALLOCATION_SUMMARY_LABELS = {
+        'assets': 'TOTAL ASSETS',
+        'cash': 'TOTAL CASH',
+        'portfolio': 'TOTAL PORTFOLIO',
+    }
+
+    def __init__(self, db_path: str = "portfolio.db", read_only: bool = False):
         """Initialize service."""
-        self.db = PortfolioDatabase(db_path)
+        self.db = PortfolioDatabase(db_path, read_only=read_only)
         self.price_service = PriceService()
 
     def setup_from_csv(self, csv_path: str):
@@ -156,11 +181,270 @@ class PortfolioService:
         with open(output_path, 'w') as f:
             json.dump(transactions, f, indent=2)
 
+    @staticmethod
+    def _normalize_cash_asset(asset: str, asset_type: str) -> str:
+        """Map cash-like assets to a canonical ticker."""
+        if asset_type == 'cash_base' or asset == 'CASH USD':
+            return PortfolioService.BASE_CURRENCY
+        if asset_type == 'cash_fx':
+            return asset
+        if asset == 'CASH EUR':
+            return 'EURUSD=X'
+        if asset == 'CASH GBP':
+            return 'GBPUSD=X'
+        if asset == 'CASH UAH':
+            return 'UAHUSD=X'
+        return asset
+
+    def _get_fx_conversion_series(self, cash_assets: set, min_date, max_date) -> dict:
+        """Fetch FX series needed to convert cash flows into USD."""
+        fx_assets = {asset for asset in cash_assets if asset not in {self.BASE_CURRENCY, 'CASH USD'}}
+        if not fx_assets:
+            return {}
+
+        try:
+            return self.price_service.fetch_all_prices(sorted(fx_assets), min_date, max_date)
+        except Exception:
+            return {}
+
+    def _convert_cash_amount_to_usd(self, asset: str, quantity: float, date_obj, fx_prices: dict) -> float:
+        """Convert a cash amount in the original cash currency to USD."""
+        from portfolio_db.calculator import get_asset_type
+
+        asset_type = get_asset_type(asset)
+        normalized_asset = self._normalize_cash_asset(asset, asset_type)
+        if normalized_asset == self.BASE_CURRENCY:
+            return float(quantity)
+
+        fx_rate = self._require_series_price_asof(
+            fx_prices.get(normalized_asset),
+            date_obj,
+            symbol=normalized_asset,
+            kind='FX rate',
+        )
+        return float(quantity) * fx_rate
+
+    def _empty_reporting_snapshot(self) -> dict:
+        """Return an empty reporting snapshot."""
+        return {
+            'as_of_date': None,
+            'portfolio_value': 0.0,
+            'positions': [],
+            'cash_balances': [],
+            'deposits': 0.0,
+            'withdrawals': 0.0,
+            'net_contributions': 0.0,
+            'realized_gain': 0.0,
+            'unrealized_gain': 0.0,
+            'total_profit': 0.0,
+            'time_weighted_return_pct': 0.0,
+            'total_return_pct': 0.0,
+            'total_invested': 0.0,
+            'cagr': 0.0,
+        }
+
+    def _resolve_as_of_date(self, as_of_date=None):
+        """Resolve the canonical reporting date."""
+        if as_of_date is not None:
+            return as_of_date
+
+        returns = self.get_daily_returns()
+        if returns:
+            return datetime.strptime(returns[-1]['date'], '%Y-%m-%d').date()
+
+        last_transaction_date = self.db.get_last_transaction_date()
+        if last_transaction_date:
+            return last_transaction_date
+
+        return None
+
+    @staticmethod
+    def _extract_scalar_price(value):
+        """Extract scalar from Series/DataFrame cell-like objects."""
+        if value is None:
+            return None
+        if hasattr(value, 'iloc'):
+            if len(value) == 0:
+                return None
+            value = value.iloc[0]
+        elif hasattr(value, 'values'):
+            values = value.values
+            if len(values) == 0:
+                return None
+            value = values[0]
+
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+
+        if value != value:
+            return None
+        return value
+
+    def _get_series_price_asof(self, price_series, valuation_ts):
+        """Read price using asof semantics at or before valuation_ts."""
+        if price_series is None:
+            return None
+        try:
+            return self._extract_scalar_price(price_series.asof(valuation_ts))
+        except Exception:
+            return None
+
+    def _require_series_price_asof(self, price_series, valuation_ts, *, symbol: str, kind: str) -> float:
+        """Read mandatory price/FX data or raise a user-facing retry error."""
+        value = self._get_series_price_asof(price_series, valuation_ts)
+        if value is None:
+            valuation_label = str(getattr(valuation_ts, 'date', lambda: valuation_ts)())
+            raise PriceDataUnavailableError(
+                f"{kind} unavailable for {symbol} as of {valuation_label}; try again."
+            )
+        return value
+
+    @staticmethod
+    def _get_cash_key_for_asset(asset: str, asset_type: str) -> str:
+        """Return canonical cash bucket for an asset or currency."""
+        if asset_type == 'stock_gbp' or asset == 'CASH GBP':
+            return PortfolioService.CASH_FX_SYMBOLS[1]
+        if asset_type == 'stock_eur' or asset == 'CASH EUR':
+            return PortfolioService.CASH_FX_SYMBOLS[0]
+        if asset_type == 'cash_fx':
+            return asset
+        return PortfolioService.BASE_CURRENCY
+
+    def _get_transactions_up_to(self, as_of_date=None):
+        """Return transactions up to and including as_of_date."""
+        transactions = self.db.get_transactions()
+        if as_of_date is None:
+            return transactions
+        return [trans for trans in transactions if trans[1] <= as_of_date]
+
+    def _load_reporting_price_context(self, as_of_date) -> dict:
+        """Fetch price context for one reporting date."""
+        import pandas as pd
+
+        transactions = self._get_transactions_up_to(as_of_date)
+        if not transactions:
+            return {
+                'as_of_date': as_of_date,
+                'valuation_ts': pd.Timestamp(as_of_date) if as_of_date else None,
+                'transactions': [],
+                'prices_dict': {},
+                'returns': [],
+            }
+
+        min_date = transactions[0][1]
+        discovered = self.discover_assets_and_currencies()
+        all_symbols = list(discovered['assets'])
+        all_symbols.extend(discovered['fx_currencies'])
+
+        try:
+            prices_dict = self.price_service.fetch_all_prices(all_symbols, min_date, as_of_date)
+        except Exception:
+            prices_dict = {}
+
+        returns = [
+            row for row in self.get_daily_returns()
+            if datetime.strptime(row['date'], '%Y-%m-%d').date() <= as_of_date
+        ]
+
+        return {
+            'as_of_date': as_of_date,
+            'valuation_ts': pd.Timestamp(as_of_date),
+            'transactions': transactions,
+            'prices_dict': prices_dict,
+            'returns': returns,
+        }
+
+    def _get_external_cash_flow_metrics(self, transactions=None, as_of_date=None, fx_prices=None) -> dict:
+        """Calculate deposits, withdrawals, and net contributions in USD."""
+        from portfolio_db.calculator import get_asset_type
+
+        if transactions is None:
+            transactions = self._get_transactions_up_to(as_of_date)
+        if not transactions:
+            return {
+                'deposits': 0.0,
+                'withdrawals': 0.0,
+                'net_contributions': 0.0,
+                'cash_flow_events': [],
+            }
+
+        if fx_prices is None:
+            cash_assets = set()
+            min_date = transactions[0][1]
+            max_date = transactions[-1][1]
+
+            for trans in transactions:
+                asset = trans[2]
+                asset_type = get_asset_type(asset)
+                if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
+                    cash_assets.add(self._normalize_cash_asset(asset, asset_type))
+
+            fx_prices = self._get_fx_conversion_series(cash_assets, min_date, max_date)
+
+        deposits = 0.0
+        withdrawals = 0.0
+        cash_flow_events = []
+
+        for trans in transactions:
+            date_obj = trans[1]
+            asset = trans[2]
+            action = trans[3].upper()
+            quantity = float(trans[4])
+            asset_type = get_asset_type(asset)
+            is_cash_asset = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
+
+            if not is_cash_asset or action not in {'DEPOSIT', 'WITHDRAW'}:
+                continue
+
+            amount_usd = self._convert_cash_amount_to_usd(asset, quantity, date_obj, fx_prices)
+            if action == 'DEPOSIT':
+                deposits += amount_usd
+                cash_flow_events.append({'date': date_obj, 'amount': amount_usd})
+            else:
+                withdrawals += amount_usd
+                cash_flow_events.append({'date': date_obj, 'amount': -amount_usd})
+
+        return {
+            'deposits': deposits,
+            'withdrawals': withdrawals,
+            'net_contributions': deposits - withdrawals,
+            'cash_flow_events': cash_flow_events,
+        }
+
+    def _get_profit_components(self, positions=None) -> dict:
+        """Split PnL into realized and unrealized components."""
+        from portfolio_db.calculator import get_asset_type
+
+        if positions is None:
+            positions = self.get_position_summary(include_closed=True)
+
+        realized = 0.0
+        unrealized = 0.0
+
+        for position in positions:
+            asset_type = get_asset_type(position['symbol'])
+            if asset_type in ('cash_base', 'cash_fx') or position['symbol'].startswith('CASH'):
+                continue
+            realized += float(position.get('realized_gain_value') or 0.0)
+            unrealized += float(position.get('total_gain_value') or 0.0)
+
+        return {
+            'realized': realized,
+            'unrealized': unrealized,
+            'total_profit': realized + unrealized,
+        }
+
     def get_performance_stats(self) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         import math
         from datetime import datetime
+        snapshot = self.build_reporting_snapshot()
+        as_of_date = snapshot['as_of_date']
         returns = self.get_daily_returns()
+        if as_of_date is not None:
+            returns = [row for row in returns if row['date'] <= as_of_date]
 
         empty_stats = {
             'total_days': 0,
@@ -170,7 +454,14 @@ class PortfolioService:
             'end_value': 0.0,
             'total_gain': 0.0,
             'net_gain': 0.0,
+            'deposits': 0.0,
+            'withdrawals': 0.0,
+            'net_contributions': 0.0,
+            'realized_gain': 0.0,
+            'unrealized_gain': 0.0,
+            'time_weighted_return_pct': 0.0,
             'total_cash_flow': 0.0,
+            'total_invested': 0.0,
             'total_return_pct': 0.0,
             'avg_daily_return': 0.0,
             'avg_monthly_return': 0.0,
@@ -195,14 +486,31 @@ class PortfolioService:
             'avg_drawdown_duration': 0.0,
         }
 
-        if not returns:
+        if as_of_date is None:
             return empty_stats.copy()
 
         # Filter out zero values
         returns_with_values = [r for r in returns if r['portfolio_value'] > 0]
 
         if not returns_with_values:
-            return empty_stats.copy()
+            stats = empty_stats.copy()
+            stats.update({
+                'start_date': as_of_date,
+                'end_date': as_of_date,
+                'end_value': snapshot['portfolio_value'],
+                'net_gain': snapshot['total_profit'],
+                'deposits': snapshot['deposits'],
+                'withdrawals': snapshot['withdrawals'],
+                'net_contributions': snapshot['net_contributions'],
+                'realized_gain': snapshot['realized_gain'],
+                'unrealized_gain': snapshot['unrealized_gain'],
+                'total_cash_flow': snapshot['net_contributions'],
+                'total_invested': snapshot['total_invested'],
+                'time_weighted_return_pct': snapshot['time_weighted_return_pct'],
+                'total_return_pct': snapshot['total_return_pct'],
+                'cagr': snapshot['cagr'],
+            })
+            return stats
 
         # Calculate portfolio stats
         daily_returns = [r['portfolio_daily_return'] for r in returns_with_values]
@@ -287,20 +595,26 @@ class PortfolioService:
         except Exception:
             beta = 0.0
 
-        total_cash_flow = sum(r['cash_flow_impact'] for r in returns_with_values)
+        total_cash_flow = snapshot['net_contributions']
         start_value = returns_with_values[0]['portfolio_value']
-        end_value = returns_with_values[-1]['portfolio_value']
+        end_value = snapshot['portfolio_value']
         gross_gain = end_value - start_value
-        net_gain = gross_gain - total_cash_flow
+        net_gain = snapshot['total_profit']
 
-        # Calculate basic returns
-        # True ROI: Net Gain relative to all capital invested
-        # Total invested = Start Value + Deposits (cash flow into portfolio)
-        total_invested = start_value + total_cash_flow  # deposits are positive
-        total_return_pct = (net_gain / total_invested * 100) if total_invested > 0 else 0.0
+        # External cash-flow model:
+        # deposits / withdrawals are investor actions,
+        # realized / unrealized are investment results,
+        # TWR is the primary return metric because it isolates manager performance.
+        # Keep total_invested as a backward-compatible alias for net contributed capital.
+        total_invested = snapshot['total_invested']
+        cumulative_twr = 1.0
+        for row in returns_with_values[1:]:
+            cumulative_twr *= (1 + (row['investment_return'] / 100))
+        time_weighted_return_pct = (cumulative_twr - 1) * 100
+        total_return_pct = time_weighted_return_pct
 
         # CAGR from Total Return (accounts for deposit timing)
-        # CAGR = (1 + Total Return)^(1/years) - 1
+        # Use TWR-based annualization so deposits/withdrawals do not distort CAGR.
         from datetime import datetime
         start_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
         end_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
@@ -311,7 +625,7 @@ class PortfolioService:
 
         # Sharpe Ratio (annualized)
         # SR = (Rp - Rf) / σp
-        rf_annual = 0.02  # 2% annual risk-free rate
+        rf_annual = self.RISK_FREE_RATE_ANNUAL
         sharpe_ratio = ((cagr_decimal - rf_annual) / (hist_volatility/100)) if hist_volatility > 0 else 0.0
 
         # Sortino Ratio (annualized) - only downside risk
@@ -427,12 +741,19 @@ class PortfolioService:
         return {
             'total_days': len(returns_with_values),
             'start_date': returns_with_values[0]['date'],
-            'end_date': returns_with_values[-1]['date'],
+            'end_date': as_of_date,
             'start_value': start_value,
             'end_value': end_value,
             'total_gain': gross_gain,
             'net_gain': net_gain,
+            'deposits': snapshot['deposits'],
+            'withdrawals': snapshot['withdrawals'],
+            'net_contributions': snapshot['net_contributions'],
+            'realized_gain': snapshot['realized_gain'],
+            'unrealized_gain': snapshot['unrealized_gain'],
+            'time_weighted_return_pct': time_weighted_return_pct,
             'total_cash_flow': total_cash_flow,
+            'total_invested': total_invested,
             'total_return_pct': total_return_pct,
             'avg_daily_return': avg,
             'avg_monthly_return': avg_monthly_return,
@@ -521,7 +842,7 @@ class PortfolioService:
         Args:
             date_obj: Transaction date (date object or string DD-MM-YYYY)
             asset: Asset symbol
-            action: BUY, SELL, or DEPOSIT
+            action: BUY, SELL, DEPOSIT, WITHDRAW, or FEE
             quantity: Transaction quantity
             price: Asset price (optional, will be detected for unknown assets)
             asset_type: Asset type (optional, will be detected if not provided)
@@ -725,16 +1046,18 @@ class PortfolioService:
             }
 
         # Determine recalc scope
+        calc_start_date = transactions[0][1]
         if force or from_date is None:
             # Full recalculation
-            min_date = transactions[0][1]
             is_full_recalc = True
             self.db.clear_daily_returns()
         else:
-            # Partial recalculation - delete from this date onwards
+            # Partial recalculation still needs the full historical price context.
+            # The calculator rebuilds holdings from the first transaction, so
+            # fetching prices only from from_date breaks the retained rows'
+            # prev_value / adjusted_base chain.
             is_full_recalc = False
             self.db.delete_daily_returns_from_date(from_date)
-            min_date = from_date
 
         # Discover assets and currencies for price lookup
         discovered_assets = self.discover_assets_and_currencies()
@@ -750,13 +1073,14 @@ class PortfolioService:
         all_symbols = list(assets)
         all_symbols.extend(fx_currencies)
 
-        # Fetch prices for needed date range
+        # Fetch prices for the full calculation window even during partial
+        # recalculation. Results can still be filtered before persistence.
         prices_dict = self.price_service.fetch_all_prices(
-            all_symbols, min_date, max_date
+            all_symbols, calc_start_date, max_date
         )
 
         # Calculate returns using calculator
-        calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_trans_date)
+        calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_date)
         results = calculator.calculate_all_returns()
 
         # Persist prices to database for caching
@@ -812,7 +1136,7 @@ class PortfolioService:
 
         # Based on explicit currencies field
         for currency in currencies:
-            if currency and currency != 'USD':  # Assuming USD is base currency
+            if currency and currency != self.BASE_CURRENCY:  # Assuming USD is base currency
                 if currency == 'EUR':
                     fx_currencies.add('EURUSD=X')
                 elif currency == 'GBP':
@@ -916,176 +1240,114 @@ class PortfolioService:
             ]
         }
 
-    def get_actual_cash_balances(self) -> dict:
-        """
-        Single source of truth for cash balances.
-
-        Calculates: Deposits - Spent on BUY + Received from SELL
-
-        Returns:
-            {
-                'USD': {'balance': 1234.56, 'deposits': 5000, 'spent': 4000, 'received': 234.56},
-                'EURUSD=X': {...},
-                'GBPUSD=X': {...}
-            }
-        """
+    def get_actual_cash_balances(self, as_of_date=None) -> dict:
+        """Single source of truth for raw cash balances up to as_of_date."""
         from portfolio_db.calculator import get_asset_type
 
-        transactions = self.db.get_transactions()
+        transactions = self._get_transactions_up_to(as_of_date)
         cash_balances = {
-            'USD': {'balance': 0.0, 'deposits': 0.0, 'spent': 0.0, 'received': 0.0},
-            'EURUSD=X': {'balance': 0.0, 'deposits': 0.0, 'spent': 0.0, 'received': 0.0},
-            'GBPUSD=X': {'balance': 0.0, 'deposits': 0.0, 'spent': 0.0, 'received': 0.0},
+            symbol: values.copy()
+            for symbol, values in self.CASH_BUCKET_DEFAULTS.items()
         }
 
         for trans in transactions:
             asset = trans[2]
             action = trans[3].upper()
-            quantity = trans[4]
+            quantity = float(trans[4])
             price = trans[6]
-
             asset_type = get_asset_type(asset)
+            cash_key = self._get_cash_key_for_asset(asset, asset_type)
 
-            # Determine which cash currency is affected
-            if asset_type == 'stock_gbp':
-                cash_key = 'GBPUSD=X'
-            elif asset_type == 'stock_eur':
-                cash_key = 'EURUSD=X'
-            else:
-                cash_key = 'USD'
-
-            if action == 'DEPOSIT':
-                # Handle both new format (USD, EURUSD=X) and old format (CASH USD, CASH EUR)
-                if asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH'):
-                    # Map asset to cash key
-                    if asset_type == 'cash_base' or asset == 'CASH USD':
-                        deposit_key = 'USD'
-                    elif asset_type == 'cash_fx':
-                        deposit_key = asset  # EURUSD=X, GBPUSD=X
-                    elif asset == 'CASH EUR':
-                        deposit_key = 'EURUSD=X'
-                    elif asset == 'CASH GBP':
-                        deposit_key = 'GBPUSD=X'
-                    else:
-                        deposit_key = 'USD'
-
-                    cash_balances[deposit_key]['deposits'] += quantity
-                    cash_balances[deposit_key]['balance'] += quantity
+            if action == 'DEPOSIT' and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
+                deposit_key = self._normalize_cash_asset(asset, asset_type)
+                cash_balances.setdefault(deposit_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances[deposit_key]['deposits'] += quantity
+                cash_balances[deposit_key]['balance'] += quantity
+            elif action == 'WITHDRAW' and (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')):
+                withdraw_key = self._normalize_cash_asset(asset, asset_type)
+                cash_balances.setdefault(withdraw_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances[withdraw_key]['withdrawals'] += quantity
+                cash_balances[withdraw_key]['balance'] -= quantity
             elif action == 'BUY' and price:
-                # Buying deducts from cash
-                cost = quantity * price
-                cash_balances[cash_key]['spent'] += cost
-                cash_balances[cash_key]['balance'] -= cost
+                cash_balances[cash_key]['spent'] += quantity * price
+                cash_balances[cash_key]['balance'] -= quantity * price
             elif action == 'SELL' and price:
-                # Selling adds to cash
-                proceeds = quantity * price
-                cash_balances[cash_key]['received'] += proceeds
-                cash_balances[cash_key]['balance'] += proceeds
+                cash_balances[cash_key]['received'] += quantity * price
+                cash_balances[cash_key]['balance'] += quantity * price
             elif action == 'FEE':
-                # FEE reduces cash balance (asset is the cash currency)
-                if asset_type in ('cash_base', 'cash_fx'):
-                    # Direct cash currency fee
-                    fee_key = asset if asset_type == 'cash_fx' else 'USD'
-                elif asset.startswith('CASH'):
-                    # Old format
-                    if asset == 'CASH EUR':
-                        fee_key = 'EURUSD=X'
-                    elif asset == 'CASH GBP':
-                        fee_key = 'GBPUSD=X'
-                    else:
-                        fee_key = 'USD'
-                else:
-                    # Fee related to asset, use corresponding cash currency
-                    fee_key = cash_key
+                fee_key = self._normalize_cash_asset(asset, asset_type) if (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')) else cash_key
+                cash_balances.setdefault(fee_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
                 cash_balances[fee_key]['balance'] -= quantity
             elif action == 'EXCHANGE_FROM':
-                # EXCHANGE_FROM reduces source currency balance
-                if asset_type in ('cash_base', 'cash_fx'):
-                    exchange_key = asset if asset_type == 'cash_fx' else 'USD'
-                elif asset.startswith('CASH'):
-                    if asset == 'CASH EUR':
-                        exchange_key = 'EURUSD=X'
-                    elif asset == 'CASH GBP':
-                        exchange_key = 'GBPUSD=X'
-                    else:
-                        exchange_key = 'USD'
-                else:
-                    exchange_key = cash_key
-                cash_balances[exchange_key]['balance'] += quantity  # quantity is negative
+                exchange_key = self._normalize_cash_asset(asset, asset_type) if (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')) else cash_key
+                cash_balances.setdefault(exchange_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
+                cash_balances[exchange_key]['balance'] += quantity
             elif action == 'EXCHANGE_TO':
-                # EXCHANGE_TO adds to target currency balance
-                if asset_type in ('cash_base', 'cash_fx'):
-                    exchange_key = asset if asset_type == 'cash_fx' else 'USD'
-                elif asset.startswith('CASH'):
-                    if asset == 'CASH EUR':
-                        exchange_key = 'EURUSD=X'
-                    elif asset == 'CASH GBP':
-                        exchange_key = 'GBPUSD=X'
-                    else:
-                        exchange_key = 'USD'
-                else:
-                    exchange_key = cash_key
+                exchange_key = self._normalize_cash_asset(asset, asset_type) if (asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')) else cash_key
+                cash_balances.setdefault(exchange_key, {'balance': 0.0, 'deposits': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0})
                 cash_balances[exchange_key]['balance'] += quantity
 
         return cash_balances
 
-    def get_position_summary(self, include_closed=True):
-        """
-        Get position-level summary with gains/losses.
+    def _build_cash_snapshot(self, as_of_date, price_context: dict) -> list:
+        """Build valued cash balances for one reporting snapshot."""
+        valuation_ts = price_context['valuation_ts']
+        prices_dict = price_context['prices_dict']
+        raw_balances = self.get_actual_cash_balances(as_of_date=as_of_date)
 
-        Args:
-            include_closed: Include closed positions (shares = 0)
+        snapshot = []
+        for symbol, raw in raw_balances.items():
+            fx_rate = 1.0
+            if symbol != self.BASE_CURRENCY:
+                fx_rate = self._require_series_price_asof(
+                    prices_dict.get(symbol),
+                    valuation_ts,
+                    symbol=symbol,
+                    kind='FX rate',
+                )
 
-        Returns:
-            List of position dicts with all required metrics
-        """
-        transactions = self.db.get_transactions()
-        if not transactions:
-            return []
+            snapshot.append({
+                'symbol': symbol,
+                'currency': self.CASH_DISPLAY_CURRENCY.get(symbol, symbol),
+                'balance': raw['balance'],
+                'market_value': raw['balance'] * fx_rate,
+                'usd_value': raw['balance'] * fx_rate,
+                'last_price': fx_rate,
+                'fx_rate': fx_rate,
+                'deposits': raw['deposits'],
+                'withdrawals': raw['withdrawals'],
+                'spent': raw['spent'],
+                'received': raw['received'],
+            })
 
-        # Get latest daily return data
-        daily_returns = self.get_daily_returns()
-        latest_date = daily_returns[-1]['date'] if daily_returns else None
-        latest_portfolio_value = daily_returns[-1]['portfolio_value'] if daily_returns else 0
+        return snapshot
 
-        # Get latest prices - fetch all assets
-        assets = self.db.get_unique_assets()
-        min_date = transactions[0][1]
-        max_date = date.today()
+    def _build_position_snapshot(self, as_of_date, price_context: dict, cash_snapshot: list, include_closed=True) -> list:
+        """Build position-level reporting snapshot."""
+        from portfolio_db.calculator import get_asset_type
 
-        discovered = self.discover_assets_and_currencies()
-        all_symbols = list(discovered['assets'])
-        all_symbols.extend(discovered['fx_currencies'])
+        transactions = price_context['transactions']
+        valuation_ts = price_context['valuation_ts']
+        prices_dict = price_context['prices_dict']
 
-        # Fetch prices from database first, then supplement with fresh prices
-        prices_dict = {}
-
-        # Try to fetch fresh prices
-        try:
-            prices_dict = self.price_service.fetch_all_prices(all_symbols, min_date, max_date)
-        except Exception:
-            pass
-
-        # Build position data by asset (skip cash DEPOSIT and FEE - handled separately)
         positions = {}
         for trans in transactions:
             asset = trans[2]
             action = trans[3].upper()
-            quantity = trans[4]
+            quantity = float(trans[4])
             price = trans[6]
             date_obj = trans[1]
 
-            # Skip FEE, DEPOSIT, EXCHANGE for cash - they don't create investment positions
-            if action in ('FEE', 'DEPOSIT', 'EXCHANGE_FROM', 'EXCHANGE_TO'):
+            if action in ('FEE', 'DEPOSIT', 'EXCHANGE_FROM', 'EXCHANGE_TO', 'WITHDRAW'):
                 continue
 
             if asset not in positions:
                 positions[asset] = {
                     'symbol': asset,
-                    'shares': 0,
-                    'buy_quantity': 0,
+                    'shares': 0.0,
+                    'buy_quantity': 0.0,
                     'buy_cost': 0.0,
-                    'sell_quantity': 0,
+                    'sell_quantity': 0.0,
                     'sell_proceeds': 0.0,
                     'dividend_income': 0.0,
                     'first_buy_date': date_obj,
@@ -1106,175 +1368,71 @@ class PortfolioService:
                     positions[asset]['sell_proceeds'] += quantity * price
                     positions[asset]['last_price_from_trans'] = price
 
-        # Use actual cash balances as single source of truth
-        actual_cash = self.get_actual_cash_balances()
+        def fx_rate(symbol: str) -> float:
+            return self._require_series_price_asof(
+                prices_dict.get(symbol),
+                valuation_ts,
+                symbol=symbol,
+                kind='FX rate',
+            )
 
-        # Create/Update cash positions with actual balances
-        from portfolio_db.calculator import get_asset_type
-
-        for cash_key, cash_data in actual_cash.items():
-            # Skip if balance is 0 and no deposits ever made
-            if cash_data['balance'] == 0 and cash_data['deposits'] == 0:
-                continue
-
-            # Determine the symbol to use
-            if cash_key == 'USD':
-                symbol = 'USD'
-            else:
-                symbol = cash_key  # EURUSD=X, GBPUSD=X
-
-            # Add or update cash position with actual balance
-            if symbol not in positions:
-                positions[symbol] = {
-                    'symbol': symbol,
-                    'shares': cash_data['balance'],
-                    'buy_quantity': 0,
-                    'buy_cost': 0.0,
-                    'sell_quantity': 0,
-                    'sell_proceeds': 0.0,
-                    'dividend_income': 0.0,
-                    'first_buy_date': date.today(),
-                    'last_price_from_trans': None,
-                }
-            else:
-                positions[symbol]['shares'] = cash_data['balance']
-
-        # Calculate summary metrics for each position
         result = []
-        for asset, pos_data in positions.items():
+        for symbol, pos_data in positions.items():
             shares = pos_data['shares']
-
-            # Round to 0 if very small (rounding errors from floating point math)
             if abs(shares) < 0.01:
-                shares = 0
-
-            # Skip if closed and not including closed positions
+                shares = 0.0
             if shares == 0 and not include_closed:
                 continue
 
-            # Get latest price - try multiple sources
-            last_price = None
-            from portfolio_db.calculator import get_asset_type
-            asset_type = get_asset_type(asset)
+            asset_type = get_asset_type(symbol)
+            last_price = self._get_series_price_asof(prices_dict.get(symbol), valuation_ts)
+            if last_price is None and shares > 0:
+                raise PriceDataUnavailableError(
+                    f"Price unavailable for {symbol} as of {as_of_date}; try again."
+                )
+            if last_price is None:
+                last_price = pos_data['last_price_from_trans']
+            if last_price is not None and asset_type == 'stock_gbp':
+                last_price *= fx_rate('GBPUSD=X')
+            elif last_price is not None and asset_type == 'stock_eur':
+                last_price *= fx_rate('EURUSD=X')
 
-            # Helper to extract FX rate from price series
-            def extract_fx_rate(fx_series):
-                if fx_series is None:
-                    return 1.0
-                try:
-                    val = fx_series.iloc[-1]
-                    if hasattr(val, 'iloc'):
-                        return float(val.iloc[0])
-                    elif hasattr(val, 'values'):
-                        return float(val.values[0] if len(val.values) > 0 else val)
-                    else:
-                        return float(val)
-                except:
-                    return 1.0
+            avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0.0
+            total_cost = (shares * avg_cost_per_share) if shares > 0 else 0.0
+            market_value = (shares * last_price) if last_price and shares > 0 else 0.0
+            unrealized_gain_value = market_value - total_cost if shares > 0 else 0.0
+            unrealized_gain_pct = (unrealized_gain_value / total_cost * 100) if total_cost > 0 and shares > 0 else 0.0
+            realized_gain_value = pos_data['sell_proceeds'] - (pos_data['sell_quantity'] * avg_cost_per_share) if pos_data['sell_quantity'] > 0 else 0.0
+            realized_gain_pct = (realized_gain_value / (pos_data['sell_quantity'] * avg_cost_per_share) * 100) if pos_data['sell_quantity'] > 0 and avg_cost_per_share > 0 else 0.0
 
-            if asset_type == 'cash_base' or asset == 'CASH USD':
-                last_price = 1.0  # USD is always $1
-            elif asset_type == 'cash_fx':
-                # FX pairs: get actual FX rate from prices
-                price_series = prices_dict.get(asset)
-                if price_series is not None:
-                    try:
-                        import pandas as pd
-                        val = price_series.iloc[-1]
-                        # Handle Series (multi-column DataFrame) vs scalar
-                        if hasattr(val, 'iloc'):
-                            last_price = float(val.iloc[0])
-                        elif hasattr(val, 'values'):
-                            last_price = float(val.values[0] if len(val.values) > 0 else val)
-                        else:
-                            last_price = float(val)
-                    except:
-                        last_price = 1.0  # Fallback
-                else:
-                    last_price = 1.0  # Fallback
-            elif asset.startswith('CASH'):
-                # Old format: CASH EUR, CASH GBP - get FX rate
-                if asset == 'CASH EUR':
-                    last_price = extract_fx_rate(prices_dict.get('EURUSD=X'))
-                elif asset == 'CASH GBP':
-                    last_price = extract_fx_rate(prices_dict.get('GBPUSD=X'))
-                else:
-                    last_price = 1.0  # CASH USD
-            else:
-                # Try price_dict first
-                price_series = prices_dict.get(asset)
-                if price_series is not None:
-                    try:
-                        import pandas as pd
-                        val = price_series.iloc[-1]
-                        if hasattr(val, 'iloc'):
-                            last_price = float(val.iloc[0])
-                        elif hasattr(val, 'values'):
-                            last_price = float(val.values[0] if len(val.values) > 0 else val)
-                        else:
-                            last_price = float(val)
-                    except:
-                        pass
-
-                # Fallback to transaction price
-                if last_price is None:
-                    last_price = pos_data['last_price_from_trans']
-
-                # Apply FX conversion for non-USD stocks
-                if last_price and asset_type == 'stock_gbp':
-                    gbp_rate = extract_fx_rate(prices_dict.get('GBPUSD=X'))
-                    last_price = last_price * gbp_rate
-                elif last_price and asset_type == 'stock_eur':
-                    eur_rate = extract_fx_rate(prices_dict.get('EURUSD=X'))
-                    last_price = last_price * eur_rate
-
-            # Calculate metrics
-            avg_cost_per_share = (pos_data['buy_cost'] / pos_data['buy_quantity']) if pos_data['buy_quantity'] > 0 else 0
-            # Total cost of CURRENT shares (not all shares ever bought)
-            total_cost = (shares * avg_cost_per_share) if shares > 0 else 0
-            # Market value: for cash, allow negative values; for other assets, only positive
-            is_cash = asset_type in ('cash_base', 'cash_fx') or asset.startswith('CASH')
-            market_value = (shares * last_price) if last_price and (shares > 0 or is_cash) else 0
-
-            # Unrealized gains (only for current holding)
-            unrealized_gain_value = market_value - total_cost if shares > 0 else 0
-            unrealized_gain_pct = (unrealized_gain_value / total_cost * 100) if total_cost > 0 and shares > 0 else 0
-
-            # Realized gains (from sold positions)
-            realized_gain_value = pos_data['sell_proceeds'] - (pos_data['sell_quantity'] * avg_cost_per_share) if pos_data['sell_quantity'] > 0 else 0
-            realized_gain_pct = (realized_gain_value / (pos_data['sell_quantity'] * avg_cost_per_share) * 100) if pos_data['sell_quantity'] > 0 and avg_cost_per_share > 0 else 0
-
-            # Daily gains (calculate from price changes for this position)
             daily_gain_pct = 0.0
             daily_gain_value = 0.0
-
-            if shares > 0 and last_price and not asset.startswith('CASH'):
-                # Get price series to calculate daily change
-                price_series = prices_dict.get(asset)
-                if price_series is not None and len(price_series) > 1:
-                    try:
-                        import pandas as pd
-                        # Extract price values from the DataFrame/Series
-                        if isinstance(price_series, pd.DataFrame):
-                            # DataFrame case: extract column for this asset
-                            today_price = float(price_series.iloc[-1][asset])
-                            yesterday_price = float(price_series.iloc[-2][asset])
-                        else:
-                            # Series case
-                            today_price = float(price_series.iloc[-1])
-                            yesterday_price = float(price_series.iloc[-2])
-
+            price_series = prices_dict.get(symbol)
+            if shares > 0 and last_price and price_series is not None:
+                try:
+                    price_history = price_series.loc[:as_of_date]
+                    if hasattr(price_history, 'columns'):
+                        price_history = price_history.iloc[:, 0]
+                    if len(price_history) > 1:
+                        today_price = float(price_history.iloc[-1])
+                        yesterday_price = float(price_history.iloc[-2])
+                        if asset_type == 'stock_gbp':
+                            rate = fx_rate('GBPUSD=X')
+                            today_price *= rate
+                            yesterday_price *= rate
+                        elif asset_type == 'stock_eur':
+                            rate = fx_rate('EURUSD=X')
+                            today_price *= rate
+                            yesterday_price *= rate
                         if yesterday_price > 0:
                             daily_gain_pct = ((today_price - yesterday_price) / yesterday_price) * 100
                             daily_gain_value = shares * (today_price - yesterday_price)
-                    except:
-                        pass
-
-            status = 'OPEN' if shares > 0 else 'CLOSED'
+                except Exception:
+                    pass
 
             result.append({
-                'symbol': asset,
-                'status': status,
+                'symbol': symbol,
+                'status': 'OPEN' if shares > 0 else 'CLOSED',
                 'shares': shares,
                 'last_price': last_price,
                 'avg_cost_per_share': avg_cost_per_share,
@@ -1289,179 +1447,168 @@ class PortfolioService:
                 'realized_gain_pct': realized_gain_pct,
             })
 
-        # Sort by market value descending
-        result.sort(key=lambda x: x['market_value'], reverse=True)
+        for cash in cash_snapshot:
+            if cash['balance'] == 0 and not include_closed and cash['deposits'] == 0 and cash['withdrawals'] == 0:
+                continue
+            result.append({
+                'symbol': cash['symbol'],
+                'status': 'OPEN' if cash['balance'] > 0 else 'CLOSED',
+                'shares': cash['balance'],
+                'last_price': cash['last_price'],
+                'avg_cost_per_share': 0.0,
+                'total_cost': 0.0,
+                'market_value': cash['market_value'],
+                'dividend_income': 0.0,
+                'day_gain_pct': 0.0,
+                'day_gain_value': 0.0,
+                'total_gain_pct': 0.0,
+                'total_gain_value': 0.0,
+                'realized_gain_value': 0.0,
+                'realized_gain_pct': 0.0,
+            })
+
+        result.sort(key=lambda item: item['market_value'], reverse=True)
         return result
 
-    def get_allocation(self, allocation_type='all'):
-        """
-        Get portfolio allocation breakdown.
-
-        Args:
-            allocation_type: 'assets' (stocks/crypto only), 'cash' (cash only), or 'all' (both)
-
-        Returns:
-            List of allocation dicts with symbol, value, percentage
-        """
+    def _aggregate_reporting_totals(self, as_of_date, positions: list, transactions=None, fx_prices=None) -> dict:
+        """Aggregate totals for the snapshot."""
         from portfolio_db.calculator import get_asset_type
 
-        positions = self.get_position_summary(include_closed=False)
+        if transactions is None:
+            transactions = self._get_transactions_up_to(as_of_date)
 
-        # Separate assets and cash
+        cash_flow_metrics = self._get_external_cash_flow_metrics(
+            transactions=transactions,
+            as_of_date=as_of_date,
+            fx_prices=fx_prices,
+        )
+        realized_gain = 0.0
+        unrealized_gain = 0.0
+        portfolio_value = 0.0
+
+        for position in positions:
+            portfolio_value += float(position.get('market_value') or 0.0)
+            asset_type = get_asset_type(position['symbol'])
+            if asset_type in ('cash_base', 'cash_fx') or position['symbol'].startswith('CASH'):
+                continue
+            realized_gain += float(position.get('realized_gain_value') or 0.0)
+            unrealized_gain += float(position.get('total_gain_value') or 0.0)
+
+        total_profit = realized_gain + unrealized_gain
+        return {
+            'portfolio_value': portfolio_value,
+            'deposits': cash_flow_metrics['deposits'],
+            'withdrawals': cash_flow_metrics['withdrawals'],
+            'net_contributions': cash_flow_metrics['net_contributions'],
+            'realized_gain': realized_gain,
+            'unrealized_gain': unrealized_gain,
+            'total_profit': total_profit,
+            'total_return_pct': 0.0,
+            'time_weighted_return_pct': 0.0,
+            'total_invested': cash_flow_metrics['net_contributions'],
+            'cagr': 0.0,
+        }
+
+    def build_reporting_snapshot(self, as_of_date=None, include_closed=True) -> dict:
+        """Build one deterministic reporting snapshot."""
+        as_of_date = self._resolve_as_of_date(as_of_date)
+        if as_of_date is None:
+            return self._empty_reporting_snapshot()
+
+        price_context = self._load_reporting_price_context(as_of_date)
+        cash_snapshot = self._build_cash_snapshot(as_of_date, price_context)
+        positions = self._build_position_snapshot(as_of_date, price_context, cash_snapshot, include_closed=include_closed)
+        totals = self._aggregate_reporting_totals(
+            as_of_date,
+            positions,
+            transactions=price_context['transactions'],
+            fx_prices=price_context['prices_dict'],
+        )
+
+        snapshot = self._empty_reporting_snapshot()
+        snapshot.update({
+            'as_of_date': str(as_of_date),
+            'portfolio_value': totals['portfolio_value'],
+            'positions': positions,
+            'cash_balances': cash_snapshot,
+            'deposits': totals['deposits'],
+            'withdrawals': totals['withdrawals'],
+            'net_contributions': totals['net_contributions'],
+            'realized_gain': totals['realized_gain'],
+            'unrealized_gain': totals['unrealized_gain'],
+            'total_profit': totals['total_profit'],
+            'time_weighted_return_pct': totals['time_weighted_return_pct'],
+            'total_return_pct': totals['total_return_pct'],
+            'total_invested': totals['total_invested'],
+            'cagr': totals['cagr'],
+        })
+        return snapshot
+
+    def get_position_summary(self, include_closed=True):
+        """Get position-level summary with gains/losses."""
+        snapshot = self.build_reporting_snapshot(include_closed=include_closed)
+        return snapshot['positions']
+
+    def get_allocation(self, allocation_type='all'):
+        """Get portfolio allocation breakdown from the snapshot."""
+        from portfolio_db.calculator import get_asset_type
+
+        snapshot = self.build_reporting_snapshot(include_closed=False)
+        positions = snapshot['positions']
         assets = []
         cash = []
-        for p in positions:
-            asset_type = get_asset_type(p['symbol'])
-            if asset_type in ('cash_base', 'cash_fx') or p['symbol'].startswith('CASH'):
-                cash.append(p)
+        for position in positions:
+            asset_type = get_asset_type(position['symbol'])
+            if asset_type in ('cash_base', 'cash_fx') or position['symbol'].startswith('CASH'):
+                cash.append(position)
             else:
-                assets.append(p)
+                assets.append(position)
 
-        # Fetch FX rates for cash conversion
-        transactions = self.db.get_transactions()
-        min_date = transactions[0][1] if transactions else date.today()
-        max_date = date.today()
-
-        fx_prices = {}
-        try:
-            fx_dict = self.price_service.fetch_all_prices(
-                ['EURUSD=X', 'GBPUSD=X'], min_date, max_date
-            )
-            # Extract latest FX rates
-            for fx_pair in ['EURUSD=X', 'GBPUSD=X']:
-                if fx_pair in fx_dict:
-                    ps = fx_dict[fx_pair]
-                    try:
-                        import pandas as pd
-                        if isinstance(ps, pd.DataFrame):
-                            fx_prices[fx_pair] = float(ps.iloc[-1][fx_pair])
-                        else:
-                            fx_prices[fx_pair] = float(ps.iloc[-1])
-                    except:
-                        pass
-        except:
-            pass
-
-        # Default FX rates if fetching fails
-        if 'EURUSD=X' not in fx_prices:
-            fx_prices['EURUSD=X'] = 1.196
-        if 'GBPUSD=X' not in fx_prices:
-            fx_prices['GBPUSD=X'] = 1.3769
-
-        # Convert cash to USD
-        cash_in_usd = []
-        for pos in cash:
-            symbol = pos['symbol']
-            value = pos['market_value']
-            asset_type = get_asset_type(symbol)
-
-            # Convert to USD if not already USD
-            # FX pairs (EURUSD=X, GBPUSD=X) already have market_value in USD
-            # because market_value = shares (foreign currency) * price (FX rate to USD)
-            if symbol == 'EURUSD=X':
-                value_usd = value  # Already in USD
-                fx_rate = 1.0  # No conversion applied
-            elif symbol == 'GBPUSD=X':
-                value_usd = value  # Already in USD
-                fx_rate = 1.0  # No conversion applied
-            elif symbol == 'CASH EUR':
-                # Backwards compatibility - old format needs conversion
-                value_usd = value * fx_prices['EURUSD=X']
-                fx_rate = fx_prices['EURUSD=X']
-            elif symbol == 'CASH GBP':
-                # Backwards compatibility - old format needs conversion
-                value_usd = value * fx_prices['GBPUSD=X']
-                fx_rate = fx_prices['GBPUSD=X']
-            else:
-                # USD
-                value_usd = value
-                fx_rate = 1.0
-
-            cash_in_usd.append({
-                **pos,
-                'value_usd': value_usd,
-                'fx_rate': fx_rate,
-            })
-
-        # Calculate totals using USD-converted values
-        total_assets_value = sum(p['market_value'] for p in assets)
-        total_cash_value = sum(p['value_usd'] for p in cash_in_usd)
-        total_portfolio_value = total_assets_value + total_cash_value
+        total_assets_value = sum(position['market_value'] for position in assets)
+        total_cash_value = sum(position['market_value'] for position in cash)
+        total_portfolio_value = snapshot['portfolio_value']
 
         result = []
-
         if allocation_type in ['assets', 'all']:
-            # Add assets allocation
-            for pos in assets:
-                if allocation_type == 'all':
-                    pct = (pos['market_value'] / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
-                else:  # assets only
-                    pct = (pos['market_value'] / total_assets_value * 100) if total_assets_value > 0 else 0
-
+            for position in assets:
+                denominator = total_portfolio_value if allocation_type == 'all' else total_assets_value
+                pct = (position['market_value'] / denominator * 100) if denominator > 0 else 0.0
                 result.append({
-                    'symbol': pos['symbol'],
+                    'symbol': position['symbol'],
                     'type': 'asset',
-                    'value': pos['market_value'],
+                    'value': position['market_value'],
                     'percentage': pct,
                 })
 
         if allocation_type in ['cash', 'all']:
-            # Add cash allocation (converted to USD)
-            for pos in cash_in_usd:
-                if allocation_type == 'all':
-                    pct = (pos['value_usd'] / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
-                else:  # cash only
-                    pct = (pos['value_usd'] / total_cash_value * 100) if total_cash_value > 0 else 0
-
+            cash_lookup = {item['symbol']: item for item in snapshot['cash_balances']}
+            for position in cash:
+                denominator = total_portfolio_value if allocation_type == 'all' else total_cash_value
+                pct = (position['market_value'] / denominator * 100) if denominator > 0 else 0.0
+                cash_meta = cash_lookup.get(position['symbol'], {})
                 result.append({
-                    'symbol': pos['symbol'],
+                    'symbol': position['symbol'],
                     'type': 'cash',
-                    'value': pos['value_usd'],
+                    'value': position['market_value'],
                     'percentage': pct,
-                    'original_currency_value': pos['market_value'],
-                    'fx_rate': pos['fx_rate'],
+                    'original_currency_value': cash_meta.get('balance', position['shares']),
+                    'fx_rate': cash_meta.get('fx_rate', position['last_price']),
                 })
 
-        # Sort by value descending
-        result.sort(key=lambda x: x['value'], reverse=True)
+        result.sort(key=lambda item: item['value'], reverse=True)
 
-        # Add summary totals
         summary = []
         if allocation_type in ['assets', 'all']:
-            if allocation_type == 'all':
-                assets_pct = (total_assets_value / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
-            else:
-                assets_pct = 100.0 if total_assets_value > 0 else 0
-
-            summary.append({
-                'symbol': 'TOTAL ASSETS',
-                'type': 'summary',
-                'value': total_assets_value,
-                'percentage': assets_pct,
-            })
-
+            assets_pct = (total_assets_value / total_portfolio_value * 100) if allocation_type == 'all' and total_portfolio_value > 0 else (100.0 if total_assets_value > 0 else 0.0)
+            summary.append({'symbol': self.ALLOCATION_SUMMARY_LABELS['assets'], 'type': 'summary', 'value': total_assets_value, 'percentage': assets_pct})
         if allocation_type in ['cash', 'all']:
-            if allocation_type == 'all':
-                cash_pct = (total_cash_value / total_portfolio_value * 100) if total_portfolio_value > 0 else 0
-            else:
-                cash_pct = 100.0 if total_cash_value > 0 else 0
-
-            summary.append({
-                'symbol': 'TOTAL CASH',
-                'type': 'summary',
-                'value': total_cash_value,
-                'percentage': cash_pct,
-            })
-
+            cash_pct = (total_cash_value / total_portfolio_value * 100) if allocation_type == 'all' and total_portfolio_value > 0 else (100.0 if total_cash_value > 0 else 0.0)
+            summary.append({'symbol': self.ALLOCATION_SUMMARY_LABELS['cash'], 'type': 'summary', 'value': total_cash_value, 'percentage': cash_pct})
         if allocation_type == 'all':
-            summary.append({
-                'symbol': 'TOTAL PORTFOLIO',
-                'type': 'summary',
-                'value': total_portfolio_value,
-                'percentage': 100.0,
-            })
+            summary.append({'symbol': self.ALLOCATION_SUMMARY_LABELS['portfolio'], 'type': 'summary', 'value': total_portfolio_value, 'percentage': 100.0})
 
         return {
+            'as_of_date': snapshot['as_of_date'],
             'positions': result,
             'summary': summary,
             'total_value': total_portfolio_value,
