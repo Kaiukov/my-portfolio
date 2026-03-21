@@ -265,3 +265,15 @@ Deliverable:
 - [ ] rebalancing / account layer
 - [ ] MWR/IRR: `--as-of-date` support in dedicated `mwr` command
 - [ ] benchmark: configurable benchmark ticker (not just SPY)
+
+## Known Issues
+
+### SPY not cached — benchmark metrics return 0
+
+`beta`, `relative_return`, `spy_twr_pct`, `up_capture_ratio`, `down_capture_ratio` all show 0
+because SPY is not in the portfolio and therefore never fetched by `repair_prices`.
+
+**Fix:** Add SPY (and other benchmark tickers) to a dedicated benchmark price refresh step:
+- [ ] Add `BENCHMARK_TICKERS = ['SPY']` config in `portfolio_service.py`
+- [ ] Extend `repair_prices` (or add `refresh_benchmark_prices`) to always fetch benchmark tickers
+- [ ] Document that `repair_prices` must be run at least once to populate SPY cache

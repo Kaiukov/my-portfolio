@@ -87,7 +87,15 @@ def report(limit, offset, start_date, end_date, db):
 
 # ─── transactions ─────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio transactions
+
+  portfolio transactions --limit 20 --offset 40
+
+  portfolio transactions --start-date 2026-01-01 --end-date 2026-03-31
+""")
 @click.option("--limit", default=50, type=int, help="Max rows (default 50)")
 @click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
 @click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
@@ -110,7 +118,13 @@ def transactions(limit, offset, start_date, end_date, db):
 
 # ─── status ───────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio status
+
+  portfolio status --as-of-date 2026-01-01
+""")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def status(as_of_date, db):
@@ -146,7 +160,15 @@ def status(as_of_date, db):
 
 # ─── add ──────────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio add --date 01-01-2026 --asset AAPL --action buy --quantity 10 --price 150
+
+  portfolio add --date 01-01-2026 --asset USD --action deposit --quantity 10000
+
+  portfolio add --date 01-01-2026 --asset AAPL --action sell --quantity 5 --price 180 --fees 1.5
+""")
 @click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
 @click.option("--asset", required=True, help="Asset symbol")
 @click.option("--action", required=True,
@@ -163,6 +185,24 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
     date_obj = _parse_legacy_date(date_str, "--date")
     service = PortfolioService(db)
     try:
+        # CONFLICT check: SELL must not exceed current net holdings
+        if action.upper() == "SELL":
+            net = service.db.con.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
+                                         WHEN action='SELL' THEN -quantity
+                                         ELSE 0 END), 0)
+                FROM transactions WHERE asset = ?
+                """,
+                [asset],
+            ).fetchone()[0]
+            if quantity > net:
+                error(
+                    "add",
+                    "CONFLICT",
+                    f"Cannot SELL {quantity} of {asset}: only {net} shares held",
+                )
+
         result = service.add_transaction(
             date_obj=date_obj,
             asset=asset,
@@ -188,7 +228,15 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
 
 # ─── edit ─────────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio edit --id 42 --price 155.50
+
+  portfolio edit --id 42 --quantity 8 --dry-run
+
+  portfolio edit --id 42 --date 15-01-2026 --fees 2.0
+""")
 @click.option("--id", "trans_id", required=True, type=int)
 @click.option("--date", "date_str", default=None, help="Transaction date (DD-MM-YYYY)")
 @click.option("--asset", default=None, help="Asset symbol")
@@ -240,6 +288,13 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
 
     service = PortfolioService(db)
     try:
+        # CONFLICT check: transaction may have been deleted after a dry-run
+        if not service.db.get_transaction_by_id(trans_id):
+            error(
+                "edit",
+                "CONFLICT",
+                f"Transaction ID {trans_id} no longer exists; it may have been deleted since the dry-run",
+            )
         result = service.edit_transaction(trans_id, **changes)
         success("edit", {"transaction": result["transaction"], "recalculated": True, "from_date": result["from_date"]})
     except PriceDataUnavailableError as e:
@@ -256,7 +311,13 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
 
 # ─── verify_prices ────────────────────────────────────────────────────────────
 
-@cli.command(name="verify_prices")
+@cli.command(name="verify_prices", epilog="""
+Examples:
+
+  portfolio verify_prices
+
+  portfolio verify_prices --db custom.db
+""")
 @click.option("--db", default="portfolio.db")
 def verify_prices(db):
     """Verify prices table structure and storage."""
@@ -288,7 +349,15 @@ def verify_prices(db):
 
 # ─── repair_prices ────────────────────────────────────────────────────────────
 
-@cli.command(name="repair_prices")
+@cli.command(name="repair_prices", epilog="""
+Examples:
+
+  portfolio repair_prices
+
+  portfolio repair_prices --ticker AAPL --ticker MSFT
+
+  portfolio repair_prices --start-date 2026-01-01 --dry-run
+""")
 @click.option("--ticker", "tickers", multiple=True, help="Specific ticker(s) to refresh")
 @click.option("--start-date", default=None, help="Refresh from date (YYYY-MM-DD)")
 @click.option("--end-date", default=None, help="Refresh to date (YYYY-MM-DD)")
@@ -329,7 +398,15 @@ def repair_prices(tickers, start_date, end_date, dry_run, db):
 
 # ─── recalculate ──────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio recalculate
+
+  portfolio recalculate --from-date 01-01-2026
+
+  portfolio recalculate --force --dry-run
+""")
 @click.option("--force", is_flag=True)
 @click.option("--from-date", default=None, help="Recalculate from date (DD-MM-YYYY)")
 @click.option("--dry-run", is_flag=True, help="Show what would be recalculated without executing")
@@ -378,7 +455,15 @@ def recalculate(force, from_date, dry_run, db):
 
 # ─── allocation ───────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio allocation
+
+  portfolio allocation --type assets
+
+  portfolio allocation --type cash --as-of-date 2026-01-01
+""")
 @click.option("--type", "allocation_type",
               type=click.Choice(["assets", "cash", "all"]), default="all")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
@@ -400,7 +485,13 @@ def allocation(allocation_type, as_of_date, db):
 
 # ─── cash ─────────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio cash
+
+  portfolio cash --as-of-date 2026-01-01
+""")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db")
 def cash(as_of_date, db):
@@ -452,7 +543,13 @@ def cash(as_of_date, db):
 
 # ─── delete ───────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio delete --id 42 --dry-run
+
+  portfolio delete --id 42 --confirm
+""")
 @click.option("--id", "trans_id", required=True, type=int)
 @click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted without executing")
@@ -512,7 +609,13 @@ def delete(trans_id, confirm, dry_run, db):
 
 # ─── performance ──────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio performance
+
+  portfolio performance --as-of-date 2026-01-01
+""")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--db", default="portfolio.db")
 def performance(as_of_date, db):
@@ -612,7 +715,15 @@ def performance(as_of_date, db):
 
 # ─── summary ──────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio summary
+
+  portfolio summary --filter open
+
+  portfolio summary --as-of-date 2026-01-01
+""")
 @click.option("--filter", "position_filter",
               type=click.Choice(["open", "all"]), default="all")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
@@ -636,7 +747,13 @@ def summary(position_filter, as_of_date, db):
 
 # ─── exchange ─────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio exchange --date 01-01-2026 --from USD --to EUR --quantity 1000 --rate 0.92
+
+  portfolio exchange --date 01-01-2026 --from EURUSD=X --to USD --quantity 500 --rate 1.09
+""")
 @click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
 @click.option("--from", "from_asset", required=True)
 @click.option("--to", "to_asset", required=True)
@@ -646,6 +763,15 @@ def summary(position_filter, as_of_date, db):
 def exchange(date_str, from_asset, to_asset, quantity, rate, db):
     """Exchange one currency for another."""
     date_obj = _parse_legacy_date(date_str, "--date")
+
+    # CONFLICT check: exchanging a currency with itself makes no sense
+    if from_asset.upper() == to_asset.upper():
+        error(
+            "exchange",
+            "CONFLICT",
+            f"--from and --to must be different assets; both are '{from_asset}'",
+        )
+
     service = PortfolioService(db)
     try:
         result = service.exchange_currency(
@@ -671,7 +797,13 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
 
 # ─── backup ───────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio backup
+
+  portfolio backup --out /backups/portfolio-2026-01-01.db
+""")
 @click.option("--db", default="portfolio.db")
 @click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
 def backup(db, out):
@@ -707,7 +839,13 @@ def init(db):
 
 # ─── health ───────────────────────────────────────────────────────────────────
 
-@cli.command()
+@cli.command(epilog="""
+Examples:
+
+  portfolio health
+
+  portfolio health --db custom.db
+""")
 @click.option("--db", default="portfolio.db")
 def health(db):
     """Show DB and data health: recalc freshness, price coverage, stale state."""
