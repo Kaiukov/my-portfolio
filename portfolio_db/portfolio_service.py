@@ -1,6 +1,7 @@
 """High-level portfolio service API."""
 
 import json
+import os
 from datetime import datetime, date, timezone
 from pathlib import Path
 
@@ -35,6 +36,11 @@ class PortfolioService:
 
     RISK_FREE_RATE_ANNUAL = 0.02
     BASE_CURRENCY = 'USD'
+    BENCHMARK_TICKERS = [
+        t.strip()
+        for t in os.getenv('PORTFOLIO_BENCHMARK_TICKERS', 'SPY').split(',')
+        if t.strip()
+    ]
     EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT'}
     EXTERNAL_OUTFLOW_ACTIONS = {'WITHDRAW'}
     TRANSFER_ACTIONS = {'TRANSFER'}
@@ -484,13 +490,14 @@ class PortfolioService:
         with open(output_path, 'w') as f:
             json.dump(transactions, f, indent=2)
 
-    def get_performance_stats(self, as_of_date=None) -> dict:
+    def get_performance_stats(self, as_of_date=None, benchmark_ticker=None) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         return self._performance.get_performance_stats(
             as_of_date=as_of_date,
             get_daily_returns_fn=self.get_daily_returns,
             build_snapshot_fn=self.build_reporting_snapshot,
             risk_free_rate_annual=self.RISK_FREE_RATE_ANNUAL,
+            benchmark_ticker=benchmark_ticker or self.BENCHMARK_TICKERS[0],
         )
 
     def evaluate_metric(self, metric_name: str, value: float) -> str:
@@ -709,7 +716,14 @@ class PortfolioService:
             if coverage['required_range']['end'] else None
         )
 
-        repair_result = self._price_cache.repair_prices(coverage, required_start, required_end, tickers=tickers)
+        # Always include benchmark tickers so SPY (and others) are cached
+        # even though they don't appear in portfolio transactions.
+        effective_tickers = tickers
+        if effective_tickers is None:
+            portfolio_tickers = [item['ticker'] for item in coverage['coverage'] if item['issues']]
+            effective_tickers = sorted(set(portfolio_tickers) | set(self.BENCHMARK_TICKERS))
+
+        repair_result = self._price_cache.repair_prices(coverage, required_start, required_end, tickers=effective_tickers)
         if repair_result.get('status') in ('skipped', 'up_to_date'):
             return repair_result
 

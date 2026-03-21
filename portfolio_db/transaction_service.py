@@ -174,6 +174,7 @@ class TransactionService:
             'status': 'success',
             'recalc_type': recalc_result.get('recalc_type', 'full'),
             'from_date': str(recalc_from),
+            'before': current,
             'transaction': serialize_transaction_row_fn(updated_row),
         }
 

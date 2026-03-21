@@ -232,8 +232,8 @@ class TestBenchmark:
         assert data["ok"] is True
         assert "benchmark" in data["data"]
         bench = data["data"]["benchmark"]
-        assert "spy_twr_pct" in bench
-        assert "spy_cagr_pct" in bench
+        assert "benchmark_twr_pct" in bench
+        assert "benchmark_cagr_pct" in bench
         assert "relative_return_pct" in bench
         assert "up_capture_ratio" in bench
         assert "down_capture_ratio" in bench
@@ -246,8 +246,8 @@ class TestBenchmark:
         result = runner.invoke(cli, ["performance", "--db", simple_db])
         data = json.loads(result.output)
         bench = data["data"]["benchmark"]
-        assert isinstance(bench["spy_twr_pct"], (int, float))
-        assert isinstance(bench["spy_cagr_pct"], (int, float))
+        assert isinstance(bench["benchmark_twr_pct"], (int, float))
+        assert isinstance(bench["benchmark_cagr_pct"], (int, float))
         assert isinstance(bench["up_capture_ratio"], (int, float))
         assert isinstance(bench["down_capture_ratio"], (int, float))
 

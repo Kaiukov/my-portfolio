@@ -65,15 +65,31 @@ portfolio health --db portfolio.db
 Returns: `status` (ok/degraded), `stale_data`, `last_successful_price_refresh`,
 `last_successful_recalc`, `price_coverage_issues`, `stale_tickers`.
 
-## Backup
+## Backup and Restore
 
 ```bash
+# Create backup manually
 portfolio backup --db portfolio.db                        # timestamped copy in same dir
 portfolio backup --db portfolio.db --out /backups/p.db    # explicit path
+
+# Auto-backup before a destructive delete
+portfolio delete --id 42 --confirm --backup
 ```
 
 Recommended: run before destructive operations (bulk delete, migration).
 Backup events are logged to `logs/portfolio.log`.
+
+### Restore Procedure
+
+```bash
+# Stop any processes using portfolio.db first, then:
+cp portfolio.db.backup-20260321-120000.db portfolio.db
+portfolio health --db portfolio.db          # verify integrity
+portfolio recalculate --db portfolio.db     # rebuild reporting state
+```
+
+- Do not restore while the CLI is running (DuckDB uses a single-writer lock)
+- After restore, always run `recalculate` to ensure reporting state matches transactions
 
 ## Structured Logs
 

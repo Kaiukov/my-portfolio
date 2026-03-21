@@ -296,7 +296,12 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
                 f"Transaction ID {trans_id} no longer exists; it may have been deleted since the dry-run",
             )
         result = service.edit_transaction(trans_id, **changes)
-        success("edit", {"transaction": result["transaction"], "recalculated": True, "from_date": result["from_date"]})
+        success("edit", {
+            "before": result["before"],
+            "transaction": result["transaction"],
+            "recalculated": True,
+            "from_date": result["from_date"],
+        })
     except PriceDataUnavailableError as e:
         error("edit", "PRICE_DATA_ERROR", str(e))
     except ValueError as e:
@@ -549,12 +554,15 @@ Examples:
   portfolio delete --id 42 --dry-run
 
   portfolio delete --id 42 --confirm
+
+  portfolio delete --id 42 --confirm --backup
 """)
 @click.option("--id", "trans_id", required=True, type=int)
 @click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted without executing")
+@click.option("--backup", is_flag=True, help="Create a DB backup before deleting")
 @click.option("--db", default="portfolio.db")
-def delete(trans_id, confirm, dry_run, db):
+def delete(trans_id, confirm, dry_run, backup, db):
     """Delete a transaction by ID and auto-recalculate returns."""
     if dry_run:
         service = PortfolioService(db, read_only=True)
@@ -579,6 +587,15 @@ def delete(trans_id, confirm, dry_run, db):
         finally:
             service.close()
         return
+
+    if backup:
+        src = Path(db)
+        if src.exists():
+            from datetime import datetime as _dt
+            ts = _dt.now().strftime("%Y%m%d-%H%M%S")
+            dst = src.parent / f"{src.stem}.backup-{ts}.db"
+            shutil.copy2(src, dst)
+            log.backup_created(str(src), str(dst), dst.stat().st_size)
 
     service = PortfolioService(db)
     try:
@@ -615,15 +632,18 @@ Examples:
   portfolio performance
 
   portfolio performance --as-of-date 2026-01-01
+
+  portfolio performance --benchmark QQQ
 """)
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
+@click.option("--benchmark", default=None, help="Benchmark ticker (default: SPY)")
 @click.option("--db", default="portfolio.db")
-def performance(as_of_date, db):
+def performance(as_of_date, benchmark, db):
     """Show performance metrics."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = PortfolioService(db, read_only=True)
     try:
-        stats = service.get_performance_stats(as_of_date=as_of)
+        stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark)
         concentration = service.get_concentration_metrics(as_of_date=as_of)
 
         def m(name, value):
@@ -687,8 +707,9 @@ def performance(as_of_date, db):
                 "num_positions": concentration["num_positions"],
             },
             "benchmark": {
-                "spy_twr_pct": stats["spy_twr_pct"],
-                "spy_cagr_pct": stats["spy_cagr_pct"],
+                "ticker": benchmark or service.BENCHMARK_TICKERS[0],
+                "benchmark_twr_pct": stats["spy_twr_pct"],
+                "benchmark_cagr_pct": stats["spy_cagr_pct"],
                 "relative_return_pct": m("relative_return", stats["relative_return"]),
                 "tracking_error_pct": m("tracking_error", stats["tracking_error"]),
                 "information_ratio": m("information_ratio", stats["information_ratio"]),
@@ -709,6 +730,39 @@ def performance(as_of_date, db):
         error("performance", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("performance", "DB_ERROR", str(e))
+    finally:
+        service.close()
+
+
+# ─── mwr ──────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Examples:
+
+  portfolio mwr
+
+  portfolio mwr --as-of-date 2026-01-01
+
+  portfolio mwr --db /data/portfolio.db --as-of-date 2025-12-31
+""")
+@click.option("--as-of-date", default=None, help="Calculate MWR as of date (YYYY-MM-DD)")
+@click.option("--db", default="portfolio.db")
+def mwr(as_of_date, db):
+    """Show Money-Weighted Return (XIRR / IRR)."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    service = PortfolioService(db, read_only=True)
+    try:
+        mwr_val = service.get_mwr_irr(as_of_date=as_of)
+        snap = service.build_reporting_snapshot(as_of_date=as_of)
+        success("mwr", {
+            "mwr_pct": round(mwr_val * 100, 4),
+            "as_of_date": str(snap["as_of_date"]) if snap.get("as_of_date") else None,
+            "portfolio_value": snap.get("portfolio_value", 0.0),
+            "net_contributions": snap.get("net_contributions", 0.0),
+            "note": "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
+        })
+    except Exception as e:
+        error("mwr", "DB_ERROR", str(e))
     finally:
         service.close()
 

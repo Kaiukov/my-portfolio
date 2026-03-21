@@ -52,7 +52,7 @@ class PerformanceService:
             pass
         return 0.0
 
-    def get_performance_stats(self, as_of_date, get_daily_returns_fn, build_snapshot_fn, risk_free_rate_annual) -> dict:
+    def get_performance_stats(self, as_of_date, get_daily_returns_fn, build_snapshot_fn, risk_free_rate_annual, benchmark_ticker='SPY') -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         import math
         from datetime import datetime
@@ -192,14 +192,14 @@ class PerformanceService:
             min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
             max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
 
-            spy_prices = self.db.get_price_series(['SPY'], start_date=min_date, end_date=max_date)
-            if spy_prices and 'SPY' in spy_prices and len(spy_prices['SPY']) > 1:
+            spy_prices = self.db.get_price_series([benchmark_ticker], start_date=min_date, end_date=max_date)
+            if spy_prices and benchmark_ticker in spy_prices and len(spy_prices[benchmark_ticker]) > 1:
                 import pandas as pd
-                spy_series = spy_prices['SPY']
+                spy_series = spy_prices[benchmark_ticker]
                 if isinstance(spy_series, pd.DataFrame):
                     spy_series = spy_series.iloc[:, 0]
 
-                # Calculate SPY daily returns
+                # Calculate benchmark daily returns
                 spy_returns = []
                 for i in range(1, len(spy_series)):
                     prev_val = float(spy_series.iloc[i-1])
@@ -287,14 +287,14 @@ class PerformanceService:
             min_date = datetime.strptime(returns_with_values[0]['date'], '%Y-%m-%d').date()
             max_date = datetime.strptime(returns_with_values[-1]['date'], '%Y-%m-%d').date()
 
-            spy_prices = self.db.get_price_series(['SPY'], start_date=min_date, end_date=max_date)
-            if spy_prices and 'SPY' in spy_prices and len(spy_prices['SPY']) > 1:
+            spy_prices = self.db.get_price_series([benchmark_ticker], start_date=min_date, end_date=max_date)
+            if spy_prices and benchmark_ticker in spy_prices and len(spy_prices[benchmark_ticker]) > 1:
                 import pandas as pd
-                spy_series = spy_prices['SPY']
+                spy_series = spy_prices[benchmark_ticker]
                 if isinstance(spy_series, pd.DataFrame):
                     spy_series = spy_series.iloc[:, 0]
 
-                # Calculate SPY daily returns
+                # Calculate benchmark daily returns
                 spy_returns = []
                 for i in range(1, len(spy_series)):
                     prev_val = float(spy_series.iloc[i-1])
@@ -302,7 +302,7 @@ class PerformanceService:
                     if prev_val > 0:
                         spy_returns.append((curr_val - prev_val) / prev_val * 100)
 
-                # Calculate SPY CAGR and TWR
+                # Calculate benchmark CAGR and TWR
                 spy_start = float(spy_series.iloc[0])
                 spy_end = float(spy_series.iloc[-1])
                 spy_total_return = (spy_end - spy_start) / spy_start

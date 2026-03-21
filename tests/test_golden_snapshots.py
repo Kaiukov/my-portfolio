@@ -358,6 +358,31 @@ def test_stale_prices_repair_fills_gap(tmp_path):
     assert snap["portfolio_value"] > 0
 
 
+# ── Benchmark tickers regression ─────────────────────────────────────────────
+
+def test_repair_prices_caches_spy(tmp_path):
+    """repair_prices always fetches BENCHMARK_TICKERS (SPY) even when not in portfolio."""
+    db_path = str(tmp_path / "spy_cache.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
+    svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
+
+    # Before repair: SPY should not be in prices cache
+    pre_count = svc.db.get_prices_by_ticker_count()
+    spy_before = next((r for r in pre_count if r[0] == "SPY"), None)
+    assert spy_before is None or spy_before[1] == 0, "SPY should not be cached before repair"
+
+    svc.repair_prices()
+    svc.close()
+
+    # After repair: SPY must be present in prices cache
+    svc2 = PortfolioService(db_path, read_only=True)
+    post_count = svc2.db.get_prices_by_ticker_count()
+    svc2.close()
+    spy_after = next((r for r in post_count if r[0] == "SPY"), None)
+    assert spy_after is not None and spy_after[1] > 0, "SPY must be cached after repair_prices"
+
+
 def test_delete_dry_run(golden_db, runner):
     """delete --dry-run shows would_delete without removing the transaction."""
     result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run", "--db", golden_db])
