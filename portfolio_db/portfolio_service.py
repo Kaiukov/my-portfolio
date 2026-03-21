@@ -711,17 +711,17 @@ class PortfolioService:
             datetime.strptime(coverage['required_range']['start'], '%Y-%m-%d').date()
             if coverage['required_range']['start'] else None
         )
-        required_end = end_date or (
-            datetime.strptime(coverage['required_range']['end'], '%Y-%m-%d').date()
-            if coverage['required_range']['end'] else None
-        )
+        # Always extend to today so the daily cron keeps prices current.
+        # Without this, repair_prices only validates up to the last recalc date
+        # and never fetches prices for the current day.
+        required_end = end_date or date.today()
 
-        # Always include benchmark tickers so SPY (and others) are cached
-        # even though they don't appear in portfolio transactions.
+        # Always refresh ALL portfolio tickers (not just ones with gaps) so
+        # that the daily cron proactively refreshes every position to today.
         effective_tickers = tickers
         if effective_tickers is None:
-            portfolio_tickers = [item['ticker'] for item in coverage['coverage'] if item['issues']]
-            effective_tickers = sorted(set(portfolio_tickers) | set(self.BENCHMARK_TICKERS))
+            all_portfolio_tickers = [item['ticker'] for item in coverage['coverage']]
+            effective_tickers = sorted(set(all_portfolio_tickers) | set(self.BENCHMARK_TICKERS))
 
         repair_result = self._price_cache.repair_prices(coverage, required_start, required_end, tickers=effective_tickers)
         if repair_result.get('status') in ('skipped', 'up_to_date'):
