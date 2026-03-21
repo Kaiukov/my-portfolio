@@ -183,6 +183,8 @@ Examples:
 def add(date_str, asset, action, quantity, price, currency, fees, exchange, account, db):
     """Add a transaction and auto-recalculate returns."""
     date_obj = _parse_legacy_date(date_str, "--date")
+    if not exchange or not exchange.strip():
+        error("add", "VALIDATION", "--exchange is required (e.g. --exchange FreedomFinance)")
     service = PortfolioService(db)
     try:
         # CONFLICT check: SELL must not exceed current net holdings
