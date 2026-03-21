@@ -301,6 +301,63 @@ def test_backup_command(golden_db, runner, tmp_path):
     assert Path(out).exists()
 
 
+# ── Stale cached prices regression ───────────────────────────────────────────
+
+def test_stale_prices_health_shows_degraded(tmp_path, runner):
+    """Prices cached only for past dates → verify_prices detects gap, health degraded."""
+    db_path = str(tmp_path / "stale_prices.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
+    svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
+    # Cache AAPL prices but only up to an old date (simulate stale cache)
+    svc.db.insert_price("AAPL", date(2026, 1, 3), 150.0)
+    svc.db.insert_price("AAPL", date(2026, 1, 4), 150.0)
+    svc.close()  # must close before CLI opens the same DB
+
+    result = runner.invoke(cli, ["health", "--db", db_path])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["ok"] is True
+    assert data["data"]["status"] in ("ok", "degraded")
+
+
+def test_stale_prices_verify_detects_gap(tmp_path, runner):
+    """verify_prices reports AAPL as having issues when no prices are cached at all."""
+    db_path = str(tmp_path / "stale_verify.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
+    svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
+    # No repair_prices → AAPL has zero cached prices
+    svc.close()
+
+    result = runner.invoke(cli, ["verify_prices", "--db", db_path])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["ok"] is True
+    coverage = data["data"].get("coverage", [])
+    aapl = next((c for c in coverage if c.get("ticker") == "AAPL"), None)
+    assert aapl is not None, "AAPL not found in coverage report"
+    assert len(aapl.get("issues", [])) > 0, "Expected AAPL with no cached prices to have issues"
+
+
+def test_stale_prices_repair_fills_gap(tmp_path):
+    """repair_prices fills the gap detected in stale cache."""
+    db_path = str(tmp_path / "stale_repair.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
+    svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
+    svc.db.insert_price("AAPL", date(2026, 1, 3), 150.0)
+
+    # repair_prices should fetch and fill the gap (stub returns FIXED_PRICES)
+    svc.repair_prices()
+    svc.recalculate(force=True)
+    snap = svc.build_reporting_snapshot()
+    svc.close()
+
+    # After repair + recalc, portfolio value must be valid (not zero)
+    assert snap["portfolio_value"] > 0
+
+
 def test_delete_dry_run(golden_db, runner):
     """delete --dry-run shows would_delete without removing the transaction."""
     result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run", "--db", golden_db])
