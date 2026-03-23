@@ -430,20 +430,12 @@ class ReportingService:
                             fx_series = prices_dict.get(fx_symbol)
                             today_ts = price_history.index[-1]
                             yesterday_ts = price_history.index[-2]
-                            if fx_series is not None and len(fx_series) > 0:
-                                today_fx = float(fx_series.asof(today_ts))
-                                yesterday_fx = float(fx_series.asof(yesterday_ts))
-                                if today_fx > 0 and yesterday_fx > 0:
-                                    today_price *= today_fx
-                                    yesterday_price *= yesterday_fx
-                                else:
-                                    rate = fx_rate(fx_symbol)
-                                    today_price *= rate
-                                    yesterday_price *= rate
-                            else:
-                                rate = fx_rate(fx_symbol)
-                                today_price *= rate
-                                yesterday_price *= rate
+                            today_fx = self.price_cache._get_series_price_asof(fx_series, today_ts)
+                            yesterday_fx = self.price_cache._get_series_price_asof(fx_series, yesterday_ts)
+                            if today_fx is None or yesterday_fx is None or today_fx <= 0 or yesterday_fx <= 0:
+                                continue
+                            today_price *= today_fx
+                            yesterday_price *= yesterday_fx
                         if yesterday_price > 0:
                             daily_gain_pct = ((today_price - yesterday_price) / yesterday_price) * 100
                             daily_gain_value = shares * (today_price - yesterday_price)
