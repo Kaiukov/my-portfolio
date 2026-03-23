@@ -272,14 +272,13 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
     if dry_run:
         service = PortfolioService(db, read_only=True)
         try:
-            row = service.db.get_transaction_by_id(trans_id)
-            if not row:
-                error("edit", "NOT_FOUND", f"Transaction ID {trans_id} not found")
-            fields = ["id", "date", "asset", "action", "quantity", "asset_type", "price",
-                      "currency", "fees", "exchange", "data_source", "account", "created_at", "updated_at"]
-            current = dict(zip(fields, row))
+            preview = service.preview_edit_transaction(trans_id, **changes)
             proposed = {k: (str(v) if v is not None else None) for k, v in changes.items() if v is not None}
-            success("edit", {"dry_run": True, "transaction_id": trans_id, "current": current, "proposed_changes": proposed})
+            success("edit", {"dry_run": True, "transaction_id": trans_id, "current": preview["current"], "proposed_changes": proposed})
+        except ValueError as e:
+            message = str(e)
+            code = "NOT_FOUND" if "not found" in message.lower() else "VALIDATION_ERROR"
+            error("edit", code, message)
         except SystemExit:
             raise
         except Exception as e:
