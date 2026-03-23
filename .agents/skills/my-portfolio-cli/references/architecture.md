@@ -136,6 +136,7 @@ Action groups in the current implementation:
 - DuckDB cached prices are the read-path source of truth.
 - Reporting loads price series through database access before valuation.
 - Price lookup uses as-of semantics: use the latest cached value on or before the valuation timestamp.
+- Price series slicing always uses `pd.Timestamp` (`valuation_ts`), never `datetime.date` — avoids Pandas4Warning and future silent failure.
 - If a required asset price or FX rate is missing at `as_of_date`, the read path must fail explicitly.
 - No hidden approximation or fallback FX conversion is allowed in reporting.
 

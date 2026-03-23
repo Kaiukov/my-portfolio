@@ -70,6 +70,11 @@ Current error contract:
 - CLI maps repair fetch failures to `PRICE_FETCH_ERROR`
 - CLI maps malformed input to `VALIDATION_ERROR`
 
+## Known Fixed Bugs
+
+- **FX day-gain was always 0.0** — `day_gain_pct` / `day_gain_value` for FX cash positions (EURUSD=X, GBPUSD=X) were hardcoded to `0.0` in the cash snapshot loop. Fixed by computing daily gain from price series, same logic as stocks. Regression tests in `TestFXDayGain`.
+- **Pandas date-slice deprecation** — both stock and FX cash day-gain branches used `price_series.loc[:as_of_date]` (`datetime.date`). Replaced with `price_series.loc[:valuation_ts]` (`pd.Timestamp`) to prevent future silent `except` swallow.
+
 ## Implemented Data-Integrity Helpers
 
 Database helpers already present:
