@@ -1,3 +1,4 @@
+import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -360,3 +361,19 @@ def test_changing_action_to_transfer_without_account_rejected(db_path: Path):
     with pytest.raises(ValueError, match="TRANSFER requires an account"):
         service.edit_transaction(trans_id, action="TRANSFER")
     service.close()
+
+
+def test_transfer_edit_dry_run_cannot_clear_account(runner, db_path: Path):
+    service = PortfolioService(str(db_path))
+    result = service.add_transaction("01-01-2026", "USD", "TRANSFER", 500, account="broker-A")
+    trans_id = result["transaction_id"]
+    service.close()
+
+    result = runner.invoke(cli, ["edit", "--id", str(trans_id), "--account", "", "--dry-run", "--db", str(db_path)])
+
+    assert result.exit_code == 1, result.output
+    body = json.loads(result.output)
+    assert body["ok"] is False
+    assert body["command"] == "edit"
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "TRANSFER requires an account" in body["error"]["message"]

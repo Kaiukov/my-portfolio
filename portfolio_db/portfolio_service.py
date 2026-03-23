@@ -600,12 +600,22 @@ class PortfolioService:
             system_actions=self.SYSTEM_ACTIONS,
         )
 
-    def edit_transaction(self, transaction_id: int, **changes) -> dict:
-        """Edit a transaction and recalculate from the earliest affected date."""
-        # Validate TRANSFER account requirement for both new and existing TRANSFER rows
+    def preview_edit_transaction(self, transaction_id: int, **changes) -> dict:
+        """Validate and preview an edit without mutating state."""
         existing = self.db.get_transaction_by_id(transaction_id)
         if not existing:
             raise ValueError(f"Transaction ID {transaction_id} not found")
+
+        current = self._serialize_transaction_row(existing)
+        updated = current.copy()
+        updated.update({key: value for key, value in changes.items() if value is not None})
+
+        if isinstance(updated['date'], str):
+            try:
+                updated['date'] = datetime.strptime(updated['date'], '%d-%m-%Y').date()
+            except ValueError:
+                updated['date'] = datetime.strptime(updated['date'], '%Y-%m-%d').date()
+
         new_action = changes.get('action')
         effective_action = (new_action.upper() if new_action else existing[3]).upper()
         if effective_action == 'TRANSFER':
@@ -614,6 +624,31 @@ class PortfolioService:
             resolved_account = new_account if new_account is not None else existing_account
             if not resolved_account:
                 raise ValueError("TRANSFER requires an account label (use --account)")
+
+        updated['action'] = self.validate_action(updated['action'])
+        if updated['action'] not in self.SYSTEM_ACTIONS:
+            updated['asset_type'] = self.derive_asset_type(updated['asset'])
+        self._transactions._validate_transaction_payload(
+            asset=updated['asset'],
+            action=updated['action'],
+            quantity=float(updated['quantity']),
+            price=updated.get('price'),
+            trade_actions=self.TRADE_ACTIONS,
+            external_inflow_actions=self.EXTERNAL_INFLOW_ACTIONS,
+            external_outflow_actions=self.EXTERNAL_OUTFLOW_ACTIONS,
+            transfer_actions=self.TRANSFER_ACTIONS,
+            income_actions=self.INCOME_ACTIONS,
+            expense_actions=self.EXPENSE_ACTIONS,
+            system_actions=self.SYSTEM_ACTIONS,
+        )
+        return {
+            'current': current,
+            'updated': updated,
+        }
+
+    def edit_transaction(self, transaction_id: int, **changes) -> dict:
+        """Edit a transaction and recalculate from the earliest affected date."""
+        self.preview_edit_transaction(transaction_id, **changes)
         return self._transactions.edit_transaction(
             transaction_id, changes,
             validate_action_fn=self.validate_action,
