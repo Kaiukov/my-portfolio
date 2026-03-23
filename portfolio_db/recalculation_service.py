@@ -88,16 +88,7 @@ class RecalculationService:
         except ValueError as exc:
             set_stale_fn(True)
             raise price_data_unavailable_error_cls(str(exc)) from exc
-
-        for result in results:
-            self.db.insert_daily_return(
-                result['date'],
-                result['portfolio_value'],
-                result['portfolio_daily_return'],
-                investment_return=result.get('investment_return'),
-                cash_flow_impact=result.get('cash_flow_impact'),
-                adjusted_base=result.get('adjusted_base')
-            )
+        self.db.replace_daily_returns(results, start_date=min_date)
 
     def recalculate(self, from_date, force, discover_assets_fn, require_cached_fn, set_stale_fn, mark_recalc_success_fn, price_data_unavailable_error_cls):
         """
@@ -131,14 +122,12 @@ class RecalculationService:
         if force or from_date is None:
             # Full recalculation
             is_full_recalc = True
-            self.db.clear_daily_returns()
         else:
             # Partial recalculation still needs the full historical price context.
             # The calculator rebuilds holdings from the first transaction, so
             # fetching prices only from from_date breaks the retained rows'
             # prev_value / adjusted_base chain.
             is_full_recalc = False
-            self.db.delete_daily_returns_from_date(from_date)
 
         # Discover assets and currencies for price lookup
         discovered_assets = discover_assets_fn()
@@ -169,18 +158,9 @@ class RecalculationService:
         if not is_full_recalc and from_date:
             results = [r for r in results if r['date'] >= from_date]
 
-        # Store results
-        rows_affected = 0
-        for result in results:
-            self.db.insert_daily_return(
-                result['date'],
-                result['portfolio_value'],
-                result['portfolio_daily_return'],
-                investment_return=result.get('investment_return'),
-                cash_flow_impact=result.get('cash_flow_impact'),
-                adjusted_base=result.get('adjusted_base')
-            )
-            rows_affected += 1
+        replace_start_date = None if is_full_recalc else from_date
+        self.db.replace_daily_returns(results, start_date=replace_start_date)
+        rows_affected = len(results)
 
         recalc_type = 'full' if is_full_recalc else 'partial'
         self.db.log_refresh(recalc_type, rows_affected)

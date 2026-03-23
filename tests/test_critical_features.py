@@ -18,6 +18,7 @@ for module_name in list(sys.modules):
 from portfolio_db.cli import cli
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.price_service import PriceService
+import portfolio_db.recalculation_service as recalc_module
 
 
 def fake_price_fetch(symbols, start_date, end_date):
@@ -139,6 +140,70 @@ def test_recalculate_fails_explicitly_when_cached_fx_is_missing(db_path: Path):
         service.recalculate(force=True)
 
     assert service.get_refresh_state()["stale_data"] is True
+    service.close()
+
+
+def test_recalculate_failure_preserves_existing_daily_returns(db_path: Path, monkeypatch):
+    service = PortfolioService(str(db_path))
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    daily_returns_before = service.get_daily_returns()
+
+    def boom(self):
+        raise ValueError("simulated calc failure")
+
+    monkeypatch.setattr(recalc_module.DailyReturnCalculator, "calculate_all_returns", boom)
+
+    with pytest.raises(PriceDataUnavailableError):
+        service.recalculate(force=True)
+
+    assert service.get_daily_returns() == daily_returns_before, (
+        "Failed recalc must preserve previously stored daily returns"
+    )
+    assert service.get_refresh_state()["stale_data"] is True
+    service.close()
+
+
+def test_recalculate_uses_bulk_daily_return_replace(db_path: Path, monkeypatch):
+    service = PortfolioService(str(db_path))
+    service.db.add_transaction(
+        pd.Timestamp("2026-01-01").date(),
+        "USD",
+        "DEPOSIT",
+        1000.0,
+        asset_type="cash_base",
+    )
+    service.db.add_transaction(
+        pd.Timestamp("2026-01-02").date(),
+        "AAPL",
+        "BUY",
+        1.0,
+        asset_type="stock_usd",
+        price=100.0,
+    )
+    monkeypatch.setattr(service, "_require_cached_price_requirements", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service._recalc.price_cache,
+        "load_calculation_prices",
+        lambda symbols, start_date, end_date: fake_price_fetch(symbols, start_date, end_date),
+    )
+
+    calls = []
+    original_replace = service.db.replace_daily_returns
+
+    def spy(rows, start_date=None):
+        calls.append((len(rows), start_date))
+        return original_replace(rows, start_date=start_date)
+
+    def fail_if_row_write(*args, **kwargs):
+        raise AssertionError("recalculate should not call insert_daily_return row-by-row")
+
+    monkeypatch.setattr(service.db, "replace_daily_returns", spy)
+    monkeypatch.setattr(service.db, "insert_daily_return", fail_if_row_write)
+
+    result = service.recalculate(force=True)
+
+    assert result["status"] == "success"
+    assert calls == [(len(service.get_daily_returns()), None)]
     service.close()
 
 

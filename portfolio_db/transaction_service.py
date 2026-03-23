@@ -42,20 +42,11 @@ class TransactionService:
 
     def _restore_rollback_snapshot(self, snapshot: dict):
         """Restore derived state after a failed mutation recalc."""
-        if snapshot['is_full_recalc']:
-            self.db.clear_daily_returns()
-        else:
-            self.db.delete_daily_returns_from_date(snapshot['from_date'])
-
-        for daily_return in snapshot['daily_returns']:
-            self.db.insert_daily_return(
-                daily_return[0],
-                daily_return[1],
-                daily_return[2],
-                investment_return=daily_return[3],
-                cash_flow_impact=daily_return[4],
-                adjusted_base=daily_return[5],
-            )
+        restore_start_date = None if snapshot['is_full_recalc'] else snapshot['from_date']
+        self.db.replace_daily_returns(
+            snapshot['daily_returns'],
+            start_date=restore_start_date,
+        )
 
         for key, value in snapshot['refresh_state'].items():
             self.db.set_service_state(key, value)

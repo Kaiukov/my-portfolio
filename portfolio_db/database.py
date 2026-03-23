@@ -344,6 +344,75 @@ class PortfolioDatabase:
         )
         self.con.commit()
 
+    def _normalize_daily_return_rows(self, rows) -> list[dict]:
+        """Normalize calculator dicts or DB tuples into one bulk-insert shape."""
+        normalized = []
+        for row in rows:
+            if isinstance(row, dict):
+                normalized.append({
+                    'date': row['date'],
+                    'portfolio_value': row['portfolio_value'],
+                    'portfolio_daily_return': row['portfolio_daily_return'],
+                    'investment_return': row.get('investment_return'),
+                    'cash_flow_impact': row.get('cash_flow_impact'),
+                    'adjusted_base': row.get('adjusted_base'),
+                })
+            else:
+                normalized.append({
+                    'date': row[0],
+                    'portfolio_value': row[1],
+                    'portfolio_daily_return': row[2],
+                    'investment_return': row[3],
+                    'cash_flow_impact': row[4],
+                    'adjusted_base': row[5],
+                })
+        return normalized
+
+    def replace_daily_returns(self, rows, start_date=None):
+        """Replace all or part of daily_returns in one transaction."""
+        batch_rows = self._normalize_daily_return_rows(rows)
+        batch_name = "_daily_returns_batch"
+
+        self.con.execute("BEGIN TRANSACTION")
+        try:
+            if start_date is None:
+                self.con.execute("DELETE FROM daily_returns")
+            else:
+                self.con.execute(
+                    "DELETE FROM daily_returns WHERE date >= ?",
+                    [start_date],
+                )
+
+            if batch_rows:
+                df = pd.DataFrame(
+                    batch_rows,
+                    columns=[
+                        'date',
+                        'portfolio_value',
+                        'portfolio_daily_return',
+                        'investment_return',
+                        'cash_flow_impact',
+                        'adjusted_base',
+                    ],
+                )
+                self.con.register(batch_name, df)
+                try:
+                    self.con.execute(
+                        f"""
+                        INSERT OR REPLACE INTO daily_returns
+                        (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
+                        SELECT date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base
+                        FROM {batch_name}
+                        """
+                    )
+                finally:
+                    self.con.unregister(batch_name)
+
+            self.con.commit()
+        except Exception:
+            self.con.rollback()
+            raise
+
     def get_daily_returns(self):
         """Get all daily returns with separated metrics."""
         return self.con.execute(
