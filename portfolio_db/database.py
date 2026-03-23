@@ -344,28 +344,18 @@ class PortfolioDatabase:
         )
         self.con.commit()
 
+    _DAILY_RETURN_COLUMNS = ('date', 'portfolio_value', 'portfolio_daily_return',
+                             'investment_return', 'cash_flow_impact', 'adjusted_base')
+
     def _normalize_daily_return_rows(self, rows) -> list[dict]:
         """Normalize calculator dicts or DB tuples into one bulk-insert shape."""
+        cols = self._DAILY_RETURN_COLUMNS
         normalized = []
         for row in rows:
             if isinstance(row, dict):
-                normalized.append({
-                    'date': row['date'],
-                    'portfolio_value': row['portfolio_value'],
-                    'portfolio_daily_return': row['portfolio_daily_return'],
-                    'investment_return': row.get('investment_return'),
-                    'cash_flow_impact': row.get('cash_flow_impact'),
-                    'adjusted_base': row.get('adjusted_base'),
-                })
+                normalized.append({c: row.get(c) for c in cols})
             else:
-                normalized.append({
-                    'date': row[0],
-                    'portfolio_value': row[1],
-                    'portfolio_daily_return': row[2],
-                    'investment_return': row[3],
-                    'cash_flow_impact': row[4],
-                    'adjusted_base': row[5],
-                })
+                normalized.append(dict(zip(cols, row)))
         return normalized
 
     def replace_daily_returns(self, rows, start_date=None):

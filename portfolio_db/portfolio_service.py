@@ -617,11 +617,10 @@ class PortfolioService:
                 updated['date'] = datetime.strptime(updated['date'], '%Y-%m-%d').date()
 
         new_action = changes.get('action')
-        effective_action = (new_action.upper() if new_action else existing[3]).upper()
+        effective_action = (new_action.upper() if new_action else current['action']).upper()
         if effective_action == 'TRANSFER':
             new_account = changes.get('account')
-            existing_account = existing[11]  # account is index 11
-            resolved_account = new_account if new_account is not None else existing_account
+            resolved_account = new_account if new_account is not None else current['account']
             if not resolved_account:
                 raise ValueError("TRANSFER requires an account label (use --account)")
 
