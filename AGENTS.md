@@ -9,3 +9,10 @@
 - pure json response 
 - Scripts are located in [scripts](scripts) directory
 
+## Deploy 
+
+- git commit and push to [main](main)
+- ssh to [root@opneclaw] 
+- run `git pull`
+- test
+

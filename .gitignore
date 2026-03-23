@@ -72,3 +72,6 @@ yfiance-transactions/DONE/
 mcp-searxng/.venv/
 .claude/agent-memory/
 .claude/__pycache__/
+# Secrets and backups
+$DB
+*.local-backup-*
