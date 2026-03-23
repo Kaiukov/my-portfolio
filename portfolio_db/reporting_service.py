@@ -425,14 +425,17 @@ class ReportingService:
                     if len(price_history) > 1:
                         today_price = float(price_history.iloc[-1])
                         yesterday_price = float(price_history.iloc[-2])
-                        if asset_type == 'stock_gbp':
-                            rate = fx_rate('GBPUSD=X')
-                            today_price *= rate
-                            yesterday_price *= rate
-                        elif asset_type == 'stock_eur':
-                            rate = fx_rate('EURUSD=X')
-                            today_price *= rate
-                            yesterday_price *= rate
+                        if asset_type in ('stock_gbp', 'stock_eur'):
+                            fx_symbol = 'GBPUSD=X' if asset_type == 'stock_gbp' else 'EURUSD=X'
+                            fx_series = prices_dict.get(fx_symbol)
+                            today_ts = price_history.index[-1]
+                            yesterday_ts = price_history.index[-2]
+                            today_fx = self.price_cache._get_series_price_asof(fx_series, today_ts)
+                            yesterday_fx = self.price_cache._get_series_price_asof(fx_series, yesterday_ts)
+                            if today_fx is None or yesterday_fx is None or today_fx <= 0 or yesterday_fx <= 0:
+                                continue
+                            today_price *= today_fx
+                            yesterday_price *= yesterday_fx
                         if yesterday_price > 0:
                             daily_gain_pct = ((today_price - yesterday_price) / yesterday_price) * 100
                             daily_gain_value = shares * (today_price - yesterday_price)

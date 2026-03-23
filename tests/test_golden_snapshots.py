@@ -86,64 +86,71 @@ def test_snapshot_portfolio_value(golden_db):
     assert snap["fees"] == pytest.approx(5.0)
 
 
-def test_cash_command_envelope(golden_db, runner):
-    result = runner.invoke(cli, ["cash", "--db", golden_db])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
+def test_reporting_commands_share_consistent_snapshot(golden_db, runner):
+    summary_result = runner.invoke(cli, ["summary", "--db", golden_db])
+    performance_result = runner.invoke(cli, ["performance", "--db", golden_db])
+    report_result = runner.invoke(cli, ["report", "--db", golden_db, "--limit", "1"])
+    cash_result = runner.invoke(cli, ["cash", "--db", golden_db])
+    allocation_result = runner.invoke(cli, ["allocation", "--type", "all", "--db", golden_db])
 
-    assert data["ok"] is True
-    assert data["command"] == "cash"
-    assert "data" in data
-    assert "as_of_date" in data["meta"]
+    assert summary_result.exit_code == 0, summary_result.output
+    assert performance_result.exit_code == 0, performance_result.output
+    assert report_result.exit_code == 0, report_result.output
+    assert cash_result.exit_code == 0, cash_result.output
+    assert allocation_result.exit_code == 0, allocation_result.output
 
+    summary_body = json.loads(summary_result.output)
+    performance_body = json.loads(performance_result.output)
+    report_body = json.loads(report_result.output)
+    cash_body = json.loads(cash_result.output)
+    allocation_body = json.loads(allocation_result.output)
 
-def test_status_command_envelope(golden_db, runner):
-    result = runner.invoke(cli, ["status", "--db", golden_db])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
+    summary_as_of = summary_body["meta"]["as_of_date"]
+    performance_as_of = performance_body["data"]["period"]["end_date"]
+    cash_as_of = cash_body["meta"]["as_of_date"]
+    allocation_as_of = allocation_body["data"]["as_of_date"]
+    report_as_of = report_body["data"][-1]["date"]
 
-    assert data["ok"] is True
-    assert data["command"] == "status"
-    body = data["data"]
-    assert "portfolio_value" in body
-    assert body["portfolio_value"] == pytest.approx(10_045.0, rel=1e-2)
+    assert summary_as_of == performance_as_of == cash_as_of == allocation_as_of == report_as_of
 
+    allocation_total = allocation_body["data"]["total_value"]
+    performance_end_value = performance_body["data"]["values"]["end_value"]
+    report_end_value = report_body["data"][-1]["portfolio_value"]
+    cash_total = sum(item["usd_value"] for item in cash_body["data"])
+    open_positions_total = sum(
+        item["market_value"]
+        for item in summary_body["data"]
+        if item["status"] == "OPEN"
+    )
 
-def test_allocation_command_envelope(golden_db, runner):
-    result = runner.invoke(cli, ["allocation", "--type", "all", "--db", golden_db])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
+    assert allocation_total == pytest.approx(10_045.0, rel=1e-3)
+    assert performance_end_value == pytest.approx(allocation_total, rel=1e-6)
+    assert report_end_value == pytest.approx(allocation_total, rel=1e-6)
+    assert open_positions_total == pytest.approx(allocation_total, rel=1e-6)
 
-    assert data["ok"] is True
-    assert data["command"] == "allocation"
-    body = data["data"]
-    assert "assets" in body or "cash" in body or "summary" in body
+    allocation_cash = next(
+        item["value"] for item in allocation_body["data"]["positions"]
+        if item["type"] == "cash" and item["symbol"] == "USD"
+    )
+    allocation_assets = sum(
+        item["value"] for item in allocation_body["data"]["positions"]
+        if item["type"] == "asset"
+    )
+    summary_cash = next(
+        item["market_value"] for item in summary_body["data"]
+        if item["symbol"] == "USD" and item["status"] == "OPEN"
+    )
+    summary_aapl = next(
+        item["market_value"] for item in summary_body["data"]
+        if item["symbol"] == "AAPL" and item["status"] == "OPEN"
+    )
 
-
-def test_summary_command_envelope(golden_db, runner):
-    result = runner.invoke(cli, ["summary", "--db", golden_db])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-
-    assert data["ok"] is True
-    assert data["command"] == "summary"
-    positions = data["data"]
-    assert isinstance(positions, list)
-    symbols = [p["symbol"] for p in positions]
-    assert "AAPL" in symbols
-
-
-def test_performance_command_envelope(golden_db, runner):
-    result = runner.invoke(cli, ["performance", "--db", golden_db])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-
-    assert data["ok"] is True
-    assert data["command"] == "performance"
-    body = data["data"]
-    assert "period" in body
-    assert "returns" in body
-    assert "values" in body
+    assert cash_total == pytest.approx(allocation_cash, rel=1e-6)
+    assert summary_cash == pytest.approx(allocation_cash, rel=1e-6)
+    assert summary_aapl == pytest.approx(allocation_assets, rel=1e-6)
+    assert performance_body["data"]["values"]["net_contributions"] == pytest.approx(10_000.0)
+    assert performance_body["data"]["values"]["income"] == pytest.approx(50.0)
+    assert performance_body["data"]["values"]["fees"] == pytest.approx(5.0)
 
 
 def test_health_command_ok(golden_db, runner):

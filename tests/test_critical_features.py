@@ -1,4 +1,5 @@
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -224,3 +225,101 @@ def test_delete_last_transaction_does_not_crash(db_path: Path):
     assert delete_result["transaction_id"] == trans_id
     assert service.db.get_transaction_count() == 0
     service.close()
+
+
+# ── Bug #5: non-USD stock day_gain must use per-day FX rates ──
+
+def _make_fx_price_fetch(day1, stock_price_day1, stock_price_day2, fx_day1, fx_day2):
+    """Stub that returns day-specific prices for regional stock + FX pair."""
+    def fetch(symbols, start_date, end_date):
+        idx = pd.date_range(start=start_date, end=end_date, freq="D")
+        result = {}
+        for s in symbols:
+            if s == "VGEU.DE":
+                values = [stock_price_day1 if pd.Timestamp(d).date() <= day1 else stock_price_day2 for d in idx]
+                result[s] = pd.Series(values, index=idx)
+            elif s == "VUKG.L":
+                values = [stock_price_day1 if pd.Timestamp(d).date() <= day1 else stock_price_day2 for d in idx]
+                result[s] = pd.Series(values, index=idx)
+            elif s == "EURUSD=X":
+                values = [fx_day1 if pd.Timestamp(d).date() <= day1 else fx_day2 for d in idx]
+                result[s] = pd.Series(values, index=idx)
+            elif s == "GBPUSD=X":
+                values = [fx_day1 if pd.Timestamp(d).date() <= day1 else fx_day2 for d in idx]
+                result[s] = pd.Series(values, index=idx)
+            else:
+                result[s] = pd.Series([1.0] * len(idx), index=idx)
+        return result
+    return fetch
+
+
+def _setup_non_usd_stock_service(db_path, monkeypatch, fetch_fn, symbol, currency, asset_type):
+    """Add USD deposit + one non-USD stock BUY directly, then repair+recalc."""
+    monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fetch_fn))
+    service = PortfolioService(str(db_path))
+    # Add transactions directly to DB to avoid recalc-before-price-load order issue
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 10000)
+    service.db.add_transaction(
+        date(2026, 1, 1), symbol, "BUY", 100,
+        asset_type=asset_type, price=50.0, currency=currency,
+    )
+    service.repair_prices()
+    service.recalculate(force=True)
+    return service
+
+
+def test_stock_eur_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch):
+    """Flat local price, FX 1.08→1.10: day_gain must capture pure FX PnL."""
+    day1, day2 = date(2026, 1, 1), date(2026, 1, 2)
+    shares, local_price = 100, 50.0
+
+    service = _setup_non_usd_stock_service(
+        db_path, monkeypatch,
+        _make_fx_price_fetch(day1, local_price, local_price, fx_day1=1.08, fx_day2=1.10),
+        symbol="VGEU.DE", currency="EUR", asset_type="stock_eur",
+    )
+    positions = service.get_position_summary(as_of_date=day2)
+    pos = next(p for p in positions if p["symbol"] == "VGEU.DE")
+    service.close()
+
+    # yesterday: 100*50*1.08=5400 | today: 100*50*1.10=5500
+    assert pos["day_gain_value"] == pytest.approx(shares * local_price * (1.10 - 1.08))
+    assert pos["day_gain_pct"] == pytest.approx((local_price * 1.10 - local_price * 1.08) / (local_price * 1.08) * 100)
+
+
+def test_stock_eur_day_gain_reflects_combined_stock_and_fx_movement(db_path: Path, monkeypatch):
+    """Local price 50→52, FX 1.08→1.10: day_gain reflects both components."""
+    day1, day2 = date(2026, 1, 1), date(2026, 1, 2)
+    shares = 100
+
+    service = _setup_non_usd_stock_service(
+        db_path, monkeypatch,
+        _make_fx_price_fetch(day1, stock_price_day1=50.0, stock_price_day2=52.0, fx_day1=1.08, fx_day2=1.10),
+        symbol="VGEU.DE", currency="EUR", asset_type="stock_eur",
+    )
+    positions = service.get_position_summary(as_of_date=day2)
+    pos = next(p for p in positions if p["symbol"] == "VGEU.DE")
+    service.close()
+
+    # yesterday: 100*50*1.08=5400 | today: 100*52*1.10=5720
+    assert pos["day_gain_value"] == pytest.approx(shares * (52.0 * 1.10 - 50.0 * 1.08))
+    assert pos["day_gain_pct"] == pytest.approx((52.0 * 1.10 - 50.0 * 1.08) / (50.0 * 1.08) * 100)
+
+
+def test_stock_gbp_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch):
+    """Flat local price, FX 1.28→1.30: day_gain must capture pure FX PnL."""
+    day1, day2 = date(2026, 1, 1), date(2026, 1, 2)
+    shares, local_price = 100, 50.0
+
+    service = _setup_non_usd_stock_service(
+        db_path, monkeypatch,
+        _make_fx_price_fetch(day1, local_price, local_price, fx_day1=1.28, fx_day2=1.30),
+        symbol="VUKG.L", currency="GBP", asset_type="stock_gbp",
+    )
+    positions = service.get_position_summary(as_of_date=day2)
+    pos = next(p for p in positions if p["symbol"] == "VUKG.L")
+    service.close()
+
+    # yesterday: 100*50*1.28=6400 | today: 100*50*1.30=6500
+    assert pos["day_gain_value"] == pytest.approx(shares * local_price * (1.30 - 1.28))
+    assert pos["day_gain_pct"] == pytest.approx((local_price * 1.30 - local_price * 1.28) / (local_price * 1.28) * 100)
