@@ -647,6 +647,10 @@ class PortfolioService:
         Returns:
             {"status": "success", "from_trans_id": ..., "to_trans_id": ..., "recalc_type": ..., "from_date": ...}
         """
+        if not self._is_cash_like(from_asset):
+            raise ValueError(f"'{from_asset}' is not a recognized cash asset. Use USD, EURUSD=X, GBPUSD=X, etc.")
+        if not self._is_cash_like(to_asset):
+            raise ValueError(f"'{to_asset}' is not a recognized cash asset. Use USD, EURUSD=X, GBPUSD=X, etc.")
         return self._transactions.exchange_currency(
             date_obj, from_asset, to_asset, quantity, rate,
             recalculate_fn=self.recalculate,

@@ -323,3 +323,39 @@ def test_stock_gbp_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch
     # yesterday: 100*50*1.28=6400 | today: 100*50*1.30=6500
     assert pos["day_gain_value"] == pytest.approx(shares * local_price * (1.30 - 1.28))
     assert pos["day_gain_pct"] == pytest.approx((local_price * 1.30 - local_price * 1.28) / (local_price * 1.28) * 100)
+
+
+# ── Bug #6: TRANSFER must count in net_contributions ──
+
+def test_transfer_included_in_net_contributions(db_path: Path):
+    service = PortfolioService(str(db_path))
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
+    service.add_transaction("02-01-2026", "USD", "TRANSFER", 300, account="broker-B")
+
+    snapshot = service.build_reporting_snapshot()
+    service.close()
+
+    assert snapshot["transfers_in"] == pytest.approx(300.0)
+    assert snapshot["net_contributions"] == pytest.approx(800.0), (
+        "net_contributions must include transfers_in"
+    )
+    assert snapshot["total_invested"] == pytest.approx(800.0)
+
+
+# ── Bug #7: exchange rejects non-cash assets ──
+
+def test_exchange_rejects_plain_iso_code(db_path: Path):
+    service = PortfolioService(str(db_path))
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 5000)
+
+    with pytest.raises(ValueError, match="not a recognized cash asset"):
+        service.exchange_currency(
+            date(2026, 1, 2), "USD", "EUR", 1000, 0.92,
+        )
+    service.close()
+
+
+def test_exchange_help_shows_valid_ticker(runner, db_path):
+    result = runner.invoke(cli, ["exchange", "--help"])
+    assert "EURUSD=X" in result.output
+    assert "--to EUR " not in result.output

@@ -806,7 +806,7 @@ def summary(position_filter, as_of_date, db):
 @cli.command(epilog="""
 Examples:
 
-  portfolio exchange --date 01-01-2026 --from USD --to EUR --quantity 1000 --rate 0.92
+  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
 
   portfolio exchange --date 01-01-2026 --from EURUSD=X --to USD --quantity 500 --rate 1.09
 """)

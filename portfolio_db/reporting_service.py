@@ -197,8 +197,8 @@ class ReportingService:
                 deposits += amount_usd
                 cash_flow_events.append({'date': date_obj, 'amount': amount_usd})
             elif action in transfer_actions:
-                # Internal transfer: adds to balance but not counted as external deposit
                 transfers_in += amount_usd
+                cash_flow_events.append({'date': date_obj, 'amount': amount_usd})
             elif action in external_outflow_actions:
                 withdrawals += amount_usd
                 cash_flow_events.append({'date': date_obj, 'amount': -amount_usd})
@@ -215,7 +215,7 @@ class ReportingService:
             'deposits': deposits,
             'transfers_in': transfers_in,
             'withdrawals': withdrawals,
-            'net_contributions': deposits - withdrawals,
+            'net_contributions': deposits + transfers_in - withdrawals,
             'dividends': dividends,
             'interest': interest,
             'fees': fees,
