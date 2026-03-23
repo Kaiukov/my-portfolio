@@ -845,6 +845,8 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
             "transaction_ids": [result["from_trans_id"], result["to_trans_id"]],
         }
         success("exchange", data)
+    except ValueError as e:
+        error("exchange", "VALIDATION_ERROR", str(e))
     except Exception as e:
         error("exchange", "DB_ERROR", str(e))
     finally:
