@@ -323,3 +323,40 @@ def test_stock_gbp_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch
     # yesterday: 100*50*1.28=6400 | today: 100*50*1.30=6500
     assert pos["day_gain_value"] == pytest.approx(shares * local_price * (1.30 - 1.28))
     assert pos["day_gain_pct"] == pytest.approx((local_price * 1.30 - local_price * 1.28) / (local_price * 1.28) * 100)
+
+
+# ── Bug #8: negative cash balance must be OPEN, not CLOSED ──
+
+def test_negative_cash_balance_is_open(db_path: Path):
+    service = PortfolioService(str(db_path))
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 100)
+    service.add_transaction("02-01-2026", "USD", "WITHDRAW", 150)
+
+    snapshot = service.build_reporting_snapshot(include_closed=True)
+    usd = next(p for p in snapshot["positions"] if p["symbol"] == "USD")
+    service.close()
+
+    assert usd["shares"] == pytest.approx(-50.0)
+    assert usd["status"] == "OPEN", "Negative cash balance is still an active position"
+
+
+# ── Bug #12: editing TRANSFER account to empty must be rejected ──
+
+def test_transfer_edit_cannot_clear_account(db_path: Path):
+    service = PortfolioService(str(db_path))
+    result = service.add_transaction("01-01-2026", "USD", "TRANSFER", 500, account="broker-A")
+    trans_id = result["transaction_id"]
+
+    with pytest.raises(ValueError, match="TRANSFER requires an account"):
+        service.edit_transaction(trans_id, account="")
+    service.close()
+
+
+def test_changing_action_to_transfer_without_account_rejected(db_path: Path):
+    service = PortfolioService(str(db_path))
+    result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
+    trans_id = result["transaction_id"]
+
+    with pytest.raises(ValueError, match="TRANSFER requires an account"):
+        service.edit_transaction(trans_id, action="TRANSFER")
+    service.close()

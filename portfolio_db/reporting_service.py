@@ -481,7 +481,7 @@ class ReportingService:
                         pass
             result.append({
                 'symbol': cash['symbol'],
-                'status': 'OPEN' if cash['balance'] > 0 else 'CLOSED',
+                'status': 'OPEN' if cash['balance'] != 0 else 'CLOSED',
                 'shares': cash['balance'],
                 'last_price': cash['last_price'],
                 'avg_cost_per_share': 0.0,

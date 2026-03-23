@@ -602,14 +602,15 @@ class PortfolioService:
 
     def edit_transaction(self, transaction_id: int, **changes) -> dict:
         """Edit a transaction and recalculate from the earliest affected date."""
-        # Validate TRANSFER account requirement
-        # We need to check both what's being set and what's already stored
+        # Validate TRANSFER account requirement for both new and existing TRANSFER rows
+        existing = self.db.get_transaction_by_id(transaction_id)
+        if not existing:
+            raise ValueError(f"Transaction ID {transaction_id} not found")
         new_action = changes.get('action')
-        new_account = changes.get('account')
-        if new_action and new_action.upper() == 'TRANSFER':
-            # Check if account is being set or already exists on the transaction
-            existing = self.db.get_transaction_by_id(transaction_id)
-            existing_account = existing[11] if existing else None  # account is index 11
+        effective_action = (new_action.upper() if new_action else existing[3]).upper()
+        if effective_action == 'TRANSFER':
+            new_account = changes.get('account')
+            existing_account = existing[11]  # account is index 11
             resolved_account = new_account if new_account is not None else existing_account
             if not resolved_account:
                 raise ValueError("TRANSFER requires an account label (use --account)")
