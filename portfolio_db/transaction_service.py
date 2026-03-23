@@ -3,13 +3,62 @@
 from datetime import datetime
 
 from portfolio_db.domain import is_cash_like
+from portfolio_db.price_cache_service import (
+    PRICE_REFRESH_STATE_KEY,
+    RECALC_STATE_KEY,
+    STALE_DATA_STATE_KEY,
+)
 import portfolio_db.logger as log
 
 
 class TransactionService:
+    _REFRESH_STATE_KEYS = (
+        PRICE_REFRESH_STATE_KEY,
+        RECALC_STATE_KEY,
+        STALE_DATA_STATE_KEY,
+    )
+
     def __init__(self, db, recalc):
         self.db = db
         self.recalc = recalc
+
+    def _capture_rollback_snapshot(self, *, from_date, is_full_recalc: bool, refresh_state=None) -> dict:
+        """Capture derived state that recalc may mutate before failing."""
+        refresh_state = refresh_state or self.db.get_all_service_state()
+        daily_returns = (
+            self.db.get_daily_returns()
+            if is_full_recalc
+            else self.db.get_daily_returns_from_date(from_date)
+        )
+        return {
+            'from_date': from_date,
+            'is_full_recalc': is_full_recalc,
+            'daily_returns': daily_returns,
+            'refresh_state': {
+                key: refresh_state.get(key, {}).get('value')
+                for key in self._REFRESH_STATE_KEYS
+            },
+        }
+
+    def _restore_rollback_snapshot(self, snapshot: dict):
+        """Restore derived state after a failed mutation recalc."""
+        if snapshot['is_full_recalc']:
+            self.db.clear_daily_returns()
+        else:
+            self.db.delete_daily_returns_from_date(snapshot['from_date'])
+
+        for daily_return in snapshot['daily_returns']:
+            self.db.insert_daily_return(
+                daily_return[0],
+                daily_return[1],
+                daily_return[2],
+                investment_return=daily_return[3],
+                cash_flow_impact=daily_return[4],
+                adjusted_base=daily_return[5],
+            )
+
+        for key, value in snapshot['refresh_state'].items():
+            self.db.set_service_state(key, value)
 
     def _validate_transaction_payload(self, *, asset: str, action: str, quantity: float, price: float = None, trade_actions, external_inflow_actions, external_outflow_actions, transfer_actions, income_actions, expense_actions, system_actions):
         """Validate transaction rules for supported actions."""
@@ -89,7 +138,6 @@ class TransactionService:
             currency=currency, fees=fees,
             exchange=exchange, data_source=data_source, account=account,
         )
-        mark_price_data_stale_fn()
 
         # Determine recalculation scope based on date relative to previous last date
         if last_date_before is None:
@@ -105,11 +153,19 @@ class TransactionService:
             is_full_recalc = False
             from_date = date_obj
 
+        rollback_snapshot = self._capture_rollback_snapshot(
+            from_date=from_date,
+            is_full_recalc=is_full_recalc,
+            refresh_state=self.db.get_all_service_state(),
+        )
+        mark_price_data_stale_fn()
+
         # Perform recalculation — roll back the insert if it fails
         try:
             recalculate_fn(from_date=from_date, force=False)
         except Exception:
             self.db.delete_transaction_by_id(trans_id)
+            self._restore_rollback_snapshot(rollback_snapshot)
             raise
 
         recalc_type = 'full' if is_full_recalc else 'partial'
@@ -170,6 +226,11 @@ class TransactionService:
             data_source=updated.get('data_source', ''),
             account=updated.get('account'),
         )
+        rollback_snapshot = self._capture_rollback_snapshot(
+            from_date=recalc_from,
+            is_full_recalc=True,
+            refresh_state=self.db.get_all_service_state(),
+        )
         mark_price_data_stale_fn()
         # Perform recalculation — restore original row if it fails
         try:
@@ -189,6 +250,7 @@ class TransactionService:
                 data_source=existing[10] or '',
                 account=existing[11],
             )
+            self._restore_rollback_snapshot(rollback_snapshot)
             raise
         changed_fields = [k for k, v in changes.items() if v is not None]
         log.transaction_edit(transaction_id, changed_fields, recalc_from, recalc_result.get('recalc_type', 'full'))
@@ -266,7 +328,6 @@ class TransactionService:
             asset_type=None, price=None, currency='', fees=None,
             exchange='', data_source=f'← {from_asset} @ {rate}'
         )
-        mark_price_data_stale_fn()
 
         # Determine recalculation scope
         if last_date_before is None:
@@ -279,12 +340,20 @@ class TransactionService:
             is_full_recalc = False
             from_date = date_obj
 
+        rollback_snapshot = self._capture_rollback_snapshot(
+            from_date=from_date,
+            is_full_recalc=is_full_recalc,
+            refresh_state=self.db.get_all_service_state(),
+        )
+        mark_price_data_stale_fn()
+
         # Perform recalculation — roll back both inserts if it fails
         try:
             recalculate_fn(from_date=from_date, force=False)
         except Exception:
             self.db.delete_transaction_by_id(to_trans_id)
             self.db.delete_transaction_by_id(from_trans_id)
+            self._restore_rollback_snapshot(rollback_snapshot)
             raise
 
         recalc_type = 'full' if is_full_recalc else 'partial'

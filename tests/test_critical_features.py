@@ -154,16 +154,26 @@ def test_invalid_buy_without_price_is_rejected(db_path: Path):
 def test_add_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
     service = PortfolioService(str(db_path))
 
+    service.add_transaction("02-01-2026", "USD", "DEPOSIT", 1000)
+    daily_returns_before = service.get_daily_returns()
+    refresh_state_before = service.get_refresh_state()
+
     def boom(*args, **kwargs):
         raise PriceDataUnavailableError("simulated recalc failure")
 
-    monkeypatch.setattr(service, "recalculate", boom)
+    monkeypatch.setattr(service, "_require_cached_price_requirements", boom)
 
     with pytest.raises(PriceDataUnavailableError):
         service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
 
-    assert service.db.get_transaction_count() == 0, (
-        "Transaction must be rolled back when recalc fails"
+    assert service.db.get_transaction_count() == 1, (
+        "Failed add must not leave an extra transaction row"
+    )
+    assert service.get_daily_returns() == daily_returns_before, (
+        "Failed add must restore daily returns cleared by recalc"
+    )
+    assert service.get_refresh_state() == refresh_state_before, (
+        "Failed add must restore refresh state"
     )
     service.close()
 
@@ -176,12 +186,14 @@ def test_edit_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch)
     # Add a valid transaction with real recalc
     result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     trans_id = result["transaction_id"]
+    daily_returns_before = service.get_daily_returns()
+    refresh_state_before = service.get_refresh_state()
 
     # Now make recalc always fail
     def boom(*args, **kwargs):
         raise PriceDataUnavailableError("simulated recalc failure")
 
-    monkeypatch.setattr(service, "recalculate", boom)
+    monkeypatch.setattr(service, "_require_cached_price_requirements", boom)
 
     with pytest.raises(PriceDataUnavailableError):
         service.edit_transaction(trans_id, quantity=9999)
@@ -189,6 +201,12 @@ def test_edit_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch)
     row = service.db.get_transaction_by_id(trans_id)
     assert float(row[4]) == 1000.0, (
         "Original quantity must be restored when edit recalc fails"
+    )
+    assert service.get_daily_returns() == daily_returns_before, (
+        "Failed edit must restore daily returns cleared by recalc"
+    )
+    assert service.get_refresh_state() == refresh_state_before, (
+        "Failed edit must restore refresh state"
     )
     service.close()
 
