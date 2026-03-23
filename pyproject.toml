@@ -25,6 +25,11 @@ packages = ["portfolio_db"]
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100
