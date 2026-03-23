@@ -50,6 +50,16 @@ cp .env.example .env                     # configure DB path and log path
 - `repair_prices` is the remediation command that refreshes or backfills cached price data
 - reporting should fail explicitly when required coverage is still missing after verification or repair
 
+## Refresh Prices Before Reporting
+
+Always run both before reporting:
+
+```bash
+portfolio repair_prices && portfolio recalculate
+```
+
+`repair_prices` updates price cache; `recalculate` rebuilds `daily_returns`. Default `as_of_date` is the last row in `daily_returns` — stale if `recalculate` hasn't run.
+
 ## Read Reporting
 
 - `status`, `cash`, `summary`, `allocation`, and `performance` are read/reporting commands

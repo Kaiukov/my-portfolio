@@ -459,6 +459,23 @@ class ReportingService:
         for cash in cash_snapshot:
             if cash['balance'] == 0 and not include_closed and cash['deposits'] == 0 and cash['withdrawals'] == 0:
                 continue
+            cash_daily_gain_pct = 0.0
+            cash_daily_gain_value = 0.0
+            if cash['balance'] > 0 and cash['symbol'] != BASE_CURRENCY:
+                price_series = prices_dict.get(cash['symbol'])
+                if price_series is not None:
+                    try:
+                        price_history = price_series.loc[:as_of_date]
+                        if hasattr(price_history, 'columns'):
+                            price_history = price_history.iloc[:, 0]
+                        if len(price_history) > 1:
+                            today_px = float(price_history.iloc[-1])
+                            yesterday_px = float(price_history.iloc[-2])
+                            if yesterday_px > 0:
+                                cash_daily_gain_pct = ((today_px - yesterday_px) / yesterday_px) * 100
+                                cash_daily_gain_value = cash['balance'] * (today_px - yesterday_px)
+                    except Exception:
+                        pass
             result.append({
                 'symbol': cash['symbol'],
                 'status': 'OPEN' if cash['balance'] > 0 else 'CLOSED',
@@ -468,8 +485,8 @@ class ReportingService:
                 'total_cost': 0.0,
                 'market_value': cash['market_value'],
                 'dividend_income': 0.0,
-                'day_gain_pct': 0.0,
-                'day_gain_value': 0.0,
+                'day_gain_pct': cash_daily_gain_pct,
+                'day_gain_value': cash_daily_gain_value,
                 'total_gain_pct': 0.0,
                 'total_gain_value': 0.0,
                 'realized_gain_value': 0.0,

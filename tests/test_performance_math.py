@@ -299,3 +299,66 @@ class TestMwrVsTwr:
         # Terminal value 10_500, one deposit of 10_000 → should be positive
         assert snap["portfolio_value"] == pytest.approx(10_500.0, rel=0.05)
         assert mwr > 0
+
+
+# ── FX day_gain regression ─────────────────────────────────────────────────────
+
+class TestFXDayGain:
+    """Regression: day_gain_pct must be non-zero for FX pairs when rate changes."""
+
+    def test_fx_day_gain_pct_nonzero_when_rate_changes(self, tmp_path, monkeypatch):
+        """EURUSD=X position must show correct day_gain_pct when rate moves 1.08→1.10."""
+        def fx_fetch(symbols, start_date, end_date):
+            index = pd.date_range(start=start_date, end=end_date, freq="D")
+            result = {}
+            for sym in symbols:
+                if sym == "EURUSD=X":
+                    prices = [1.08] * max(1, len(index) - 1) + [1.10]
+                    prices = prices[-len(index):]
+                else:
+                    prices = [1.0] * len(index)
+                result[sym] = pd.Series(prices, index=index)
+            return result
+
+        monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fx_fetch))
+
+        db_path = str(tmp_path / "fx_gain.db")
+        svc = PortfolioService(db_path)
+        svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
+        svc.repair_prices()
+        svc.recalculate(force=True)
+        svc.close()
+
+        svc = PortfolioService(db_path, read_only=True)
+        positions = svc.get_position_summary()
+        svc.close()
+
+        fx_pos = next((p for p in positions if p["symbol"] == "EURUSD=X"), None)
+        assert fx_pos is not None, "EURUSD=X not found in position summary"
+        expected_pct = (1.10 - 1.08) / 1.08 * 100  # ≈ 1.852%
+        expected_val = 1_000 * (1.10 - 1.08)         # = 20 USD
+        assert fx_pos["day_gain_pct"] == pytest.approx(expected_pct, rel=1e-4)
+        assert fx_pos["day_gain_value"] == pytest.approx(expected_val, rel=1e-4)
+
+    def test_fx_day_gain_zero_when_rate_unchanged(self, tmp_path, monkeypatch):
+        """EURUSD=X day_gain_pct must be 0 when rate stays flat."""
+        def flat_fetch(symbols, start_date, end_date):
+            index = pd.date_range(start=start_date, end=end_date, freq="D")
+            return {sym: pd.Series([1.10] * len(index), index=index) for sym in symbols}
+
+        monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(flat_fetch))
+
+        db_path = str(tmp_path / "fx_flat.db")
+        svc = PortfolioService(db_path)
+        svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
+        svc.repair_prices()
+        svc.recalculate(force=True)
+        svc.close()
+
+        svc = PortfolioService(db_path, read_only=True)
+        positions = svc.get_position_summary()
+        svc.close()
+
+        fx_pos = next((p for p in positions if p["symbol"] == "EURUSD=X"), None)
+        assert fx_pos is not None
+        assert fx_pos["day_gain_pct"] == pytest.approx(0.0)

@@ -44,7 +44,7 @@ Current public commands in `portfolio_db/cli.py`:
 ## Flags
 
 - `--db` — path to DuckDB file (default: `portfolio.db`)
-- `--as-of-date` — snapshot date for read commands (`status`, `cash`, `summary`, `allocation`, `performance`)
+- `--as-of-date` — snapshot date for read commands. Defaults to last date in `daily_returns`; stale if `recalculate` hasn't run after `repair_prices`.
 - `--dry-run` — preview without mutating state (`edit`, `repair_prices`, `recalculate`)
 - `--confirm` — required for `delete`
 - `--force` — bypass cache check in `recalculate`
