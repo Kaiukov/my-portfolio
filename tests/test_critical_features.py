@@ -147,3 +147,62 @@ def test_invalid_buy_without_price_is_rejected(db_path: Path):
         service.add_transaction("01-01-2026", "AAPL", "BUY", 1)
 
     service.close()
+
+
+# ── Bug #13: add_transaction must not leave orphan rows when recalc fails ──
+
+def test_add_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
+    service = PortfolioService(str(db_path))
+
+    def boom(*args, **kwargs):
+        raise PriceDataUnavailableError("simulated recalc failure")
+
+    monkeypatch.setattr(service, "recalculate", boom)
+
+    with pytest.raises(PriceDataUnavailableError):
+        service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
+
+    assert service.db.get_transaction_count() == 0, (
+        "Transaction must be rolled back when recalc fails"
+    )
+    service.close()
+
+
+# ── Bug #10: edit_transaction must restore original row when recalc fails ──
+
+def test_edit_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
+    service = PortfolioService(str(db_path))
+
+    # Add a valid transaction with real recalc
+    result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    trans_id = result["transaction_id"]
+
+    # Now make recalc always fail
+    def boom(*args, **kwargs):
+        raise PriceDataUnavailableError("simulated recalc failure")
+
+    monkeypatch.setattr(service, "recalculate", boom)
+
+    with pytest.raises(PriceDataUnavailableError):
+        service.edit_transaction(trans_id, quantity=9999)
+
+    row = service.db.get_transaction_by_id(trans_id)
+    assert float(row[4]) == 1000.0, (
+        "Original quantity must be restored when edit recalc fails"
+    )
+    service.close()
+
+
+# ── Bug #11: deleting the last transaction must not crash ──
+
+def test_delete_last_transaction_does_not_crash(db_path: Path):
+    service = PortfolioService(str(db_path))
+
+    result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
+    trans_id = result["transaction_id"]
+
+    delete_result = service.delete_transaction(trans_id)
+
+    assert delete_result["transaction_id"] == trans_id
+    assert service.db.get_transaction_count() == 0
+    service.close()

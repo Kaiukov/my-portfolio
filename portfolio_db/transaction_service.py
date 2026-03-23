@@ -105,8 +105,12 @@ class TransactionService:
             is_full_recalc = False
             from_date = date_obj
 
-        # Perform recalculation
-        recalculate_fn(from_date=from_date, force=False)
+        # Perform recalculation — roll back the insert if it fails
+        try:
+            recalculate_fn(from_date=from_date, force=False)
+        except Exception:
+            self.db.delete_transaction_by_id(trans_id)
+            raise
 
         recalc_type = 'full' if is_full_recalc else 'partial'
         log.transaction_add(trans_id, asset, action, float(quantity), date_obj, recalc_type)
@@ -167,7 +171,25 @@ class TransactionService:
             account=updated.get('account'),
         )
         mark_price_data_stale_fn()
-        recalc_result = recalculate_fn(from_date=recalc_from, force=True)
+        # Perform recalculation — restore original row if it fails
+        try:
+            recalc_result = recalculate_fn(from_date=recalc_from, force=True)
+        except Exception:
+            self.db.update_transaction(
+                transaction_id,
+                date=existing[1],
+                asset=existing[2],
+                action=existing[3],
+                quantity=existing[4],
+                asset_type=existing[5],
+                price=existing[6],
+                currency=existing[7] or 'USD',
+                fees=existing[8],
+                exchange=existing[9] or '',
+                data_source=existing[10] or '',
+                account=existing[11],
+            )
+            raise
         changed_fields = [k for k, v in changes.items() if v is not None]
         log.transaction_edit(transaction_id, changed_fields, recalc_from, recalc_result.get('recalc_type', 'full'))
         return {
@@ -210,7 +232,7 @@ class TransactionService:
                 'action': trans[3],
                 'quantity': trans[4]
             },
-            'recalc_type': recalc_result['recalc_type'],
+            'recalc_type': recalc_result.get('recalc_type', 'none'),
             'from_date': str(trans_date),
             'rows_affected': recalc_result.get('rows_affected', 0)
         }
@@ -257,8 +279,13 @@ class TransactionService:
             is_full_recalc = False
             from_date = date_obj
 
-        # Perform recalculation
-        recalculate_fn(from_date=from_date, force=False)
+        # Perform recalculation — roll back both inserts if it fails
+        try:
+            recalculate_fn(from_date=from_date, force=False)
+        except Exception:
+            self.db.delete_transaction_by_id(to_trans_id)
+            self.db.delete_transaction_by_id(from_trans_id)
+            raise
 
         recalc_type = 'full' if is_full_recalc else 'partial'
         return {
