@@ -419,7 +419,7 @@ class ReportingService:
             price_series = prices_dict.get(symbol)
             if shares > 0 and last_price and price_series is not None:
                 try:
-                    price_history = price_series.loc[:as_of_date]
+                    price_history = price_series.loc[:valuation_ts]
                     if hasattr(price_history, 'columns'):
                         price_history = price_history.iloc[:, 0]
                     if len(price_history) > 1:
@@ -465,7 +465,7 @@ class ReportingService:
                 price_series = prices_dict.get(cash['symbol'])
                 if price_series is not None:
                     try:
-                        price_history = price_series.loc[:as_of_date]
+                        price_history = price_series.loc[:valuation_ts]
                         if hasattr(price_history, 'columns'):
                             price_history = price_history.iloc[:, 0]
                         if len(price_history) > 1:
