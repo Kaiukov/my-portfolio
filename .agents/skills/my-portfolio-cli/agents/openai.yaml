@@ -1,0 +1,4 @@
+interface:
+  display_name: "My Portfolio CLI"
+  short_description: "Portfolio CLI rules and JSON contract"
+  default_prompt: "Use $my-portfolio-cli to work with the my-portfolio CLI, its JSON responses, and operator workflows."

@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+**/.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+**/.claude/settings.local.json
+
+# Data and cache
+data/cache/
+.portfolio_cache/
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+Trashes
+Thumbs.db
+
+# Images
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.svg
+*.ico
+
+# Logs
+*.log
+logs/
+.playwright-mcp/
+
+# Project specific
+*.csv
+!portfolio.csv
+!yahoo_portfolio_comparison.csv
+reports/
+portfolio_reports/
+ukr_news/
+portfolio.db
+srcNOUSE
+duckdb
+tmp/
+yfiance-transactions/DONE/
+mcp-searxng/.venv/
+.agents/skills/git-issue/
+.claude/agent-memory/
+.claude/__pycache__/
+# Secrets and backups
+$DB
+*.local-backup-*
