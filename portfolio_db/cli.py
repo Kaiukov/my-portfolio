@@ -7,6 +7,15 @@ from datetime import datetime, date
 from pathlib import Path
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
+from portfolio_db.validators import (
+    validate_pagination,
+    validate_date_range,
+    validate_positive_float,
+    validate_non_negative_float,
+    validate_positive_int,
+    validate_file_exists,
+    validate_non_empty,
+)
 import portfolio_db.logger as log
 
 USER_ACTION_CHOICES = [
@@ -51,6 +60,7 @@ def cli():
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def migrate(csv, db):
     """Migrate transactions from CSV to DuckDB."""
+    validate_file_exists(csv, "--csv", "migrate")
     service = PortfolioService(db)
     try:
         service.setup_from_csv(csv)
@@ -72,8 +82,10 @@ def migrate(csv, db):
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def report(limit, offset, start_date, end_date, db):
     """Show daily returns report."""
+    validate_pagination(limit, offset, "report")
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
+    validate_date_range(sd, ed, "report")
     service = PortfolioService(db, read_only=True)
     try:
         data, total = service.get_daily_returns_paginated(limit, offset, sd, ed)
@@ -103,8 +115,10 @@ Examples:
 @click.option("--db", default="portfolio.db", help="Path to database file")
 def transactions(limit, offset, start_date, end_date, db):
     """List transactions."""
+    validate_pagination(limit, offset, "transactions")
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
+    validate_date_range(sd, ed, "transactions")
     service = PortfolioService(db, read_only=True)
     try:
         data, total = service.get_transactions_paginated(limit, offset, sd, ed)
@@ -183,12 +197,46 @@ Examples:
 def add(date_str, asset, action, quantity, price, currency, fees, exchange, account, db):
     """Add a transaction and auto-recalculate returns."""
     date_obj = _parse_legacy_date(date_str, "--date")
+
+    # --exchange is required for all transactions
     if not exchange or not exchange.strip():
-        error("add", "VALIDATION", "--exchange is required (e.g. --exchange FreedomFinance)")
+        error(
+            "add",
+            "VALIDATION_ERROR",
+            "--exchange is required.\n"
+            "Expected: --exchange <broker or exchange name>\n"
+            "Example:  portfolio add --date 01-01-2026 --asset AAPL --action BUY "
+            "--quantity 10 --price 150 --exchange Interactive",
+        )
+
+    action_upper = action.upper()
+
+    # --quantity must be positive for user-facing actions
+    validate_positive_float(quantity, "--quantity", "add")
+
+    # --price must be positive when provided
+    if price is not None:
+        validate_positive_float(price, "--price", "add")
+
+    # --fees must be non-negative when provided
+    if fees is not None:
+        validate_non_negative_float(fees, "--fees", "add")
+
+    # TRANSFER requires --account
+    if action_upper == "TRANSFER" and not account:
+        error(
+            "add",
+            "VALIDATION_ERROR",
+            "--account is required for TRANSFER transactions.\n"
+            "Expected: --account <account label>\n"
+            "Example:  portfolio add --date 01-01-2026 --asset USD --action TRANSFER "
+            "--quantity 500 --exchange MyBroker --account broker_b",
+        )
+
     service = PortfolioService(db)
     try:
         # CONFLICT check: SELL must not exceed current net holdings
-        if action.upper() == "SELL":
+        if action_upper == "SELL":
             net = service.db.con.execute(
                 """
                 SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
@@ -208,7 +256,7 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
         result = service.add_transaction(
             date_obj=date_obj,
             asset=asset,
-            action=action.upper(),
+            action=action_upper,
             quantity=quantity,
             price=price,
             currency=currency,
@@ -254,6 +302,16 @@ Examples:
 @click.option("--db", default="portfolio.db")
 def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run, db):
     """Edit an existing transaction and recalculate returns."""
+    validate_positive_int(trans_id, "--id", "edit")
+
+    # Validate numeric fields when provided
+    if quantity is not None:
+        validate_positive_float(quantity, "--quantity", "edit")
+    if price is not None:
+        validate_positive_float(price, "--price", "edit")
+    if fees is not None:
+        validate_non_negative_float(fees, "--fees", "edit")
+
     changes = {
         "date": _parse_legacy_date(date_str, "--date") if date_str else None,
         "asset": asset,
@@ -267,18 +325,25 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
         "account": account,
     }
     if not any(value is not None for value in changes.values()):
-        error("edit", "VALIDATION_ERROR", "Provide at least one field to update")
+        error(
+            "edit",
+            "VALIDATION_ERROR",
+            "Provide at least one field to update.\n"
+            "Expected: portfolio edit --id <id> [--date DD-MM-YYYY] [--asset SYMBOL] "
+            "[--action ACTION] [--quantity N] [--price N] [--fees N] [--exchange NAME]\n"
+            "Example:  portfolio edit --id 42 --price 155.50",
+        )
 
     if dry_run:
         service = PortfolioService(db, read_only=True)
         try:
+            if not service.db.get_transaction_by_id(trans_id):
+                error("edit", "NOT_FOUND", f"Transaction ID {trans_id} not found")
             preview = service.preview_edit_transaction(trans_id, **changes)
             proposed = {k: (str(v) if v is not None else None) for k, v in changes.items() if v is not None}
             success("edit", {"dry_run": True, "transaction_id": trans_id, "current": preview["current"], "proposed_changes": proposed})
         except ValueError as e:
-            message = str(e)
-            code = "NOT_FOUND" if "not found" in message.lower() else "VALIDATION_ERROR"
-            error("edit", code, message)
+            error("edit", "VALIDATION_ERROR", str(e))
         except SystemExit:
             raise
         except Exception as e:
@@ -289,12 +354,13 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
 
     service = PortfolioService(db)
     try:
-        # CONFLICT check: transaction may have been deleted after a dry-run
         if not service.db.get_transaction_by_id(trans_id):
             error(
                 "edit",
-                "CONFLICT",
-                f"Transaction ID {trans_id} no longer exists; it may have been deleted since the dry-run",
+                "NOT_FOUND",
+                f"Transaction ID {trans_id} not found.\n"
+                f"Expected: --id <existing transaction id>\n"
+                f"Hint:     run `portfolio transactions` to list available IDs",
             )
         result = service.edit_transaction(trans_id, **changes)
         success("edit", {
@@ -306,9 +372,7 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
     except PriceDataUnavailableError as e:
         error("edit", "PRICE_DATA_ERROR", str(e))
     except ValueError as e:
-        message = str(e)
-        code = "NOT_FOUND" if "not found" in message.lower() else "VALIDATION_ERROR"
-        error("edit", code, message)
+        error("edit", "VALIDATION_ERROR", str(e))
     except Exception as e:
         error("edit", "DB_ERROR", str(e))
     finally:
@@ -373,6 +437,7 @@ def repair_prices(tickers, start_date, end_date, dry_run, db):
     """Fetch and cache missing/incomplete price series."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
+    validate_date_range(sd, ed, "repair_prices")
     if dry_run:
         service = PortfolioService(db, read_only=True)
         try:
@@ -565,6 +630,7 @@ Examples:
 @click.option("--db", default="portfolio.db")
 def delete(trans_id, confirm, dry_run, backup, db):
     """Delete a transaction by ID and auto-recalculate returns."""
+    validate_positive_int(trans_id, "--id", "delete")
     if dry_run:
         service = PortfolioService(db, read_only=True)
         try:
@@ -609,11 +675,16 @@ def delete(trans_id, confirm, dry_run, backup, db):
             error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
 
         if not confirm:
-            # Non-interactive: require --confirm flag; output error envelope
-            error("delete", "VALIDATION_ERROR",
-                  "Pass --confirm to delete without interactive prompt")
-            # error() calls sys.exit(1), but linters don't know that
-            return  # Never reached, kept for clarity
+            error(
+                "delete",
+                "VALIDATION_ERROR",
+                f"Deletion of transaction ID {trans_id} requires explicit confirmation.\n"
+                "Problem: --confirm flag was not provided.\n"
+                "Expected: portfolio delete --id <id> --confirm\n"
+                f"Example:  portfolio delete --id {trans_id} --confirm\n"
+                f"Tip:      use --dry-run first to preview what will be deleted",
+            )
+            return  # Never reached; kept for linter clarity
 
         result = service.delete_transaction(trans_id)
         success("delete", {"deleted_id": result["transaction_id"], "recalculated": True})
@@ -818,13 +889,17 @@ Examples:
 def exchange(date_str, from_asset, to_asset, quantity, rate, db):
     """Exchange one currency for another."""
     date_obj = _parse_legacy_date(date_str, "--date")
+    validate_positive_float(quantity, "--quantity", "exchange")
+    validate_positive_float(rate, "--rate", "exchange")
 
     # CONFLICT check: exchanging a currency with itself makes no sense
     if from_asset.upper() == to_asset.upper():
         error(
             "exchange",
             "CONFLICT",
-            f"--from and --to must be different assets; both are '{from_asset}'",
+            f"--from and --to must be different assets; both are '{from_asset}'.\n"
+            "Expected: --from <currency> --to <different currency>\n"
+            "Example:  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92",
         )
 
     service = PortfolioService(db)
@@ -863,6 +938,7 @@ Examples:
 @click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
 def backup(db, out):
     """Create a timestamped copy of the portfolio database."""
+    validate_file_exists(db, "--db", "backup")
     src = Path(db)
     if out is None:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
