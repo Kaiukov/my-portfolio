@@ -117,6 +117,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: live end-to-end tests that hit HdRezka URLs",
+]
 addopts = [
     "--strict-markers",
     "--strict-config",

@@ -278,7 +278,6 @@ class HdRezkaClient:
                 season=season,
                 episode=episode,
                 translation=translator_id,
-                index=index,
             )
         except Exception as e:
             raise ApiError(
@@ -337,12 +336,26 @@ class HdRezkaClient:
         Raises:
             TranslatorError: If translator cannot be resolved
         """
-        translators = self.translators
+        raw_translators = getattr(self._api, "translators", {})
+        translator_items: list[tuple[str, str]] = []
+
+        if isinstance(raw_translators, dict):
+            translator_items = [
+                (str(translator_id), str(data.get("name", translator_id)))
+                for translator_id, data in raw_translators.items()
+                if isinstance(data, dict)
+            ]
+        elif isinstance(raw_translators, list):
+            for item in raw_translators:
+                if isinstance(item, dict):
+                    translator_items.append(
+                        (str(item.get("id", len(translator_items))), str(item.get("name", "")))
+                    )
 
         # If translator is None, use index fallback
         if translator is None:
-            if 0 <= index < len(translators):
-                return cast(str, translators[index]["id"])
+            if 0 <= index < len(translator_items):
+                return translator_items[index][0]
             return None
 
         # If it's already an ID (int), convert to string
@@ -350,16 +363,15 @@ class HdRezkaClient:
             return str(translator)
 
         # If it's a string, check if it's a name or ID
-        translators = self.translators
-        for t in translators:
-            if t["name"].lower() == translator.lower():
-                return cast(str, t["id"])
-            if t["id"] == translator:
-                return cast(str, t["id"])
+        for translator_id, translator_name in translator_items:
+            if translator_name.lower() == translator.lower():
+                return translator_id
+            if translator_id == translator:
+                return translator_id
 
         raise TranslatorError(
             f"Translator not found: {translator}",
-            {"available": [t["name"] for t in translators]}
+            {"available": [name for _, name in translator_items]}
         )
 
     def _get_translator_name(self, translator_id: str | None) -> str | None:
@@ -393,22 +405,41 @@ class HdRezkaClient:
         Raises:
             QualityError: If quality is not available
         """
+        def normalize_url(value: Any) -> str | None:
+            """Normalize a stream return value into a direct URL."""
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                return value
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    if isinstance(item, str) and item.startswith(("http://", "https://")):
+                        return item
+            return None
+
         try:
             # Try calling stream with quality
-            url = stream(quality)
-            if url and isinstance(url, str) and url.startswith(("http://", "https://")):
-                return cast(str, url)
+            url = normalize_url(stream(quality))
+            if url:
+                return url
         except Exception:
             pass
 
         # Try without 'p' suffix
         quality_alt = quality.rstrip("p")
         try:
-            url = stream(quality_alt)
-            if url and isinstance(url, str) and url.startswith(("http://", "https://")):
-                return cast(str, url)
+            url = normalize_url(stream(quality_alt))
+            if url:
+                return url
         except Exception:
             pass
+
+        videos = getattr(stream, "videos", {})
+        if isinstance(videos, dict):
+            candidates = [quality, quality_alt, quality.upper(), quality_alt.upper()]
+            for key in candidates:
+                value = videos.get(key)
+                url = normalize_url(value)
+                if url:
+                    return url
 
         # Check available qualities
         available = self._get_available_qualities(stream)
