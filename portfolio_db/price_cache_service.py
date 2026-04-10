@@ -17,6 +17,8 @@ class PriceCacheService:
 
     def _set_stale_data(self, is_stale: bool):
         """Persist stale-data state."""
+        if getattr(self.db, "read_only", False):
+            return
         self.db.set_service_state(STALE_DATA_STATE_KEY, 'true' if is_stale else 'false')
 
     def _mark_price_data_stale(self):
