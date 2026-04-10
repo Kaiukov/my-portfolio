@@ -1,39 +1,58 @@
 ---
 name: my-portfolio-cli
-description: Use when working on the `my-portfolio` project CLI, JSON response contract, portfolio reporting semantics, transaction actions, price repair flows, or operator workflows. Trigger this skill for tasks involving `portfolio_db/cli.py`, `portfolio_db/portfolio_service.py`, `portfolio_db/database.py`, `portfolio_db/calculator.py`, CLI command design, API response standardization, or production-readiness planning for the portfolio app.
+description: Use when working on the `portfolio` CLI, its JSON response contract, reporting snapshot rules, transaction writes, price repair/verification, or CLI help/tests in `portfolio_db`.
 ---
 
 # My Portfolio CLI
 
-Use this skill when changing or reasoning about the `my-portfolio` app CLI and reporting model.
+Use this skill for any task that changes or explains the `portfolio` command line or its supporting services.
 
-## Workflow
+## Source of truth
 
-1. Read the canonical docs map in [references/docs-map.md](references/docs-map.md).
-2. If the task is about valuation rules, transaction semantics, or reporting invariants, read [references/architecture.md](references/architecture.md).
-3. If the task is about JSON response shapes, pagination, command payloads, or error envelopes, read [references/api-contract.md](references/api-contract.md).
-4. If the task is about price validation, coverage, repair, or deterministic valuation failures, read [references/data-integrity.md](references/data-integrity.md).
-5. If the task is about available commands or how to invoke them, read [references/cli-commands.md](references/cli-commands.md).
-6. If the task is about roadmap or hardening the app for production, read [references/production-roadmap.md](references/production-roadmap.md).
-7. Treat `/Users/oleksandrkaiukov/Code/my-portfolio/.agents/skills/my-portfolio-cli/` as the canonical documentation source. Update the relevant files in `references/` when behavior changes.
+- `portfolio_db/cli.py` - command names, help text, option wiring, and command-level validation
+- `portfolio_db/portfolio_service.py` - reporting snapshot, benchmark default, error mapping, write flows
+- `portfolio_db/reporting_service.py` - as-of valuation, cash/position reporting
+- `portfolio_db/transaction_service.py` - add/edit/delete/exchange behavior
+- `portfolio_db/price_cache_service.py` - cached prices, repair flows, stale-state handling
+- `portfolio_db/database.py` - DuckDB schema and pagination queries
+- `portfolio_db/validators.py` - shared validation rules and limits
+- `portfolio_db/response.py` - JSON envelope and error shape
+- `tests/test_cli_help.py` and pytest coverage - verify the public contract
 
-## Rules
+## Safe workflow
 
-- Keep CLI output pure JSON.
-- Preserve the shared response envelope and existing machine-readable error structure.
-- Prefer DuckDB cached prices as the read-path source of truth.
-- Do not introduce silent fallback FX rates or hidden valuation approximations.
-- Keep `status`, `cash`, `summary`, `allocation`, and `performance` aligned to one reporting snapshot and one `as_of_date`.
-- When changing actions or accounting semantics, update both CLI-facing behavior and the underlying calculator/service logic.
-- When changing commands, verify the Click command name matches the documented public name.
+1. Inspect code first. If help text and code disagree, code wins.
+2. Confirm the current CLI surface:
+   - `uv run portfolio --help`
+   - `uv run portfolio COMMAND --help`
+3. Classify the command before editing:
+   - read-only: `report`, `transactions`, `status`, `allocation`, `cash`, `summary`, `performance`, `mwr`, `verify_prices`, `health`
+   - mutating or networked: `add`, `edit`, `delete`, `exchange`, `migrate`, `repair_prices`, `recalculate`, `init`
+   - file-level mutation only: `backup`
+4. Verify date behavior before changing examples:
+   - read/report commands use `YYYY-MM-DD`
+   - write/recalc paths still use legacy `DD-MM-YYYY` where implemented
+   - `migrate` ingests semicolon-separated CSV with `DD-MM-YYYY`
+5. Watch for the common traps:
+   - `add` requires `--exchange`
+   - `delete` requires `--confirm`
+   - `edit`, `repair_prices`, and `recalculate` support `--dry-run`
+   - `repair_prices` fetches price data and writes to the cache
+   - `recalculate` uses cached prices only and can be forced with `--force`
+   - `performance --benchmark` falls back to `PORTFOLIO_BENCHMARK_TICKERS`, then `SPY`
+   - `status`, `cash`, `summary`, `allocation`, `performance`, and `mwr` must stay aligned to one reporting snapshot
+6. After edits, run the narrowest useful verification:
+   - `uv run portfolio --help`
+   - `uv run portfolio COMMAND --help`
+   - `pytest -q`
+   - if price/reporting behavior changed, also smoke test `portfolio health`, `portfolio verify_prices`, and one read-only snapshot command
+7. Do not invent features, flags, or defaults. If the code does not prove it, leave it out.
 
-## Validation
+## Practical notes
 
-- Run targeted compile checks for edited Python files.
-- Run CLI smoke checks for affected commands.
-- When changing accounting, reporting, or price-repair logic, run pytest using:
-  `PYTHONPATH=/Users/oleksandrkaiukov/Code/my-portfolio /Users/oleksandrkaiukov/Code/.venv/bin/python -m pytest -q`
-  (`pythonpath = ["."]` is set in `pyproject.toml` so the local package always wins over the sibling)
-- Keep imports pinned to the local workspace package, not the sibling `/Users/oleksandrkaiukov/Code/portfolio_db`.
-  The local package carries `portfolio_db._WORKSPACE = "my-portfolio"` as a sentinel.
-  `tests/test_import_isolation.py` guards against accidental sibling import regressions.
+- `migrate` is destructive: it clears existing transactions and `daily_returns` before import.
+- Missing valuation data should surface as explicit `PRICE_DATA_ERROR`, not silent fallback.
+- `verify_prices` is diagnostic only; `repair_prices` is remediation.
+- Keep examples truthful and operator-oriented.
+- If a change touches help text, update or add tests like `tests/test_cli_help.py`.
+- If a change touches transaction or pricing logic, keep the CLI and service layers in sync and re-run pytest.
