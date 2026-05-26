@@ -1216,9 +1216,9 @@ def analyze_crypto(ticker: yf.Ticker, hist: pd.DataFrame, metrics: dict):
 
     print_risk_metrics_table(ticker.ticker, metrics)
 
-    print(f"Market Cap:         ${ticker.info.get('marketCap', 0) / 1e9:.2f}B" if ticker.info.get('marketCap') else f"Market Cap:         N/A")
-    print(f"24h Volume:          ${ticker.info.get('volume24Hr', 0) / 1e6:.2f}M" if ticker.info.get('volume24Hr') else f"24h Volume:          N/A")
-    print(f"Circulating Supply: {ticker.info.get('circulatingSupply', 0) / 1e6:.2f}M" if ticker.info.get('circulatingSupply') else f"Circulating Supply: N/A")
+    print(f"Market Cap:         ${ticker.info.get('marketCap', 0) / 1e9:.2f}B" if ticker.info.get('marketCap') else "Market Cap:         N/A")
+    print(f"24h Volume:          ${ticker.info.get('volume24Hr', 0) / 1e6:.2f}M" if ticker.info.get('volume24Hr') else "24h Volume:          N/A")
+    print(f"Circulating Supply: {ticker.info.get('circulatingSupply', 0) / 1e6:.2f}M" if ticker.info.get('circulatingSupply') else "Circulating Supply: N/A")
 
 
 def analyze_etf(ticker: yf.Ticker, hist: pd.DataFrame, info: dict, metrics: dict):
@@ -1303,7 +1303,7 @@ def analyze_asset(ticker_symbol: str, period: str = "1y"):
     info = ticker.info
 
     # Get 5y historical data for CAGR calculations
-    hist_5y = ticker.history(period="5y")
+    ticker.history(period="5y")
 
     # Historical data for risk metrics
     hist = ticker.history(period=period)

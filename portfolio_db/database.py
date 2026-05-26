@@ -157,6 +157,7 @@ class PortfolioDatabase:
                 price DOUBLE PRECISION,
                 currency VARCHAR,
                 fees DOUBLE PRECISION,
+                fee_currency VARCHAR(10),
                 exchange VARCHAR,
                 data_source VARCHAR,
                 account VARCHAR,
@@ -626,8 +627,8 @@ class PortfolioDatabase:
             self.con.execute(
                 """
                 INSERT INTO transactions
-                (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 [
                     row['date'].date(),
@@ -638,6 +639,7 @@ class PortfolioDatabase:
                     float(row['price']) if pd.notna(row.get('price')) else None,
                     row.get('currency', ''),
                     float(row['fees']) if pd.notna(row.get('fees')) else None,
+                    row.get('fee_currency', ''),
                     row.get('exchange', ''),
                     row.get('dataSource', ''),
                 ],
@@ -648,7 +650,7 @@ class PortfolioDatabase:
     def get_transactions(self):
         """Get all transactions."""
         return self.con.execute(
-            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                       account, created_at, updated_at
                FROM transactions ORDER BY date, id"""
         ).fetchall()
@@ -672,7 +674,7 @@ class PortfolioDatabase:
 
         params_page = params + [limit, offset]
         rows = self.con.execute(
-            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                        account, created_at, updated_at
                 FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT %s OFFSET %s""",
             params_page,
@@ -772,6 +774,7 @@ class PortfolioDatabase:
                 ('account', 'VARCHAR'),
                 ('created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
                 ('updated_at', 'TIMESTAMP'),
+                ('fee_currency', 'VARCHAR(10)'),
             ]:
                 if col_name not in existing:
                     try:
@@ -961,7 +964,7 @@ class PortfolioDatabase:
         ).fetchone()
         return result[0] if result and result[0] else None
 
-    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, exchange='', data_source='', account=None) -> tuple:
+    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, fee_currency='', exchange='', data_source='', account=None) -> tuple:
         """
         Add single transaction and return (transaction_id, is_old_transaction).
         is_old_transaction = True if transaction date < last existing transaction date.
@@ -979,11 +982,11 @@ class PortfolioDatabase:
         result = self.con.execute(
             """
             INSERT INTO transactions
-            (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source, account)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source, account)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account],
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source, account],
         ).fetchone()
         self.con.commit()
         trans_id = result[0] if result else None
@@ -994,7 +997,7 @@ class PortfolioDatabase:
         """Get a single transaction row by id."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
             WHERE id = %s
@@ -1017,17 +1020,18 @@ class PortfolioDatabase:
         exchange='',
         data_source='',
         account=None,
+        fee_currency='',
     ):
         """Update a transaction row and return the refreshed record."""
         self.con.execute(
             """
             UPDATE transactions
             SET date = %s, asset = %s, action = %s, quantity = %s, asset_type = %s, price = %s,
-                currency = %s, fees = %s, exchange = %s, data_source = %s, account = %s,
+                currency = %s, fees = %s, fee_currency = %s, exchange = %s, data_source = %s, account = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
             """,
-            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account, transaction_id],
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source, account, transaction_id],
         )
         self.con.commit()
         return self.get_transaction_by_id(transaction_id)
@@ -1036,7 +1040,7 @@ class PortfolioDatabase:
         """Get all transactions within an inclusive date range."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
             WHERE date >= %s AND date <= %s
