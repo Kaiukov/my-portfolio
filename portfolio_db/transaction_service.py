@@ -333,7 +333,7 @@ class TransactionService:
             'rows_affected': recalc_result.get('rows_affected', 0)
         }
 
-    def exchange_currency(self, date_obj, from_asset: str, to_asset: str, quantity: float, rate: float, recalculate_fn, mark_price_data_stale_fn) -> dict:
+    def exchange_currency(self, date_obj, from_asset: str, to_asset: str, quantity: float, rate: float, recalculate_fn, mark_price_data_stale_fn, account: str = None) -> dict:
         """
         Exchange one currency for another.
 
@@ -366,14 +366,14 @@ class TransactionService:
         from_trans_id, _ = self.db.add_transaction(
             date_obj, from_asset, 'EXCHANGE_FROM', -quantity,
             asset_type=None, price=None, currency='', fees=None,
-            exchange='', data_source=f'→ {to_asset} @ {rate}'
+            exchange='', data_source=f'→ {to_asset} @ {rate}', account=account
         )
 
         # Add EXCHANGE_TO transaction (add to target)
         to_trans_id, _ = self.db.add_transaction(
             date_obj, to_asset, 'EXCHANGE_TO', target_amount,
             asset_type=None, price=None, currency='', fees=None,
-            exchange='', data_source=f'← {from_asset} @ {rate}'
+            exchange='', data_source=f'← {from_asset} @ {rate}', account=account
         )
 
         # Determine recalculation scope
