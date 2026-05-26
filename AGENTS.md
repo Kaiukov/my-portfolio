@@ -187,11 +187,11 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 
 ## Financial correctness rules
 
-These are hard-won invariants. Violating any of them produces wrong JSON that looks correct.
+These are the invariants future changes must preserve.
 
 ### Single source of truth — domain.py
 
-All currencies, FX tickers, cash bucket defaults, cash display names, and action groupings live only in `domain.py`. Do NOT redeclare `CASH_FX_SYMBOLS`, `CASH_BUCKET_DEFAULTS`, `CASH_DISPLAY_CURRENCY`, or action sets in `portfolio_service.py` or `calculator.py`. The class-level shadows in `PortfolioService` (lines 60-71) are stale subsets — they must be removed and imports from `domain.py` used instead.
+All currencies, FX tickers, cash bucket defaults, cash display names, and action groupings live in `domain.py`. Service and calculator code may import or re-export those symbols, but they must not maintain parallel copies or drift from `domain.py`.
 
 ### Metric documentation
 
@@ -203,58 +203,43 @@ Every metric MUST document:
 
 ### Fees policy
 
-CLI accepts `--fees` on BUY/SELL but the calculator and reporting layer ignore fees for trade cash movements (`quantity * price` only, no fee subtraction). Fees are only accounted as standalone `FEE` transactions. Either:
-- Prohibit `--fees` on BUY/SELL, OR
-- Apply fees to cash balance, cost basis, realized gain, and total profit.
+BUY/SELL fees are part of the financial model and must flow consistently through cash movement, cost basis, realized gain, and total profit. Standalone `FEE` transactions remain part of reporting totals.
 
-A half-supported `--fees` on trades is misleading. Pick one.
+### Risk and benchmark math
 
-### Risk metrics: use investment_return, not portfolio_daily_return
+Risk metrics and monthly aggregation must use `investment_return`. Benchmark-relative metrics must be joined on `date`, not aligned by array position.
 
-`portfolio_daily_return` includes deposit/withdrawal impact. All risk metrics (volatility, VaR, beta, Sharpe, Sortino, Treynor, IR, capture ratios) and monthly aggregation must use `investment_return` instead. Currently `performance_service.py:146` uses `portfolio_daily_return` — this contaminates every downstream metric.
+### Monthly return naming
 
-### Benchmark alignment: join by date, never by array index
+Public performance output uses `median_monthly_return`. Do not reintroduce `avg_monthly_return` in emitted JSON.
 
-SPY and portfolio return arrays must be joined on date, not aligned via `[-n:]` array slicing. Array alignment breaks on weekends, holidays, crypto trading days, and cash-only days. Currently `performance_service.py:211-213` and `:316-319` use array-position alignment.
+### Transaction rules
 
-### `avg_monthly_return` is a median
+SELL validation is as-of-date based. `exchange_currency` validation lives in the service layer. CLI checks are only UX validation.
 
-`performance_service.py:380` returns `sorted(monthly_returns)[len(monthly_returns)//2]` — this is the median, not average. Either rename to `median_monthly_return` or compute the mean.
+### Mutation safety
 
-### SELL validation must use as-of-date
+`add`, `edit`, `exchange`, and `delete` must restore state if recalculation fails.
 
-The invariant "cannot SELL more than held on the transaction date" lives in `transaction_service.py:add_transaction` and `edit_transaction`. It uses `db.get_net_holdings_as_of(asset, date, exclude_id)` which queries only transactions at or before the given date. CLI does not duplicate this check.
+### Service layer purity
 
-### `exchange_currency` validation at service layer
+Service code must not print directly. Structured output and errors go through the logging and JSON response layers.
 
-From/to assets must be cash-like, quantity > 0, rate > 0, from != to. These checks live in `transaction_service.py:exchange_currency`. CLI only checks `from != to` as a user-facing error.
+### Price cache errors
 
-### All mutating commands must be rollback-safe
+Missing or failed price fetches and inserts must surface in verification and repair output.
 
-`add`, `edit`, `exchange`, and `delete` all capture a rollback snapshot before mutating state and restore it on recalc failure. The `delete` rollback re-inserts the deleted row via `db.re_insert_transaction_row(trans)` before restoring daily returns.
-
-### CLI validation is NOT the source of truth
-
-Every financial invariant that must hold for correctness (SELL-as-of-date, exchange validation, cash-like asset rules, quantity/price constraints) must live in the service layer. CLI validation is a UX convenience, not a safety net.
-
-### No `print()` from service layer
-
-Service layer must not call `print()`. All warnings and structured output must go through `logger.py`. The adapter layer (CLI) routes all output through `response.py` (JSON envelope only).
-
-### Price cache must surface errors
-
-Failed price fetches/inserts must appear in structured status (repair log, verify_prices output). Silent swallowing produces wrong valuations.
-
-### Bug fix template: three tests
+### Test template
 
 Every calculation bug fix needs:
-1. Hand-calculated fixture test (independent verification)
-2. Regression test (specific scenario that was broken)
-3. CLI JSON snapshot test (end-to-end contract)
+1. A hand-calculated fixture test
+2. A regression test for the broken scenario
+3. A CLI JSON snapshot test
 
-### Calculator action constants
+### Open issue #22 items
 
-`calculator.py:18-22` redeclares action groupings (`EXTERNAL_INFLOW_ACTIONS`, etc.) that duplicate `PortfolioService` and `domain.py`. These must come from a single source.
+- Time-based stale-price max-age is still not enforced.
+- Read/report and write/recalc date formats are still split (`YYYY-MM-DD` vs `DD-MM-YYYY`).
 
 ## Style
 
