@@ -3,7 +3,11 @@
 import json
 import subprocess
 import os
+from pathlib import Path
+
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -128,36 +132,48 @@ def test_cli_health_smoke():
         assert "data" in data
 
 
-def test_cli_db_error_when_no_url():
-    """Verify database error responses follow proper JSON envelope.
+def test_cli_loads_dotenv_from_cwd(tmp_path):
+    """Verify the CLI picks up PORTFOLIO_DB_URL from a local `.env` file."""
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(f"PORTFOLIO_DB_URL={os.environ['PORTFOLIO_DB_URL']}\n", encoding="utf-8")
 
-    This test requires PORTFOLIO_DB_URL to be unset to trigger a DB error.
-    """
-    # Save current env
-    original_url = os.environ.get("PORTFOLIO_DB_URL")
-    try:
-        # Unset PORTFOLIO_DB_URL to trigger error
-        if "PORTFOLIO_DB_URL" in os.environ:
-            del os.environ["PORTFOLIO_DB_URL"]
+    env = os.environ.copy()
+    env.pop("PORTFOLIO_DB_URL", None)
 
-        # Run a command that needs the database
-        result = subprocess.run(
-            ["uv", "run", "portfolio", "status"],
-            capture_output=True,
-            text=True,
-        )
+    result = subprocess.run(
+        ["uv", "run", "--project", str(REPO_ROOT), "portfolio", "status"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
 
-        # Should get JSON error response
-        if result.stdout.strip():
-            data = json.loads(result.stdout)
-            assert isinstance(data, dict), "Error response must be JSON"
-            assert "ok" in data, "Error response must have 'ok' field"
-            assert data["ok"] is False, "DB error should set ok=False"
-            assert "error" in data, "Error response must have 'error' field"
-    finally:
-        # Restore env
-        if original_url:
-            os.environ["PORTFOLIO_DB_URL"] = original_url
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["ok"] is True
+    assert data["command"] == "status"
+
+
+def test_cli_db_error_when_no_url(tmp_path):
+    """Verify database error responses stay machine-readable when no `.env` is present."""
+    env = os.environ.copy()
+    env.pop("PORTFOLIO_DB_URL", None)
+
+    result = subprocess.run(
+        ["uv", "run", "--project", str(REPO_ROOT), "portfolio", "status"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    if result.stdout.strip():
+        data = json.loads(result.stdout)
+        assert isinstance(data, dict), "Error response must be JSON"
+        assert "ok" in data, "Error response must have 'ok' field"
+        assert data["ok"] is False, "DB error should set ok=False"
+        assert "error" in data, "Error response must have 'error' field"
 
 
 def test_cli_meta_fields():

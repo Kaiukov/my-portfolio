@@ -23,6 +23,7 @@ This project runs on PostgreSQL only at runtime.
 - Set `PORTFOLIO_DB_URL` to a Supabase PostgreSQL DSN for hosted development.
 - Keep `sslmode=require` on the Supabase URL.
 - DuckDB is not supported as a runtime database; it remains only as a migration and verification fixture.
+- The CLI auto-loads a `.env` file from the current directory or any parent directory before reading `PORTFOLIO_DB_URL`.
 
 Example local DSN:
 

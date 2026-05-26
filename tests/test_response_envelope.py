@@ -34,11 +34,6 @@ def runner():
     return CliRunner()
 
 
-@pytest.fixture
-def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "portfolio.db"
-
-
 @pytest.fixture(autouse=True)
 def stub_price_fetch(monkeypatch):
     monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fake_price_fetch))
@@ -67,7 +62,7 @@ def _assert_envelope(body: dict, command: str, ok: bool = True):
 
 # ─── migrate ──────────────────────────────────────────────────────────────────
 
-def test_migrate_envelope(runner, db_path, tmp_path):
+def test_migrate_envelope(runner, tmp_path):
     csv = tmp_path / "t.csv"
     csv.write_text(
         "date;asset;action;quantity;asset_type;price;currency;fees;exchange;dataSource\n"
@@ -81,10 +76,10 @@ def test_migrate_envelope(runner, db_path, tmp_path):
 
 # ─── status ───────────────────────────────────────────────────────────────────
 
-def _seeded_db(db_path):
-    """Create a minimal seeded portfolio DB and return the path string."""
+def _seeded_db():
+    """Create a minimal seeded portfolio DB."""
     from portfolio_db.portfolio_service import PortfolioService
-    svc = PortfolioService(str(db_path))
+    svc = PortfolioService()
     svc.db.add_transaction(
         pd.Timestamp("2024-01-02").date(), "AAPL", "BUY", 10,
         asset_type="stock", price=150.0, currency="USD",
@@ -98,11 +93,10 @@ def _seeded_db(db_path):
     svc.repair_prices()
     svc.recalculate(force=True)
     svc.close()
-    return str(db_path)
 
 
-def test_status_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_status_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["status"])
     body = _parse(result)
     _assert_envelope(body, "status")
@@ -115,8 +109,8 @@ def test_status_envelope(runner, db_path):
 
 # ─── transactions ─────────────────────────────────────────────────────────────
 
-def test_transactions_envelope_and_pagination(runner, db_path):
-    _seeded_db(db_path)
+def test_transactions_envelope_and_pagination(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["transactions", "--limit", "1", "--offset", "0"])
     body = _parse(result)
     _assert_envelope(body, "transactions")
@@ -130,8 +124,8 @@ def test_transactions_envelope_and_pagination(runner, db_path):
     assert "next_offset" in pag
 
 
-def test_transactions_date_filter(runner, db_path):
-    _seeded_db(db_path)
+def test_transactions_date_filter(runner):
+    _seeded_db()
     result = runner.invoke(cli, [
         "transactions",
         "--start-date", "2025-01-01", "--end-date", "2025-12-31",
@@ -144,8 +138,8 @@ def test_transactions_date_filter(runner, db_path):
 
 # ─── report ───────────────────────────────────────────────────────────────────
 
-def test_report_envelope_and_pagination(runner, db_path):
-    _seeded_db(db_path)
+def test_report_envelope_and_pagination(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["report", "--limit", "10"])
     body = _parse(result)
     _assert_envelope(body, "report")
@@ -159,8 +153,8 @@ def test_report_envelope_and_pagination(runner, db_path):
 
 # ─── allocation ───────────────────────────────────────────────────────────────
 
-def test_allocation_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_allocation_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["allocation"])
     body = _parse(result)
     _assert_envelope(body, "allocation")
@@ -174,8 +168,8 @@ def test_allocation_envelope(runner, db_path):
 
 # ─── cash ─────────────────────────────────────────────────────────────────────
 
-def test_cash_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_cash_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["cash"])
     body = _parse(result)
     _assert_envelope(body, "cash")
@@ -186,8 +180,8 @@ def test_cash_envelope(runner, db_path):
 
 # ─── summary ──────────────────────────────────────────────────────────────────
 
-def test_summary_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_summary_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["summary"])
     body = _parse(result)
     _assert_envelope(body, "summary")
@@ -198,8 +192,8 @@ def test_summary_envelope(runner, db_path):
 
 # ─── performance ──────────────────────────────────────────────────────────────
 
-def test_performance_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_performance_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["performance"])
     body = _parse(result)
     _assert_envelope(body, "performance")
@@ -217,8 +211,8 @@ def test_performance_envelope(runner, db_path):
 
 # ─── recalculate ──────────────────────────────────────────────────────────────
 
-def test_recalculate_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_recalculate_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["recalculate", "--force"])
     body = _parse(result)
     _assert_envelope(body, "recalculate")
@@ -229,8 +223,8 @@ def test_recalculate_envelope(runner, db_path):
 
 # ─── verify_prices ────────────────────────────────────────────────────────────
 
-def test_verify_prices_envelope(runner, db_path):
-    _seeded_db(db_path)
+def test_verify_prices_envelope(runner):
+    _seeded_db()
     result = runner.invoke(cli, ["verify_prices"])
     body = _parse(result)
     _assert_envelope(body, "verify_prices")
@@ -243,7 +237,7 @@ def test_verify_prices_envelope(runner, db_path):
 
 # ─── error envelope ───────────────────────────────────────────────────────────
 
-def test_error_envelope_on_invalid_date(runner, db_path):
+def test_error_envelope_on_invalid_date(runner):
     result = runner.invoke(cli, ["transactions", "--start-date", "not-a-date"])
     assert result.exit_code == 1
     body = json.loads(result.output)
@@ -254,7 +248,7 @@ def test_error_envelope_on_invalid_date(runner, db_path):
     assert "generated_at" in body["meta"]
 
 
-def test_error_envelope_has_generated_at(runner, db_path):
+def test_error_envelope_has_generated_at(runner):
     result = runner.invoke(cli, ["transactions", "--start-date", "bad"])
     body = json.loads(result.output)
     assert body["meta"]["generated_at"].endswith("Z")

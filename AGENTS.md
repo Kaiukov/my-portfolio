@@ -24,20 +24,33 @@ cmux tree                      # show all workspaces/panes
 
 ## Command Code (`cmd`) in split view
 
+**IMPORTANT**: Never use `-p "..."` via cmux — long prompts sent as a single string get stuck in the shell buffer and never execute. Always open cmd interactively first, then send the prompt as a separate step.
+
 ```bash
-# Open a new split, then run cmd with DeepSeek for fast/cheap tasks
+# Step 1: open a new split and start cmd interactively
 cmux new-split right
-cmux send --surface surface:N "cmd --model deepseek-v4-pro --yolo 'your task'"
+cmux send --surface surface:N "cmd --model deepseek/deepseek-v4-pro --yolo"
 cmux send-key --surface surface:N "Enter"
+
+# Step 2: wait for cmd REPL to be ready (look for "Ask your question..." prompt)
+until cmux read-screen --surface surface:N --lines 3 | grep -q "Ask your question"; do sleep 2; done
+
+# Step 3: send the prompt text, then Enter
+cmux send --surface surface:N "your task description here"
+cmux send-key --surface surface:N "Enter"
+
+# Step 4: wait for response (look for "❯" prompt returning)
+until cmux read-screen --surface surface:N --lines 3 | grep -q "^❯"; do sleep 3; done
+cmux read-screen --surface surface:N --lines 40
 ```
 
 Key flags:
 - `--yolo` — bypass all permission prompts (alias for `--dangerously-skip-permissions`)
 - `--auto-accept` — auto-accept tool calls (softer than `--yolo`)
-- `--model deepseek-v4-pro` — intelligent tasks: architecture, bug fixes, reasoning
-- `--model deepseek-v4-flash` — dirty tasks: lint, imports, ruff fixes, mechanical edits
-- `-p "query"` — non-interactive single-shot mode
+- `--model deepseek/deepseek-v4-pro` — intelligent tasks: architecture, bug fixes, reasoning
+- `--model deepseek/deepseek-v4-flash` — dirty tasks: lint, imports, ruff fixes, mechanical edits
 - `--list-models` — show available models
+- `-p "query"` — non-interactive single-shot mode (**do NOT use via cmux**, only from the main terminal directly)
 
 ## Overview
 
