@@ -77,3 +77,5 @@ $DB
 *.local-backup-*
 .artifacts/
 .tmp/
+.env.backup.*
+*.backup-*.sql
