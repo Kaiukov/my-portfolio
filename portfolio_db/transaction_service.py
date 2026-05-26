@@ -285,7 +285,7 @@ class TransactionService:
         ).fetchone()[0]
         is_full_recalc = remaining == 0 or (
             last_date_before is not None and trans_date <= self.db.con.execute(
-                "SELECT MIN(date) FROM transactions WHERE id != ?", [transaction_id]
+                "SELECT MIN(date) FROM transactions WHERE id != %s", [transaction_id]
             ).fetchone()[0]
         )
         rollback_snapshot = self._capture_rollback_snapshot(
@@ -308,7 +308,7 @@ class TransactionService:
                 INSERT INTO transactions
                 (id, date, asset, action, quantity, asset_type, price, currency,
                  fees, exchange, data_source, account, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 [trans[0], trans[1], trans[2], trans[3], trans[4],
                  trans[5], trans[6], trans[7], trans[8], trans[9],

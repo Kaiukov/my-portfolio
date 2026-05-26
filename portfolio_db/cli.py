@@ -717,7 +717,7 @@ def delete(trans_id, confirm, dry_run, backup):
     try:
         service = PortfolioService()
         trans = service.db.con.execute(
-            "SELECT id, date, asset, action, quantity, price FROM transactions WHERE id = ?",
+            "SELECT id, date, asset, action, quantity, price FROM transactions WHERE id = %s",
             [trans_id],
         ).fetchone()
 

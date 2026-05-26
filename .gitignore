@@ -76,3 +76,4 @@ mcp-searxng/.venv/
 $DB
 *.local-backup-*
 .artifacts/
+.tmp/

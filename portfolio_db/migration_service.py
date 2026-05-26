@@ -82,49 +82,44 @@ def migrate_duckdb_to_postgres(
     rows_migrated = {}
     errors = []
 
+    # Pre-fetch DuckDB table list once
+    duck_tables = duck_con.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+    ).fetchall()
+    duck_table_names = {t[0] for t in duck_tables}
+
     try:
-        if not dry_run:
-            # Start transaction
-            pg_con._conn.execute("BEGIN")
-
         for table_name, columns in tables:
+            if table_name not in duck_table_names:
+                rows_migrated[table_name] = {"status": "skipped", "reason": "table not found in DuckDB"}
+                continue
+
+            query = f"SELECT {', '.join(columns)} FROM {table_name}"
+            rows = duck_con.execute(query).fetchall()
+            row_count = len(rows)
+
+            if dry_run:
+                rows_migrated[table_name] = {"status": "dry_run", "rows": row_count}
+                continue
+
             try:
-                # Check if table exists in DuckDB
-                duck_tables = duck_con.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
-                duck_table_names = [t[0] for t in duck_tables]
+                # TRUNCATE in its own commit to avoid long-running open tx
+                pg_con._conn.execute(f"TRUNCATE TABLE {table_name} CASCADE")
+                pg_con._conn.commit()
 
-                if table_name not in duck_table_names:
-                    rows_migrated[table_name] = {"status": "skipped", "reason": "table not found in DuckDB"}
-                    continue
+                if rows:
+                    col_names = ", ".join(columns)
+                    with pg_con._conn.cursor() as cur:
+                        with cur.copy(f"COPY {table_name} ({col_names}) FROM STDIN") as copy:
+                            for row in rows:
+                                copy.write_row(row)
+                    pg_con._conn.commit()
 
-                # Get all rows from DuckDB
-                query = f"SELECT {', '.join(columns)} FROM {table_name}"
-                rows = duck_con.execute(query).fetchall()
-                row_count = len(rows)
-
-                if not dry_run:
-                    # Clear target table
-                    pg_con.execute(f"DELETE FROM {table_name}")
-
-                    # Insert rows into PostgreSQL
-                    if rows:
-                        placeholders = ", ".join(["%s"] * len(columns))
-                        col_list = ", ".join(columns)
-                        insert_sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
-
-                        for row in rows:
-                            pg_con.execute(insert_sql, row)
-
-                rows_migrated[table_name] = {
-                    "status": "migrated",
-                    "rows": row_count,
-                }
+                rows_migrated[table_name] = {"status": "migrated", "rows": row_count}
             except Exception as e:
+                pg_con._conn.rollback()
                 errors.append(f"{table_name}: {str(e)}")
-                rows_migrated[table_name] = {
-                    "status": "error",
-                    "error": str(e),
-                }
+                rows_migrated[table_name] = {"status": "error", "error": str(e)}
 
         if not dry_run:
             # Reset sequences for identity columns
@@ -133,22 +128,14 @@ def migrate_duckdb_to_postgres(
                 ("refresh_log", "refresh_id"),
                 ("repair_log", "repair_id"),
             ]
-
             for table_name, col_name in sequence_resets:
                 try:
-                    # Get max ID from table
                     result = pg_con.execute(f"SELECT MAX({col_name}) FROM {table_name}").fetchone()
                     max_id = result[0] if result and result[0] else 0
-                    # Reset sequence to next ID
-                    pg_con.execute(
-                        f"SELECT setval('{table_name}_{col_name}_seq', {max_id + 1}, false)"
-                    )
+                    pg_con.execute(f"SELECT setval('{table_name}_{col_name}_seq', {max_id + 1}, false)")
+                    pg_con._conn.commit()
                 except Exception:
-                    # Some tables might not have sequences, skip silently
-                    pass
-
-            # Commit transaction
-            pg_con._conn.execute("COMMIT")
+                    pg_con._conn.rollback()
 
         duck_con.close()
         pg_con.close()
@@ -162,8 +149,7 @@ def migrate_duckdb_to_postgres(
         }
 
     except Exception as e:
-        if not dry_run:
-            pg_con._conn.execute("ROLLBACK")
+        pg_con._conn.rollback()
         duck_con.close()
         pg_con.close()
         return {

@@ -30,6 +30,7 @@ pythonpath = ["."]
 
 [dependency-groups]
 dev = [
+    "duckdb>=1.5.3",
     "pytest>=8.0",
     "ruff>=0.15.14",
 ]

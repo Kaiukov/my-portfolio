@@ -1732,7 +1732,7 @@ class PortfolioDatabase:
                 'total_value': 0.0,
             }
 
-        values_sql = ", ".join(["(?, ?, ?, ?, ?)"] * len(source_rows))
+        values_sql = ", ".join(["(%s, %s, %s, %s, %s)"] * len(source_rows))
         params = []
         for row in source_rows:
             params.extend([
@@ -1856,7 +1856,7 @@ class PortfolioDatabase:
         if not position_source:
             return []
 
-        position_values_sql = ", ".join(["(?, ?, ?, ?, ?)"] * len(position_source))
+        position_values_sql = ", ".join(["(%s, %s, %s, %s, %s)"] * len(position_source))
         position_params = []
         for row in position_source:
             position_params.extend([
@@ -1867,7 +1867,7 @@ class PortfolioDatabase:
                 row['realized_gain'],
             ])
 
-        cash_values_sql = ", ".join(["(?, ?)"] * len(cash_source)) if cash_source else None
+        cash_values_sql = ", ".join(["(%s, %s)"] * len(cash_source)) if cash_source else None
         cash_params = []
         for row in cash_source:
             cash_params.extend([
@@ -1982,7 +1982,7 @@ class PortfolioDatabase:
             for row in cash_rows
         ]
 
-        position_values_sql = ", ".join(["(?, ?, ?)"] * len(position_source))
+        position_values_sql = ", ".join(["(%s, %s, %s)"] * len(position_source))
         position_params = []
         for row in position_source:
             position_params.extend([
@@ -1991,7 +1991,7 @@ class PortfolioDatabase:
                 row['unrealized_gain'],
             ])
 
-        cash_values_sql = ", ".join(["(?, ?, ?, ?, ?, ?, ?)"] * len(cash_source))
+        cash_values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s, %s)"] * len(cash_source))
         cash_params = []
         for row in cash_source:
             cash_params.extend([

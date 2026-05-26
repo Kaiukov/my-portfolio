@@ -8,7 +8,8 @@ SELECT
     asset,
     SUM(CASE
         WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
-        WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX', 'EXCHANGE_FROM') THEN -quantity
+        WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -quantity
+        WHEN action = 'EXCHANGE_FROM' THEN quantity
         ELSE 0
     END) AS net_quantity
 FROM transactions
@@ -33,7 +34,8 @@ WITH cash_txns AS (
         END AS display_bucket,
         CASE
             WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
-            WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX', 'EXCHANGE_FROM') THEN -quantity
+            WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -quantity
+            WHEN action = 'EXCHANGE_FROM' THEN quantity
             ELSE 0
         END AS cash_delta
     FROM transactions
@@ -101,3 +103,4 @@ SELECT
     (SELECT MAX(date) FROM transactions) AS last_transaction_date,
     (SELECT COUNT(*) FROM transactions) AS transaction_count,
     CURRENT_TIMESTAMP AS generated_at;
+TIMESTAMP AS generated_at;
