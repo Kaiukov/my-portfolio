@@ -336,7 +336,7 @@ class PortfolioService:
         """Convert a DB transaction tuple into the standard response shape."""
         col_names = [
             'id', 'date', 'asset', 'action', 'quantity',
-            'asset_type', 'price', 'currency', 'fees', 'exchange', 'data_source',
+            'asset_type', 'price', 'currency', 'fees', 'fee_currency', 'exchange', 'data_source',
             'account', 'created_at', 'updated_at',
         ]
         return {

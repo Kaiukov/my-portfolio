@@ -648,7 +648,7 @@ class PortfolioDatabase:
     def get_transactions(self):
         """Get all transactions."""
         return self.con.execute(
-            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                       account, created_at, updated_at
                FROM transactions ORDER BY date, id"""
         ).fetchall()
@@ -672,7 +672,7 @@ class PortfolioDatabase:
 
         params_page = params + [limit, offset]
         rows = self.con.execute(
-            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                        account, created_at, updated_at
                 FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT %s OFFSET %s""",
             params_page,
@@ -994,7 +994,7 @@ class PortfolioDatabase:
         """Get a single transaction row by id."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
             WHERE id = %s
@@ -1036,7 +1036,7 @@ class PortfolioDatabase:
         """Get all transactions within an inclusive date range."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
             WHERE date >= %s AND date <= %s
