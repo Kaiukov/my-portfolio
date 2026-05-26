@@ -472,7 +472,6 @@ class PortfolioService:
         """Get portfolio performance statistics with separated return metrics."""
         return self._performance.get_performance_stats(
             as_of_date=as_of_date,
-            get_daily_returns_fn=self.get_daily_returns,
             build_snapshot_fn=self.build_reporting_snapshot,
             risk_free_rate_annual=self.RISK_FREE_RATE_ANNUAL,
             benchmark_ticker=benchmark_ticker or self.BENCHMARK_TICKERS[0],

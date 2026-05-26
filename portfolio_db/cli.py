@@ -4,10 +4,6 @@ import click
 import subprocess
 from datetime import datetime, date
 from pathlib import Path
-import json
-import sys
-import importlib.metadata
-import requests
 
 from portfolio_db.database import resolve_db_target
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
@@ -75,54 +71,6 @@ Write / maintenance commands:
   init            Initialize the PostgreSQL schema (idempotent).
 
 Use `portfolio COMMAND --help` for command-specific details."""
-
-
-def _check_yfinance_version_background():
-    """Fetch latest yfinance version from PyPI and warn if outdated."""
-    try:
-        cache_dir = Path.home() / ".cache" / "portfolio"
-        cache_file = cache_dir / "yfinance_version_check"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
-        current_time = datetime.now().timestamp()
-        cache_data = {}
-
-        if cache_file.exists():
-            try:
-                cache_data = json.loads(cache_file.read_text())
-                cached_time = cache_data.get("timestamp", 0)
-                if current_time - cached_time < 86400:
-                    latest_version = cache_data.get("latest_version")
-                    if latest_version:
-                        _warn_if_outdated(latest_version)
-                    return
-            except Exception:
-                pass
-
-        response = requests.get("https://pypi.org/pypi/yfinance/json", timeout=2)
-        response.raise_for_status()
-        latest_version = response.json()["info"]["version"]
-
-        cache_data = {"timestamp": current_time, "latest_version": latest_version}
-        cache_file.write_text(json.dumps(cache_data))
-
-        _warn_if_outdated(latest_version)
-    except Exception:
-        pass
-
-
-def _warn_if_outdated(latest_version: str):
-    """Warn if current yfinance version is outdated."""
-    try:
-        current_version = importlib.metadata.version("yfinance")
-        if current_version != latest_version:
-            from packaging import version as pkg_version
-            if pkg_version.parse(current_version) < pkg_version.parse(latest_version):
-                msg = f"Note: yfinance {current_version} is out of date (latest: {latest_version}). Run: uv add yfinance>={latest_version}\n"
-                sys.stderr.write(msg)
-                sys.stderr.flush()
-    except Exception:
-        pass
 
 
 def _parse_date(value: str, flag: str) -> date:
@@ -863,16 +811,56 @@ Examples:
   portfolio performance --as-of-date 2026-01-01
 
   portfolio performance --benchmark QQQ
+
+  portfolio performance --from-date 2025-01-01
+
+  portfolio performance --period 1y
+
+  portfolio performance --period ytd
 """)
 @click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 @click.option("--benchmark", default=None, help=BENCHMARK_HELP)
-def performance(as_of_date, benchmark):
+@click.option("--from-date", default=None, help="Filter returns from this date (YYYY-MM-DD)")
+@click.option("--period", default=None, type=click.Choice(["1y", "6m", "3m", "ytd"]), help="Filter to a period: 1y, 6m, 3m, ytd")
+def performance(as_of_date, benchmark, from_date, period):
     """Show performance, risk, and benchmark metrics."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    today = date.today()
+
+    if period:
+        if period == "ytd":
+            resolved_from = date(today.year, 1, 1)
+        elif period == "1y":
+            resolved_from = date(today.year - 1, today.month, today.day)
+        elif period == "6m":
+            m = today.month - 6
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+        elif period == "3m":
+            m = today.month - 3
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+    elif from_date:
+        resolved_from = _parse_date(from_date, "--from-date")
+    else:
+        resolved_from = None
+
     service = None
     try:
         service = PortfolioService(read_only=True)
-        stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark)
+        stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark, from_date=resolved_from)
         concentration = service.get_concentration_metrics(as_of_date=as_of)
 
         def m(name, value):
