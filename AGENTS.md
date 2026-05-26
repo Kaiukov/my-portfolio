@@ -1,5 +1,10 @@
 # Project specific instructions
 
+## CMUX enviroment 
+- Use cmux cli command if you are in cmux enviroment
+- cmux -v to check version
+- cmux --help to see all commands
+
 ## Overview
 
 Python CLI (`portfolio`) for portfolio tracking with DuckDB. Source lives in `portfolio_db/`, not `src/`.

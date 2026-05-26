@@ -1,0 +1,162 @@
+-- Portfolio database helper functions
+-- These mirror Python domain helpers as SQL functions for database-side calculations
+
+-- Asset type detection based on ticker symbol
+CREATE OR REPLACE FUNCTION get_asset_type_sql(ticker TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN ticker = 'USD' THEN 'cash_base'
+        WHEN RIGHT(ticker, 5) = 'USD=X' THEN 'cash_fx'
+        WHEN RIGHT(ticker, 4) = '-USD' THEN 'crypto'
+        WHEN RIGHT(ticker, 2) = '.L' THEN 'stock_gbp'
+        WHEN RIGHT(ticker, 3) = '.DE' THEN 'stock_eur'
+        WHEN RIGHT(ticker, 2) = '.T' THEN 'stock_jpy'
+        WHEN RIGHT(ticker, 3) = '.SW' THEN 'stock_chf'
+        WHEN RIGHT(ticker, 3) = '.TO' THEN 'stock_cad'
+        WHEN RIGHT(ticker, 3) = '.AX' THEN 'stock_aud'
+        WHEN RIGHT(ticker, 3) = '.HK' THEN 'stock_hkd'
+        WHEN RIGHT(ticker, 3) = '.SG' THEN 'stock_sgd'
+        ELSE 'stock_usd'
+    END
+$$;
+
+-- Check if asset is cash-like (USD, FX symbols, or CASH buckets)
+CREATE OR REPLACE FUNCTION is_cash_like_sql(asset TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT get_asset_type_sql(asset) IN ('cash_base', 'cash_fx')
+        OR asset LIKE 'CASH %'
+$$;
+
+-- Normalize cash asset to standard representation
+CREATE OR REPLACE FUNCTION normalize_cash_asset_sql(asset TEXT, asset_type TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
+        WHEN asset_type = 'cash_fx' THEN asset
+        WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
+        WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
+        WHEN asset = 'CASH UAH' THEN 'UAHUSD=X'
+        ELSE asset
+    END
+$$;
+
+-- Get the cash FX key for an asset (used to track cash positions)
+CREATE OR REPLACE FUNCTION get_cash_key_for_asset_sql(asset TEXT, asset_type TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN asset_type = 'cash_fx' THEN asset
+        WHEN asset_type = 'stock_eur' THEN 'EURUSD=X'
+        WHEN asset_type = 'stock_gbp' THEN 'GBPUSD=X'
+        WHEN asset_type = 'stock_jpy' THEN 'JPYUSD=X'
+        WHEN asset_type = 'stock_chf' THEN 'CHFUSD=X'
+        WHEN asset_type = 'stock_cad' THEN 'CADUSD=X'
+        WHEN asset_type = 'stock_aud' THEN 'AUDUSD=X'
+        WHEN asset_type = 'stock_hkd' THEN 'HKDUSD=X'
+        WHEN asset_type = 'stock_sgd' THEN 'SGDUSD=X'
+        WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
+        WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
+        WHEN asset = 'CASH UAH' THEN 'UAHUSD=X'
+        ELSE 'USD'
+    END
+$$;
+
+-- Get display currency for cash symbol
+CREATE OR REPLACE FUNCTION cash_display_currency_sql(symbol TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN symbol = 'USD' THEN 'USD'
+        WHEN symbol = 'EURUSD=X' THEN 'EUR'
+        WHEN symbol = 'GBPUSD=X' THEN 'GBP'
+        WHEN symbol = 'UAHUSD=X' THEN 'UAH'
+        WHEN symbol = 'JPYUSD=X' THEN 'JPY'
+        WHEN symbol = 'CHFUSD=X' THEN 'CHF'
+        WHEN symbol = 'CADUSD=X' THEN 'CAD'
+        WHEN symbol = 'AUDUSD=X' THEN 'AUD'
+        WHEN symbol = 'HKDUSD=X' THEN 'HKD'
+        WHEN symbol = 'SGDUSD=X' THEN 'SGD'
+        ELSE symbol
+    END
+$$;
+
+-- Get cash currency for asset type
+CREATE OR REPLACE FUNCTION cash_currency_for_asset_type_sql(asset_type TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN asset_type = 'stock_eur' THEN 'EURUSD=X'
+        WHEN asset_type = 'stock_gbp' THEN 'GBPUSD=X'
+        WHEN asset_type = 'stock_jpy' THEN 'JPYUSD=X'
+        WHEN asset_type = 'stock_chf' THEN 'CHFUSD=X'
+        WHEN asset_type = 'stock_cad' THEN 'CADUSD=X'
+        WHEN asset_type = 'stock_aud' THEN 'AUDUSD=X'
+        WHEN asset_type = 'stock_hkd' THEN 'HKDUSD=X'
+        WHEN asset_type = 'stock_sgd' THEN 'SGDUSD=X'
+        ELSE 'USD'
+    END
+$$;
+
+-- Get price as of a given date (lookup most recent price on or before date)
+CREATE OR REPLACE FUNCTION price_asof_sql(p_ticker TEXT, p_as_of_date DATE)
+RETURNS DOUBLE PRECISION
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT p.price
+    FROM prices p
+    WHERE p.ticker = p_ticker
+      AND p.date <= p_as_of_date
+    ORDER BY p.date DESC
+    LIMIT 1
+$$;
+
+-- Convert cash amount to USD using FX rates
+CREATE OR REPLACE FUNCTION cash_amount_to_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
+RETURNS DOUBLE PRECISION
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT CASE
+        WHEN normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset)) = 'USD' THEN p_quantity
+        ELSE p_quantity * price_asof_sql(
+            normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset)),
+            p_as_of_date
+        )
+    END
+$$;
+
+-- Get market value in USD for an asset quantity
+CREATE OR REPLACE FUNCTION asset_market_value_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
+RETURNS DOUBLE PRECISION
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT CASE
+        WHEN get_asset_type_sql(p_asset) = 'cash_base' THEN p_quantity
+        WHEN get_asset_type_sql(p_asset) = 'cash_fx' THEN p_quantity * price_asof_sql(p_asset, p_as_of_date)
+        WHEN get_asset_type_sql(p_asset) IN (
+            'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+            'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+        ) THEN p_quantity * price_asof_sql(p_asset, p_as_of_date) * price_asof_sql(
+            cash_currency_for_asset_type_sql(get_asset_type_sql(p_asset)),
+            p_as_of_date
+        )
+        ELSE p_quantity * price_asof_sql(p_asset, p_as_of_date)
+    END
+$$;

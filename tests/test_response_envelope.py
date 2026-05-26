@@ -73,7 +73,7 @@ def test_migrate_envelope(runner, db_path, tmp_path):
         "date;asset;action;quantity;asset_type;price;currency;fees;exchange;dataSource\n"
         "01-07-2024;AAPL;BUY;10;stock;150.0;USD;0;;YAHOO\n"
     )
-    result = runner.invoke(cli, ["migrate", "--csv", str(csv), "--db", str(db_path)])
+    result = runner.invoke(cli, ["migrate", "--csv", str(csv)])
     body = _parse(result)
     _assert_envelope(body, "migrate")
     assert body["data"]["rows_imported"] == 1
@@ -103,7 +103,7 @@ def _seeded_db(db_path):
 
 def test_status_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["status", "--db", str(db_path)])
+    result = runner.invoke(cli, ["status"])
     body = _parse(result)
     _assert_envelope(body, "status")
     data = body["data"]
@@ -117,7 +117,7 @@ def test_status_envelope(runner, db_path):
 
 def test_transactions_envelope_and_pagination(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--limit", "1", "--offset", "0"])
+    result = runner.invoke(cli, ["transactions", "--limit", "1", "--offset", "0"])
     body = _parse(result)
     _assert_envelope(body, "transactions")
     assert isinstance(body["data"], list)
@@ -133,7 +133,7 @@ def test_transactions_envelope_and_pagination(runner, db_path):
 def test_transactions_date_filter(runner, db_path):
     _seeded_db(db_path)
     result = runner.invoke(cli, [
-        "transactions", "--db", str(db_path),
+        "transactions",
         "--start-date", "2025-01-01", "--end-date", "2025-12-31",
     ])
     body = _parse(result)
@@ -146,7 +146,7 @@ def test_transactions_date_filter(runner, db_path):
 
 def test_report_envelope_and_pagination(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["report", "--db", str(db_path), "--limit", "10"])
+    result = runner.invoke(cli, ["report", "--limit", "10"])
     body = _parse(result)
     _assert_envelope(body, "report")
     assert isinstance(body["data"], list)
@@ -161,7 +161,7 @@ def test_report_envelope_and_pagination(runner, db_path):
 
 def test_allocation_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["allocation", "--db", str(db_path)])
+    result = runner.invoke(cli, ["allocation"])
     body = _parse(result)
     _assert_envelope(body, "allocation")
     data = body["data"]
@@ -176,7 +176,7 @@ def test_allocation_envelope(runner, db_path):
 
 def test_cash_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["cash", "--db", str(db_path)])
+    result = runner.invoke(cli, ["cash"])
     body = _parse(result)
     _assert_envelope(body, "cash")
     assert isinstance(body["data"], list)
@@ -188,7 +188,7 @@ def test_cash_envelope(runner, db_path):
 
 def test_summary_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["summary", "--db", str(db_path)])
+    result = runner.invoke(cli, ["summary"])
     body = _parse(result)
     _assert_envelope(body, "summary")
     assert isinstance(body["data"], list)
@@ -200,7 +200,7 @@ def test_summary_envelope(runner, db_path):
 
 def test_performance_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["performance", "--db", str(db_path)])
+    result = runner.invoke(cli, ["performance"])
     body = _parse(result)
     _assert_envelope(body, "performance")
     data = body["data"]
@@ -219,7 +219,7 @@ def test_performance_envelope(runner, db_path):
 
 def test_recalculate_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["recalculate", "--db", str(db_path), "--force"])
+    result = runner.invoke(cli, ["recalculate", "--force"])
     body = _parse(result)
     _assert_envelope(body, "recalculate")
     assert "rows_affected" in body["data"]
@@ -231,7 +231,7 @@ def test_recalculate_envelope(runner, db_path):
 
 def test_verify_prices_envelope(runner, db_path):
     _seeded_db(db_path)
-    result = runner.invoke(cli, ["verify_prices", "--db", str(db_path)])
+    result = runner.invoke(cli, ["verify_prices"])
     body = _parse(result)
     _assert_envelope(body, "verify_prices")
     data = body["data"]
@@ -244,7 +244,7 @@ def test_verify_prices_envelope(runner, db_path):
 # ─── error envelope ───────────────────────────────────────────────────────────
 
 def test_error_envelope_on_invalid_date(runner, db_path):
-    result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--start-date", "not-a-date"])
+    result = runner.invoke(cli, ["transactions", "--start-date", "not-a-date"])
     assert result.exit_code == 1
     body = json.loads(result.output)
     assert body["ok"] is False
@@ -255,7 +255,7 @@ def test_error_envelope_on_invalid_date(runner, db_path):
 
 
 def test_error_envelope_has_generated_at(runner, db_path):
-    result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--start-date", "bad"])
+    result = runner.invoke(cli, ["transactions", "--start-date", "bad"])
     body = json.loads(result.output)
     assert body["meta"]["generated_at"].endswith("Z")
     assert body["meta"]["count"] is None

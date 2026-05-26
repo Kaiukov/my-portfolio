@@ -77,7 +77,7 @@ def test_edit_transaction_updates_row_and_recalculates(db_path: Path, runner: Cl
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     service.close()
 
-    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "1300", "--db", str(db_path)])
+    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "1300"])
     assert result.exit_code == 0, result.output
 
     service = PortfolioService(str(db_path), read_only=True)
@@ -424,7 +424,7 @@ def test_transfer_edit_dry_run_cannot_clear_account(runner, db_path: Path):
     trans_id = result["transaction_id"]
     service.close()
 
-    result = runner.invoke(cli, ["edit", "--id", str(trans_id), "--account", "", "--dry-run", "--db", str(db_path)])
+    result = runner.invoke(cli, ["edit", "--id", str(trans_id), "--account", "", "--dry-run"])
 
     assert result.exit_code == 1, result.output
     body = json.loads(result.output)

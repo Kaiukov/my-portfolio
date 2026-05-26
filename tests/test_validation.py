@@ -97,7 +97,7 @@ def _parse_error(result) -> dict:
 
 class TestMigrate:
     def test_missing_csv_file(self, runner, db_path):
-        result = runner.invoke(cli, ["migrate", "--csv", "/nonexistent/file.csv", "--db", str(db_path)])
+        result = runner.invoke(cli, ["migrate", "--csv", "/nonexistent/file.csv"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "not found" in body["error"]["message"].lower() or "file" in body["error"]["message"].lower()
@@ -108,7 +108,7 @@ class TestMigrate:
             "date;asset;action;quantity;asset_type;price;currency;fees;exchange;dataSource\n"
             "01-07-2024;AAPL;BUY;10;stock;150.0;USD;0;;YAHOO\n"
         )
-        result = runner.invoke(cli, ["migrate", "--csv", str(csv), "--db", str(db_path)])
+        result = runner.invoke(cli, ["migrate", "--csv", str(csv)])
         assert result.exit_code == 0
 
 
@@ -120,35 +120,35 @@ class TestMigrate:
 class TestPagination:
     @pytest.mark.parametrize("command", ["report", "transactions"])
     def test_limit_zero_rejected(self, runner, db_path, command):
-        result = runner.invoke(cli, [command, "--db", str(db_path), "--limit", "0"])
+        result = runner.invoke(cli, [command, "--limit", "0"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "limit" in body["error"]["message"].lower()
 
     @pytest.mark.parametrize("command", ["report", "transactions"])
     def test_limit_negative_rejected(self, runner, db_path, command):
-        result = runner.invoke(cli, [command, "--db", str(db_path), "--limit", "-1"])
+        result = runner.invoke(cli, [command, "--limit", "-1"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "limit" in body["error"]["message"].lower()
 
     @pytest.mark.parametrize("command", ["report", "transactions"])
     def test_offset_negative_rejected(self, runner, db_path, command):
-        result = runner.invoke(cli, [command, "--db", str(db_path), "--offset", "-5"])
+        result = runner.invoke(cli, [command, "--offset", "-5"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "offset" in body["error"]["message"].lower()
 
     @pytest.mark.parametrize("command", ["report", "transactions"])
     def test_limit_too_large_rejected(self, runner, db_path, command):
-        result = runner.invoke(cli, [command, "--db", str(db_path), "--limit", "99999"])
+        result = runner.invoke(cli, [command, "--limit", "99999"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     @pytest.mark.parametrize("command", ["report", "transactions"])
     def test_valid_pagination_works(self, runner, db_path, command):
         _seeded_db(db_path)
-        result = runner.invoke(cli, [command, "--db", str(db_path), "--limit", "10", "--offset", "0"])
+        result = runner.invoke(cli, [command, "--limit", "10", "--offset", "0"])
         assert result.exit_code == 0
 
 
@@ -159,19 +159,19 @@ class TestPagination:
 
 class TestDateParsing:
     def test_invalid_start_date_format(self, runner, db_path):
-        result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--start-date", "not-a-date"])
+        result = runner.invoke(cli, ["transactions", "--start-date", "not-a-date"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "YYYY-MM-DD" in body["error"]["message"]
 
     def test_wrong_date_format_yyyymmdd_without_dashes(self, runner, db_path):
-        result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--start-date", "20260101"])
+        result = runner.invoke(cli, ["transactions", "--start-date", "20260101"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     def test_start_after_end_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "transactions", "--db", str(db_path),
+            "transactions",
             "--start-date", "2026-12-31", "--end-date", "2026-01-01",
         ])
         body = _parse_error(result)
@@ -181,7 +181,7 @@ class TestDateParsing:
     def test_date_range_same_day_allowed(self, runner, db_path):
         _seeded_db(db_path)
         result = runner.invoke(cli, [
-            "transactions", "--db", str(db_path),
+            "transactions",
             "--start-date", "2024-01-01", "--end-date", "2024-01-01",
         ])
         assert result.exit_code == 0
@@ -189,7 +189,7 @@ class TestDateParsing:
     def test_invalid_add_date_format(self, runner, db_path):
         """--date for add uses DD-MM-YYYY, not YYYY-MM-DD."""
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "2026-01-01",  # wrong format
             "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150",
@@ -201,7 +201,7 @@ class TestDateParsing:
 
     def test_repair_prices_date_range_consistency(self, runner, db_path):
         result = runner.invoke(cli, [
-            "repair_prices", "--db", str(db_path),
+            "repair_prices",
             "--start-date", "2026-06-01", "--end-date", "2026-01-01",
         ])
         body = _parse_error(result)
@@ -216,7 +216,7 @@ class TestDateParsing:
 class TestAdd:
     def test_missing_exchange(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150",
             # --exchange omitted
@@ -227,7 +227,7 @@ class TestAdd:
 
     def test_empty_exchange_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150", "--exchange", "   ",
         ])
@@ -236,7 +236,7 @@ class TestAdd:
 
     def test_zero_quantity_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "0", "--price", "150", "--exchange", "Interactive",
         ])
@@ -246,7 +246,7 @@ class TestAdd:
 
     def test_negative_quantity_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "-5", "--price", "150", "--exchange", "Interactive",
         ])
@@ -256,7 +256,7 @@ class TestAdd:
 
     def test_zero_price_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "0", "--exchange", "Interactive",
         ])
@@ -266,7 +266,7 @@ class TestAdd:
 
     def test_negative_price_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "-10", "--exchange", "Interactive",
         ])
@@ -275,7 +275,7 @@ class TestAdd:
 
     def test_negative_fees_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150", "--fees", "-1",
             "--exchange", "Interactive",
@@ -288,7 +288,7 @@ class TestAdd:
         """Fees of 0 is valid."""
         _seeded_db(db_path)
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "USD", "--action", "DEPOSIT",
             "--quantity", "500", "--fees", "0",
             "--exchange", "Interactive",
@@ -297,7 +297,7 @@ class TestAdd:
 
     def test_invalid_action(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "HODL",
             "--quantity", "10", "--price", "150", "--exchange", "Interactive",
         ])
@@ -307,7 +307,7 @@ class TestAdd:
     def test_transfer_requires_account(self, runner, db_path):
         _seeded_db(db_path)
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "USD", "--action", "TRANSFER",
             "--quantity", "500", "--exchange", "Interactive",
             # --account omitted
@@ -319,7 +319,7 @@ class TestAdd:
     def test_transfer_with_account_succeeds(self, runner, db_path):
         _seeded_db(db_path)
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "USD", "--action", "TRANSFER",
             "--quantity", "500", "--exchange", "Interactive", "--account", "broker_b",
         ])
@@ -327,7 +327,7 @@ class TestAdd:
 
     def test_missing_required_date(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150", "--exchange", "Interactive",
         ])
@@ -336,7 +336,7 @@ class TestAdd:
 
     def test_missing_required_asset(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--action", "BUY",
             "--quantity", "10", "--price", "150", "--exchange", "Interactive",
         ])
@@ -344,7 +344,7 @@ class TestAdd:
 
     def test_missing_required_action(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL",
             "--quantity", "10", "--price", "150", "--exchange", "Interactive",
         ])
@@ -352,7 +352,7 @@ class TestAdd:
 
     def test_missing_required_quantity(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--price", "150", "--exchange", "Interactive",
         ])
@@ -366,54 +366,54 @@ class TestAdd:
 
 class TestEdit:
     def test_no_fields_to_update(self, runner, db_path):
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "1"])
+        result = runner.invoke(cli, ["edit", "--id", "1"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "field" in body["error"]["message"].lower() or "update" in body["error"]["message"].lower()
 
     def test_id_zero_rejected(self, runner, db_path):
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "0", "--price", "10"])
+        result = runner.invoke(cli, ["edit", "--id", "0", "--price", "10"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "--id" in body["error"]["message"]
 
     def test_id_negative_rejected(self, runner, db_path):
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "-5", "--price", "10"])
+        result = runner.invoke(cli, ["edit", "--id", "-5", "--price", "10"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     def test_nonexistent_id_returns_not_found(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "9999", "--price", "200"])
+        result = runner.invoke(cli, ["edit", "--id", "9999", "--price", "200"])
         body = _parse_error(result)
         assert body["error"]["code"] == "NOT_FOUND"
 
     def test_nonexistent_id_dry_run_returns_not_found(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "9999", "--price", "200", "--dry-run"])
+        result = runner.invoke(cli, ["edit", "--id", "9999", "--price", "200", "--dry-run"])
         body = _parse_error(result)
         assert body["error"]["code"] == "NOT_FOUND"
 
     def test_zero_quantity_in_edit_rejected(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "1", "--quantity", "0"])
+        result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "0"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     def test_negative_price_in_edit_rejected(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "1", "--price", "-1"])
+        result = runner.invoke(cli, ["edit", "--id", "1", "--price", "-1"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     def test_negative_fees_in_edit_rejected(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--id", "1", "--fees", "-0.5"])
+        result = runner.invoke(cli, ["edit", "--id", "1", "--fees", "-0.5"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     def test_missing_id_flag(self, runner, db_path):
-        result = runner.invoke(cli, ["edit", "--db", str(db_path), "--price", "200"])
+        result = runner.invoke(cli, ["edit", "--price", "200"])
         assert result.exit_code != 0
 
 
@@ -425,41 +425,41 @@ class TestEdit:
 class TestDelete:
     def test_missing_confirm_rejected(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "1"])
+        result = runner.invoke(cli, ["delete", "--id", "1"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "confirm" in body["error"]["message"].lower()
 
     def test_id_zero_rejected(self, runner, db_path):
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "0", "--confirm"])
+        result = runner.invoke(cli, ["delete", "--id", "0", "--confirm"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
         assert "--id" in body["error"]["message"]
 
     def test_id_negative_rejected(self, runner, db_path):
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "-3", "--confirm"])
+        result = runner.invoke(cli, ["delete", "--id", "-3", "--confirm"])
         body = _parse_error(result)
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
     def test_nonexistent_id_not_found(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "9999", "--confirm"])
+        result = runner.invoke(cli, ["delete", "--id", "9999", "--confirm"])
         body = _parse_error(result)
         assert body["error"]["code"] == "NOT_FOUND"
 
     def test_dry_run_nonexistent_id(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "9999", "--dry-run"])
+        result = runner.invoke(cli, ["delete", "--id", "9999", "--dry-run"])
         body = _parse_error(result)
         assert body["error"]["code"] == "NOT_FOUND"
 
     def test_dry_run_does_not_require_confirm(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "1", "--dry-run"])
+        result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run"])
         assert result.exit_code == 0
 
     def test_missing_id_flag(self, runner, db_path):
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--confirm"])
+        result = runner.invoke(cli, ["delete", "--confirm"])
         assert result.exit_code != 0
 
 
@@ -471,7 +471,7 @@ class TestDelete:
 class TestExchange:
     def test_same_from_and_to_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "USD",
             "--quantity", "1000", "--rate", "1.0",
         ])
@@ -481,7 +481,7 @@ class TestExchange:
 
     def test_same_from_and_to_case_insensitive(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "usd", "--to", "USD",
             "--quantity", "1000", "--rate", "1.0",
         ])
@@ -490,7 +490,7 @@ class TestExchange:
 
     def test_zero_quantity_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "0", "--rate", "0.92",
         ])
@@ -500,7 +500,7 @@ class TestExchange:
 
     def test_negative_quantity_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "-100", "--rate", "0.92",
         ])
@@ -509,7 +509,7 @@ class TestExchange:
 
     def test_zero_rate_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "1000", "--rate", "0",
         ])
@@ -519,7 +519,7 @@ class TestExchange:
 
     def test_negative_rate_rejected(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "1000", "--rate", "-0.5",
         ])
@@ -528,7 +528,7 @@ class TestExchange:
 
     def test_missing_date(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "1000", "--rate", "0.92",
         ])
@@ -536,7 +536,7 @@ class TestExchange:
 
     def test_missing_rate(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "1000",
         ])
@@ -544,7 +544,7 @@ class TestExchange:
 
     def test_invalid_date_format(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "2026-01-01",  # wrong format: should be DD-MM-YYYY
             "--from", "USD", "--to", "EURUSD=X",
             "--quantity", "1000", "--rate", "0.92",
@@ -561,7 +561,7 @@ class TestExchange:
 
 class TestBackup:
     def test_legacy_db_path_is_ignored_for_postgres_backup(self, runner, tmp_path):
-        result = runner.invoke(cli, ["backup", "--db", str(tmp_path / "nonexistent.db")])
+        result = runner.invoke(cli, ["backup", str(tmp_path / "nonexistent.db")])
         assert result.exit_code == 0
         body = json.loads(result.output)
         assert body["ok"] is True
@@ -570,7 +570,7 @@ class TestBackup:
 
     def test_valid_backup_works(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["backup", "--db", str(db_path)])
+        result = runner.invoke(cli, ["backup"])
         assert result.exit_code == 0
 
 
@@ -592,16 +592,16 @@ class TestErrorEnvelopeShape:
         return body
 
     def test_invalid_date_envelope(self, runner, db_path):
-        result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--start-date", "bad"])
+        result = runner.invoke(cli, ["transactions", "--start-date", "bad"])
         self._assert_envelope_shape(result)
 
     def test_limit_zero_envelope(self, runner, db_path):
-        result = runner.invoke(cli, ["report", "--db", str(db_path), "--limit", "0"])
+        result = runner.invoke(cli, ["report", "--limit", "0"])
         self._assert_envelope_shape(result)
 
     def test_missing_exchange_envelope(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150",
         ])
@@ -609,7 +609,7 @@ class TestErrorEnvelopeShape:
 
     def test_delete_missing_confirm_envelope(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "1"])
+        result = runner.invoke(cli, ["delete", "--id", "1"])
         self._assert_envelope_shape(result)
 
 
@@ -620,16 +620,16 @@ class TestErrorEnvelopeShape:
 
 class TestExitCodes:
     def test_invalid_date_exits_1(self, runner, db_path):
-        result = runner.invoke(cli, ["transactions", "--db", str(db_path), "--start-date", "bad"])
+        result = runner.invoke(cli, ["transactions", "--start-date", "bad"])
         assert result.exit_code == 1
 
     def test_limit_zero_exits_1(self, runner, db_path):
-        result = runner.invoke(cli, ["report", "--db", str(db_path), "--limit", "0"])
+        result = runner.invoke(cli, ["report", "--limit", "0"])
         assert result.exit_code == 1
 
     def test_missing_exchange_exits_1(self, runner, db_path):
         result = runner.invoke(cli, [
-            "add", "--db", str(db_path),
+            "add",
             "--date", "01-01-2026", "--asset", "AAPL", "--action", "BUY",
             "--quantity", "10", "--price", "150",
         ])
@@ -637,7 +637,7 @@ class TestExitCodes:
 
     def test_same_exchange_assets_exits_1(self, runner, db_path):
         result = runner.invoke(cli, [
-            "exchange", "--db", str(db_path),
+            "exchange",
             "--date", "01-01-2026", "--from", "USD", "--to", "USD",
             "--quantity", "1000", "--rate", "1.0",
         ])
@@ -645,10 +645,10 @@ class TestExitCodes:
 
     def test_delete_without_confirm_exits_1(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["delete", "--db", str(db_path), "--id", "1"])
+        result = runner.invoke(cli, ["delete", "--id", "1"])
         assert result.exit_code == 1
 
     def test_valid_command_exits_0(self, runner, db_path):
         _seeded_db(db_path)
-        result = runner.invoke(cli, ["transactions", "--db", str(db_path)])
+        result = runner.invoke(cli, ["transactions"])
         assert result.exit_code == 0

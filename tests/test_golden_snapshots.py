@@ -87,11 +87,11 @@ def test_snapshot_portfolio_value(golden_db):
 
 
 def test_reporting_commands_share_consistent_snapshot(golden_db, runner):
-    summary_result = runner.invoke(cli, ["summary", "--db", golden_db])
-    performance_result = runner.invoke(cli, ["performance", "--db", golden_db])
-    report_result = runner.invoke(cli, ["report", "--db", golden_db, "--limit", "1"])
-    cash_result = runner.invoke(cli, ["cash", "--db", golden_db])
-    allocation_result = runner.invoke(cli, ["allocation", "--type", "all", "--db", golden_db])
+    summary_result = runner.invoke(cli, ["summary", golden_db])
+    performance_result = runner.invoke(cli, ["performance", golden_db])
+    report_result = runner.invoke(cli, ["report", golden_db, "--limit", "1"])
+    cash_result = runner.invoke(cli, ["cash", golden_db])
+    allocation_result = runner.invoke(cli, ["allocation", "--type", "all", golden_db])
 
     assert summary_result.exit_code == 0, summary_result.output
     assert performance_result.exit_code == 0, performance_result.output
@@ -154,7 +154,7 @@ def test_reporting_commands_share_consistent_snapshot(golden_db, runner):
 
 
 def test_health_command_ok(golden_db, runner):
-    result = runner.invoke(cli, ["health", "--db", golden_db])
+    result = runner.invoke(cli, ["health", golden_db])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -169,7 +169,7 @@ def test_health_command_ok(golden_db, runner):
 # ── Dry-run assertions ────────────────────────────────────────────────────────
 
 def test_repair_prices_dry_run(golden_db, runner):
-    result = runner.invoke(cli, ["repair_prices", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["repair_prices", "--dry-run", golden_db])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -179,7 +179,7 @@ def test_repair_prices_dry_run(golden_db, runner):
 
 
 def test_recalculate_dry_run(golden_db, runner):
-    result = runner.invoke(cli, ["recalculate", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["recalculate", "--dry-run", golden_db])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -190,7 +190,7 @@ def test_recalculate_dry_run(golden_db, runner):
 
 
 def test_edit_dry_run(golden_db, runner):
-    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "9999", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "9999", "--dry-run", golden_db])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -263,7 +263,7 @@ def test_missing_fx_coverage_health_shows_degraded(tmp_path, runner):
                            asset_type="cash_fx", currency="EUR")
     svc.close()
 
-    result = runner.invoke(cli, ["health", "--db", db_path])
+    result = runner.invoke(cli, ["health", db_path])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["ok"] is True
@@ -297,7 +297,7 @@ def test_stale_data_cleared_after_repair_and_recalc(tmp_path):
 def test_backup_command(golden_db, runner, tmp_path):
     """backup command creates a copy and returns correct envelope."""
     out = str(tmp_path / "backup.db")
-    result = runner.invoke(cli, ["backup", "--db", golden_db, "--out", out])
+    result = runner.invoke(cli, ["backup", golden_db, "--out", out])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -321,7 +321,7 @@ def test_stale_prices_health_shows_degraded(tmp_path, runner):
     svc.db.insert_price("AAPL", date(2026, 1, 4), 150.0)
     svc.close()  # must close before CLI opens the same DB
 
-    result = runner.invoke(cli, ["health", "--db", db_path])
+    result = runner.invoke(cli, ["health", db_path])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["ok"] is True
@@ -337,7 +337,7 @@ def test_stale_prices_verify_detects_gap(tmp_path, runner):
     # No repair_prices → AAPL has zero cached prices
     svc.close()
 
-    result = runner.invoke(cli, ["verify_prices", "--db", db_path])
+    result = runner.invoke(cli, ["verify_prices", db_path])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["ok"] is True
@@ -392,7 +392,7 @@ def test_repair_prices_caches_spy(tmp_path):
 
 def test_delete_dry_run(golden_db, runner):
     """delete --dry-run shows would_delete without removing the transaction."""
-    result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run", golden_db])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 

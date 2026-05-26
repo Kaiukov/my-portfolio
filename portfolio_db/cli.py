@@ -68,8 +68,9 @@ def _sql_literal(value) -> str:
 
 def _dump_postgres_backup(target: str, dst: Path):
     """Write a restoreable SQL backup when pg_dump is unavailable."""
-    service = PortfolioService(target, read_only=True)
+    service = None
     try:
+        service = PortfolioService(target, read_only=True)
         table_columns = [
             ("transactions", ["id", "date", "asset", "action", "quantity", "asset_type", "price", "currency", "fees", "exchange", "data_source", "account", "created_at", "updated_at"]),
             ("prices", ["date", "ticker", "price"]),
@@ -94,7 +95,8 @@ def _dump_postgres_backup(target: str, dst: Path):
                     fp.write(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({values});\n")
             fp.write("COMMIT;\n")
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 @click.group()
@@ -107,19 +109,20 @@ def cli():
 
 @cli.command()
 @click.option("--csv", default="yfiance-transactions/transactions.csv", help="Path to CSV file")
-@click.option("--db", default="portfolio.db", help="Path to database file")
-def migrate(csv, db):
+def migrate(csv):
     """Migrate transactions from CSV to the configured database."""
     validate_file_exists(csv, "--csv", "migrate")
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         service.setup_from_csv(csv)
         count = service.db.get_transaction_count()
-        success("migrate", {"rows_imported": count, "source": csv, "db": db})
+        success("migrate", {"rows_imported": count, "source": csv})
     except Exception as e:
         error("migrate", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── report ───────────────────────────────────────────────────────────────────
@@ -129,22 +132,23 @@ def migrate(csv, db):
 @click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
 @click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
 @click.option("--end-date", default=None, help="Filter to date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db", help="Path to database file")
-def report(limit, offset, start_date, end_date, db):
+def report(limit, offset, start_date, end_date):
     """Show daily returns report."""
     validate_pagination(limit, offset, "report")
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
     validate_date_range(sd, ed, "report")
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         data, total = service.get_daily_returns_paginated(limit, offset, sd, ed)
         pagination = build_pagination(limit, offset, total)
         success("report", data, count=len(data), pagination=pagination)
     except Exception as e:
         error("report", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── transactions ─────────────────────────────────────────────────────────────
@@ -162,22 +166,23 @@ Examples:
 @click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
 @click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
 @click.option("--end-date", default=None, help="Filter to date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db", help="Path to database file")
-def transactions(limit, offset, start_date, end_date, db):
+def transactions(limit, offset, start_date, end_date):
     """List transactions."""
     validate_pagination(limit, offset, "transactions")
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
     validate_date_range(sd, ed, "transactions")
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         data, total = service.get_transactions_paginated(limit, offset, sd, ed)
         pagination = build_pagination(limit, offset, total)
         success("transactions", data, count=len(data), pagination=pagination)
     except Exception as e:
         error("transactions", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── status ───────────────────────────────────────────────────────────────────
@@ -190,12 +195,12 @@ Examples:
   portfolio status --as-of-date 2026-01-01
 """)
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db", help="Path to database file")
-def status(as_of_date, db):
+def status(as_of_date):
     """Show portfolio status."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         trans_count = service.db.get_transaction_count()
         stats = service.get_performance_stats(as_of_date=as_of)
         data = {
@@ -219,7 +224,8 @@ def status(as_of_date, db):
     except Exception as e:
         error("status", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── add ──────────────────────────────────────────────────────────────────────
@@ -243,8 +249,7 @@ Examples:
 @click.option("--fees", type=float, default=None)
 @click.option("--exchange", default="")
 @click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
-@click.option("--db", default="portfolio.db")
-def add(date_str, asset, action, quantity, price, currency, fees, exchange, account, db):
+def add(date_str, asset, action, quantity, price, currency, fees, exchange, account):
     """Add a transaction and auto-recalculate returns."""
     date_obj = _parse_legacy_date(date_str, "--date")
 
@@ -283,8 +288,9 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
             "--quantity 500 --exchange MyBroker --account broker_b",
         )
 
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         result = service.add_transaction(
             date_obj=date_obj,
             asset=asset,
@@ -305,7 +311,8 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
     except Exception as e:
         error("add", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── edit ─────────────────────────────────────────────────────────────────────
@@ -331,8 +338,7 @@ Examples:
 @click.option("--data-source", default=None)
 @click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
 @click.option("--dry-run", is_flag=True, help="Show what would change without applying")
-@click.option("--db", default="portfolio.db")
-def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run, db):
+def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run):
     """Edit an existing transaction and recalculate returns."""
     validate_positive_int(trans_id, "--id", "edit")
 
@@ -367,8 +373,9 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
         )
 
     if dry_run:
-        service = PortfolioService(db, read_only=True)
+        service = None
         try:
+            service = PortfolioService(read_only=True)
             if not service.db.get_transaction_by_id(trans_id):
                 error("edit", "NOT_FOUND", f"Transaction ID {trans_id} not found")
             preview = service.preview_edit_transaction(trans_id, **changes)
@@ -384,8 +391,9 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
             service.close()
         return
 
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         if not service.db.get_transaction_by_id(trans_id):
             error(
                 "edit",
@@ -408,7 +416,8 @@ def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exc
     except Exception as e:
         error("edit", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── verify_prices ────────────────────────────────────────────────────────────
@@ -420,11 +429,11 @@ Examples:
 
   portfolio verify_prices --db custom.db
 """)
-@click.option("--db", default="portfolio.db")
-def verify_prices(db):
+def verify_prices():
     """Verify prices table structure and storage."""
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         info = service.verify_prices_storage()
         stats = info.get("statistics", {})
         tickers = info.get("ticker_breakdown", [])
@@ -446,7 +455,8 @@ def verify_prices(db):
     except Exception as e:
         error("verify_prices", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── repair_prices ────────────────────────────────────────────────────────────
@@ -464,15 +474,15 @@ Examples:
 @click.option("--start-date", default=None, help="Refresh from date (YYYY-MM-DD)")
 @click.option("--end-date", default=None, help="Refresh to date (YYYY-MM-DD)")
 @click.option("--dry-run", is_flag=True, help="Show what would be repaired without fetching")
-@click.option("--db", default="portfolio.db")
-def repair_prices(tickers, start_date, end_date, dry_run, db):
+def repair_prices(tickers, start_date, end_date, dry_run):
     """Fetch and cache missing/incomplete price series."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
     validate_date_range(sd, ed, "repair_prices")
     if dry_run:
-        service = PortfolioService(db, read_only=True)
+        service = None
         try:
+            service = PortfolioService(read_only=True)
             coverage = service.analyze_price_coverage(start_date=sd, end_date=ed)
             issues = coverage.get("issues", [])
             target = [i["ticker"] for i in issues] if not tickers else list(tickers)
@@ -487,8 +497,9 @@ def repair_prices(tickers, start_date, end_date, dry_run, db):
         finally:
             service.close()
         return
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         result = service.repair_prices(tickers=list(tickers) or None, start_date=sd, end_date=ed)
         success("repair_prices", result)
     except PriceDataUnavailableError as e:
@@ -496,7 +507,8 @@ def repair_prices(tickers, start_date, end_date, dry_run, db):
     except Exception as e:
         error("repair_prices", "PRICE_FETCH_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── recalculate ──────────────────────────────────────────────────────────────
@@ -513,13 +525,13 @@ Examples:
 @click.option("--force", is_flag=True)
 @click.option("--from-date", default=None, help="Recalculate from date (DD-MM-YYYY)")
 @click.option("--dry-run", is_flag=True, help="Show what would be recalculated without executing")
-@click.option("--db", default="portfolio.db")
-def recalculate(force, from_date, dry_run, db):
+def recalculate(force, from_date, dry_run):
     """Recalculate portfolio returns."""
     from_date_obj = _parse_legacy_date(from_date, "--from-date") if from_date else None
     if dry_run:
-        service = PortfolioService(db, read_only=True)
+        service = None
         try:
+            service = PortfolioService(read_only=True)
             state = service.get_refresh_state()
             coverage = service.analyze_price_coverage()
             success("recalculate", {
@@ -535,8 +547,9 @@ def recalculate(force, from_date, dry_run, db):
         finally:
             service.close()
         return
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         result = service.recalculate(from_date=from_date_obj, force=force)
         if result.get("status") == "success":
             data = {
@@ -553,7 +566,8 @@ def recalculate(force, from_date, dry_run, db):
     except Exception as e:
         error("recalculate", "INTERNAL_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── allocation ───────────────────────────────────────────────────────────────
@@ -570,12 +584,12 @@ Examples:
 @click.option("--type", "allocation_type",
               type=click.Choice(["assets", "cash", "all"]), default="all")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db")
-def allocation(allocation_type, as_of_date, db):
+def allocation(allocation_type, as_of_date):
     """Show portfolio allocation breakdown."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         data = service.get_allocation(allocation_type=allocation_type, as_of_date=as_of)
         success("allocation", data)
     except PriceDataUnavailableError as e:
@@ -583,7 +597,8 @@ def allocation(allocation_type, as_of_date, db):
     except Exception as e:
         error("allocation", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── cash ─────────────────────────────────────────────────────────────────────
@@ -596,12 +611,12 @@ Examples:
   portfolio cash --as-of-date 2026-01-01
 """)
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db")
-def cash(as_of_date, db):
+def cash(as_of_date):
     """Show actual cash balances (converted to USD)."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=True)
         cash_balances = snapshot["cash_balances"]
         result = []
@@ -641,7 +656,8 @@ def cash(as_of_date, db):
     except Exception as e:
         error("cash", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── delete ───────────────────────────────────────────────────────────────────
@@ -659,13 +675,13 @@ Examples:
 @click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted without executing")
 @click.option("--backup", is_flag=True, help="Create a DB backup before deleting")
-@click.option("--db", default="portfolio.db")
-def delete(trans_id, confirm, dry_run, backup, db):
+def delete(trans_id, confirm, dry_run, backup):
     """Delete a transaction by ID and auto-recalculate returns."""
     validate_positive_int(trans_id, "--id", "delete")
     if dry_run:
-        service = PortfolioService(db, read_only=True)
+        service = None
         try:
+            service = PortfolioService(read_only=True)
             trans = service.db.get_transaction_by_id(trans_id)
             if not trans:
                 error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
@@ -696,8 +712,9 @@ def delete(trans_id, confirm, dry_run, backup, db):
             shutil.copy2(src, dst)
             log.backup_created(str(src), str(dst), dst.stat().st_size)
 
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         trans = service.db.con.execute(
             "SELECT id, date, asset, action, quantity, price FROM transactions WHERE id = ?",
             [trans_id],
@@ -725,7 +742,8 @@ def delete(trans_id, confirm, dry_run, backup, db):
     except Exception as e:
         error("delete", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── performance ──────────────────────────────────────────────────────────────
@@ -741,12 +759,12 @@ Examples:
 """)
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
 @click.option("--benchmark", default=None, help="Benchmark ticker (default: SPY)")
-@click.option("--db", default="portfolio.db")
-def performance(as_of_date, benchmark, db):
+def performance(as_of_date, benchmark):
     """Show performance metrics."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark)
         concentration = service.get_concentration_metrics(as_of_date=as_of)
 
@@ -835,7 +853,8 @@ def performance(as_of_date, benchmark, db):
     except Exception as e:
         error("performance", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── mwr ──────────────────────────────────────────────────────────────────────
@@ -850,12 +869,12 @@ Examples:
   portfolio mwr --db /data/portfolio.db --as-of-date 2025-12-31
 """)
 @click.option("--as-of-date", default=None, help="Calculate MWR as of date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db")
-def mwr(as_of_date, db):
+def mwr(as_of_date):
     """Show Money-Weighted Return (XIRR / IRR)."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         mwr_val = service.get_mwr_irr(as_of_date=as_of)
         snap = service.build_reporting_snapshot(as_of_date=as_of)
         success("mwr", {
@@ -868,7 +887,8 @@ def mwr(as_of_date, db):
     except Exception as e:
         error("mwr", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── summary ──────────────────────────────────────────────────────────────────
@@ -885,12 +905,12 @@ Examples:
 @click.option("--filter", "position_filter",
               type=click.Choice(["open", "all"]), default="all")
 @click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
-@click.option("--db", default="portfolio.db")
-def summary(position_filter, as_of_date, db):
+def summary(position_filter, as_of_date):
     """Show portfolio position summary with gains/losses."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
-    service = PortfolioService(db, read_only=True)
+    service = None
     try:
+        service = PortfolioService(read_only=True)
         include_closed = position_filter == "all"
         snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=include_closed)
         positions = snapshot["positions"]
@@ -900,7 +920,8 @@ def summary(position_filter, as_of_date, db):
     except Exception as e:
         error("summary", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── exchange ─────────────────────────────────────────────────────────────────
@@ -917,8 +938,7 @@ Examples:
 @click.option("--to", "to_asset", required=True)
 @click.option("--quantity", required=True, type=float)
 @click.option("--rate", required=True, type=float)
-@click.option("--db", default="portfolio.db")
-def exchange(date_str, from_asset, to_asset, quantity, rate, db):
+def exchange(date_str, from_asset, to_asset, quantity, rate):
     """Exchange one currency for another."""
     date_obj = _parse_legacy_date(date_str, "--date")
     validate_positive_float(quantity, "--quantity", "exchange")
@@ -934,8 +954,9 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
             "Example:  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92",
         )
 
-    service = PortfolioService(db)
+    service = None
     try:
+        service = PortfolioService()
         result = service.exchange_currency(
             date_obj=date_obj,
             from_asset=from_asset,
@@ -954,7 +975,8 @@ def exchange(date_str, from_asset, to_asset, quantity, rate, db):
     except Exception as e:
         error("exchange", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 # ─── backup ───────────────────────────────────────────────────────────────────
@@ -966,9 +988,8 @@ Examples:
 
   portfolio backup --out /backups/portfolio-2026-01-01.db
 """)
-@click.option("--db", default="portfolio.db")
 @click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
-def backup(db, out):
+def backup(out):
     """Create a timestamped copy of the portfolio database."""
     target = resolve_db_target(db)
     if is_postgres_url(target):
@@ -1010,8 +1031,7 @@ def backup(db, out):
 # ─── init ─────────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.option("--db", default="portfolio.db", help="Path to database file to initialize")
-def init(db):
+def init():
     """Initialize a new portfolio database (idempotent)."""
     try:
         target = resolve_db_target(db)
@@ -1034,11 +1054,11 @@ Examples:
 
   portfolio health --db custom.db
 """)
-@click.option("--db", default="portfolio.db")
-def health(db):
+def health():
     """Show DB and data health: recalc freshness, price coverage, stale state."""
+    service = None
     try:
-        service = PortfolioService(db, read_only=True)
+        service = PortfolioService(read_only=True)
     except Exception as e:
         error("health", "DB_ERROR", f"Cannot open database: {e}")
         return
@@ -1060,7 +1080,8 @@ def health(db):
     except Exception as e:
         error("health", "DB_ERROR", str(e))
     finally:
-        service.close()
+        if service:
+            service.close()
 
 
 if __name__ == "__main__":

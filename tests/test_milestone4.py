@@ -208,7 +208,7 @@ class TestMwrIrr:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance", simple_db])
         data = json.loads(result.output)
         assert data["ok"] is True
         assert "mwr_irr" in data["data"]
@@ -227,7 +227,7 @@ class TestBenchmark:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance", simple_db])
         data = json.loads(result.output)
         assert data["ok"] is True
         assert "benchmark" in data["data"]
@@ -243,7 +243,7 @@ class TestBenchmark:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance", simple_db])
         data = json.loads(result.output)
         bench = data["data"]["benchmark"]
         assert isinstance(bench["benchmark_twr_pct"], (int, float))
@@ -314,7 +314,7 @@ class TestContributionByPosition:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance", simple_db])
         data = json.loads(result.output)
         assert data["ok"] is True
         assert "contribution_by_position" in data["data"]

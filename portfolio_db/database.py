@@ -12,19 +12,28 @@ def is_postgres_url(target: str) -> bool:
     return target.startswith(("postgres://", "postgresql://"))
 
 
-def resolve_db_target(db_path: str = "portfolio.db") -> str:
-    """Resolve the effective DB target for CLI/service entrypoints."""
+def resolve_db_target(db_path: str = None) -> str:
+    """Resolve PostgreSQL connection URL from environment or raise error.
+
+    For tests: if db_path is a non-PostgreSQL path, creates a test schema.
+    """
     env_target = os.getenv("PORTFOLIO_DB_URL")
-    if env_target:
-        if db_path != "portfolio.db" and not is_postgres_url(db_path):
-            parsed = urlsplit(env_target)
-            query_items = parse_qsl(parsed.query, keep_blank_values=True)
-            query = {k: v for k, v in query_items if k not in {"schema", "search_path"}}
-            schema_name = f"test_{hashlib.sha1(str(db_path).encode('utf-8')).hexdigest()[:12]}"
-            query["schema"] = schema_name
-            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
-        return env_target
-    return db_path
+    if not env_target:
+        raise RuntimeError(
+            "PORTFOLIO_DB_URL environment variable is not set. "
+            "Set it to a PostgreSQL connection string (postgresql://... or postgres://...)"
+        )
+
+    # For tests: if db_path provided and is not a postgres URL, attach test schema
+    if db_path and db_path != "portfolio.db" and not is_postgres_url(db_path):
+        parsed = urlsplit(env_target)
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        query = {k: v for k, v in query_items if k not in {"schema", "search_path"}}
+        schema_name = f"test_{hashlib.sha1(str(db_path).encode('utf-8')).hexdigest()[:12]}"
+        query["schema"] = schema_name
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+
+    return env_target
 
 
 class _ConnectionAdapter:
@@ -52,15 +61,20 @@ class _ConnectionAdapter:
         self._conn = psycopg.connect(clean_target)
         self._conn.autocommit = False
         if schema_name:
-            self._conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
-            self._conn.execute(f'SET search_path TO "{schema_name}"')
+            # Use psycopg's Identifier for safe quoting
+            from psycopg import sql as psycopg_sql
+            self._conn.execute(psycopg_sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(psycopg_sql.Identifier(schema_name)))
+            self._conn.execute(psycopg_sql.SQL('SET search_path TO {}').format(psycopg_sql.Identifier(schema_name)))
+        self._read_only = read_only
 
     def execute(self, sql: str, params=None):
-        """Execute SQL using psycopg placeholder syntax."""
-        sql = sql.replace("?", "%s")
+        """Execute SQL. Supports ? placeholders (converted to %s for psycopg)."""
+        # Convert ? to %s for psycopg compatibility
+        # NOTE: This is a temporary measure. SQL should use %s placeholders directly.
+        normalized_sql = sql.replace("?", "%s")
         if params is None:
-            return self._conn.execute(sql)
-        return self._conn.execute(sql, params)
+            return self._conn.execute(normalized_sql)
+        return self._conn.execute(normalized_sql, params)
 
     def commit(self):
         self._conn.commit()
@@ -73,13 +87,23 @@ class _ConnectionAdapter:
 
 
 class PortfolioDatabase:
-    """Portfolio database backed by PostgreSQL."""
+    """Portfolio database backed by PostgreSQL only."""
 
-    def __init__(self, db_path: str = "portfolio.db", read_only: bool = False):
-        """Initialize database connection."""
-        self.db_path = db_path
+    def __init__(self, db_path: str = None, read_only: bool = False):
+        """Initialize database connection.
+
+        Args:
+            db_path: PostgreSQL URL from PORTFOLIO_DB_URL env var, or test schema path.
+            read_only: Enforce read-only mode (for verification).
+
+        Raises:
+            RuntimeError: If PORTFOLIO_DB_URL env var is not set.
+        """
+        # Resolve PostgreSQL target, will error if PORTFOLIO_DB_URL not set
+        target = resolve_db_target(db_path)
+        self.db_path = target
         self.read_only = read_only
-        self.con = _ConnectionAdapter(db_path, read_only=read_only)
+        self.con = _ConnectionAdapter(target, read_only=read_only)
         if not read_only:
             self._create_schema()
 

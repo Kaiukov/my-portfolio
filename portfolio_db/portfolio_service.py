@@ -65,8 +65,16 @@ class PortfolioService:
     RECALC_STATE_KEY = 'last_successful_recalc'
     STALE_DATA_STATE_KEY = 'stale_data'
 
-    def __init__(self, db_path: str = "portfolio.db", read_only: bool = False):
-        """Initialize service."""
+    def __init__(self, db_path: str = None, read_only: bool = False):
+        """Initialize service.
+
+        Args:
+            db_path: PostgreSQL URL from PORTFOLIO_DB_URL env var (required), or test schema.
+            read_only: Enforce read-only mode.
+
+        Raises:
+            RuntimeError: If PORTFOLIO_DB_URL env var is not set.
+        """
         self.db_target = resolve_db_target(db_path)
         self.db = PortfolioDatabase(self.db_target, read_only=read_only)
         self.price_service = PriceService()
