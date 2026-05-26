@@ -614,6 +614,38 @@ def test_exchange_to_non_cash_rejected():
     service.close()
 
 
+def test_exchange_usd_cash_usd_self_exchange_rejected():
+    """USD → CASH USD self-exchange must be rejected after alias normalization."""
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    with pytest.raises(ValueError, match=r"FROM and TO must be different.*resolve to 'USD'"):
+        service.exchange_currency("02-01-2026", "USD", "CASH USD", 100, 1.0)
+    service.close()
+
+
+def test_exchange_cash_eur_eurusd_self_exchange_rejected():
+    """CASH EUR → EURUSD=X self-exchange must be rejected after alias normalization."""
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    with pytest.raises(ValueError, match=r"FROM and TO must be different.*resolve to 'EURUSD=X'"):
+        service.exchange_currency("02-01-2026", "CASH EUR", "EURUSD=X", 100, 1.0)
+    service.close()
+
+
+def test_exchange_different_currencies_accepted(monkeypatch):
+    """USD → EURUSD=X across different currencies must succeed."""
+    from datetime import date
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    monkeypatch.setattr(service, "_require_cached_price_requirements", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service.db, "refresh_daily_returns_sql", lambda from_date=None: 1)
+    result = service.exchange_currency(date(2026, 1, 2), "USD", "EURUSD=X", 100, 1.2)
+    assert result["status"] == "success"
+    assert result["from_trans_id"] is not None
+    assert result["to_trans_id"] is not None
+    service.close()
+
+
 def test_edit_sell_asof_date_check():
     """Editing a transaction to SELL must validate as-of-date holdings."""
     from datetime import date as _date
