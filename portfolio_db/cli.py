@@ -992,7 +992,11 @@ Examples:
 @click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
 def backup(out):
     """Create a timestamped backup of the PostgreSQL database."""
-    target = resolve_db_target()
+    try:
+        target = resolve_db_target()
+    except RuntimeError as e:
+        error("backup", "CONFIG_ERROR", str(e))
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     dst = Path(out) if out else Path(f"portfolio.backup-{timestamp}.sql")
     cmd = ["pg_dump", target, "-f", str(dst)]
