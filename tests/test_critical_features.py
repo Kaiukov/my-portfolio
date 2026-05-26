@@ -614,6 +614,42 @@ def test_exchange_to_non_cash_rejected():
     service.close()
 
 
+def test_exchange_usd_cash_usd_self_exchange_rejected():
+    """USD → CASH USD self-exchange must be rejected after alias normalization."""
+    from datetime import date
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    with pytest.raises(ValueError, match=r"FROM and TO must be different.*resolve to 'USD'"):
+        service.exchange_currency(date(2026, 1, 2), "USD", "CASH USD", 100, 1.0)
+    service.close()
+
+
+def test_exchange_cash_eur_eurusd_self_exchange_rejected():
+    """CASH EUR → EURUSD=X self-exchange must be rejected after alias normalization."""
+    from datetime import date
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    with pytest.raises(ValueError, match=r"FROM and TO must be different.*resolve to 'EURUSD=X'"):
+        service.exchange_currency(date(2026, 1, 2), "CASH EUR", "EURUSD=X", 100, 1.0)
+    service.close()
+
+
+def test_exchange_different_currencies_accepted():
+    """USD → EURUSD=X must pass the self-exchange guard (different canonical assets)."""
+    from datetime import date
+    from portfolio_db.portfolio_service import PriceDataUnavailableError
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    try:
+        service.exchange_currency(date(2026, 1, 2), "USD", "EURUSD=X", 100, 1.2)
+    except PriceDataUnavailableError:
+        pass  # price data absent in test env — self-exchange guard passed
+    except ValueError as exc:
+        pytest.fail(f"exchange_currency raised unexpected ValueError: {exc}")
+    finally:
+        service.close()
+
+
 def test_edit_sell_asof_date_check():
     """Editing a transaction to SELL must validate as-of-date holdings."""
     from datetime import date as _date
