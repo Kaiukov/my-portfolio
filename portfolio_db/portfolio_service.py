@@ -73,7 +73,7 @@ class PortfolioService:
         Raises:
             RuntimeError: If PORTFOLIO_DB_URL env var is not set.
         """
-        self.db_target = resolve_db_target(db_path)
+        self.db_target = resolve_db_target()
         self.db = PortfolioDatabase(self.db_target, read_only=read_only)
         self.price_service = PriceService()
         self._price_cache = PriceCacheService(self.db, self.price_service)

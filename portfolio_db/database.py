@@ -1,6 +1,5 @@
 """Database setup and transaction management."""
 
-import hashlib
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -12,27 +11,14 @@ def is_postgres_url(target: str) -> bool:
     return target.startswith(("postgres://", "postgresql://"))
 
 
-def resolve_db_target(db_path: str = None) -> str:
-    """Resolve PostgreSQL connection URL from environment or raise error.
-
-    For tests: if db_path is a non-PostgreSQL path, creates a test schema.
-    """
+def resolve_db_target() -> str:
+    """Resolve PostgreSQL connection URL from environment or raise error."""
     env_target = os.getenv("PORTFOLIO_DB_URL")
     if not env_target:
         raise RuntimeError(
             "PORTFOLIO_DB_URL environment variable is not set. "
             "Set it to a PostgreSQL connection string (postgresql://... or postgres://...)"
         )
-
-    # For tests: if db_path provided and is not a postgres URL, attach test schema
-    if db_path and db_path != "portfolio.db" and not is_postgres_url(db_path):
-        parsed = urlsplit(env_target)
-        query_items = parse_qsl(parsed.query, keep_blank_values=True)
-        query = {k: v for k, v in query_items if k not in {"schema", "search_path"}}
-        schema_name = f"test_{hashlib.sha1(str(db_path).encode('utf-8')).hexdigest()[:12]}"
-        query["schema"] = schema_name
-        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
-
     return env_target
 
 
@@ -97,7 +83,7 @@ class PortfolioDatabase:
             RuntimeError: If PORTFOLIO_DB_URL env var is not set.
         """
         # Resolve PostgreSQL target, will error if PORTFOLIO_DB_URL not set
-        target = resolve_db_target(db_path)
+        target = resolve_db_target()
         self.db_path = target
         self.read_only = read_only
         self.con = _ConnectionAdapter(target, read_only=read_only)
