@@ -75,3 +75,4 @@ mcp-searxng/.venv/
 # Secrets and backups
 $DB
 *.local-backup-*
+.artifacts/
