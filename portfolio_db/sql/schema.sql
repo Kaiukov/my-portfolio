@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     price DOUBLE PRECISION,
     currency VARCHAR,
     fees DOUBLE PRECISION,
+    fee_currency VARCHAR,
     exchange VARCHAR,
     data_source VARCHAR,
     account VARCHAR,

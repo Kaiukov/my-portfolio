@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from portfolio_db.domain import is_cash_like
+from portfolio_db.domain import is_cash_like, normalize_cash_asset, get_asset_type
 from portfolio_db.price_cache_service import (
     PRICE_REFRESH_STATE_KEY,
     RECALC_STATE_KEY,
@@ -336,9 +336,12 @@ class TransactionService:
             raise ValueError(f"Exchange FROM asset must be cash-like, got {from_asset!r}")
         if not is_cash_like(to_asset):
             raise ValueError(f"Exchange TO asset must be cash-like, got {to_asset!r}")
-        if from_asset.upper() == to_asset.upper():
+
+        from_normalized = normalize_cash_asset(from_asset, get_asset_type(from_asset))
+        to_normalized = normalize_cash_asset(to_asset, get_asset_type(to_asset))
+        if from_normalized == to_normalized:
             raise ValueError(
-                f"FROM and TO must be different assets; both are {from_asset!r}"
+                f"FROM and TO must be different assets; both resolve to {from_normalized!r}"
             )
         if quantity <= 0:
             raise ValueError(f"Quantity must be positive, got {quantity}")

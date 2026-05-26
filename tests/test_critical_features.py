@@ -553,7 +553,7 @@ def test_portfolio_service_constants_from_domain():
 
 def test_calculator_uses_domain_action_constants():
     from portfolio_db import domain
-    from portfolio_db import calculator
+    from portfolio_db._legacy import calculator
 
     assert calculator.EXTERNAL_INFLOW_ACTIONS is domain.EXTERNAL_INFLOW_ACTIONS
     assert calculator.EXTERNAL_OUTFLOW_ACTIONS is domain.EXTERNAL_OUTFLOW_ACTIONS
@@ -612,6 +612,42 @@ def test_exchange_to_non_cash_rejected():
     with pytest.raises(ValueError, match="Exchange TO asset must be cash-like"):
         service.exchange_currency("02-01-2026", "USD", "AAPL", 100, 0.92)
     service.close()
+
+
+def test_exchange_usd_cash_usd_self_exchange_rejected():
+    """USD → CASH USD self-exchange must be rejected after alias normalization."""
+    from datetime import date
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    with pytest.raises(ValueError, match=r"FROM and TO must be different.*resolve to 'USD'"):
+        service.exchange_currency(date(2026, 1, 2), "USD", "CASH USD", 100, 1.0)
+    service.close()
+
+
+def test_exchange_cash_eur_eurusd_self_exchange_rejected():
+    """CASH EUR → EURUSD=X self-exchange must be rejected after alias normalization."""
+    from datetime import date
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    with pytest.raises(ValueError, match=r"FROM and TO must be different.*resolve to 'EURUSD=X'"):
+        service.exchange_currency(date(2026, 1, 2), "CASH EUR", "EURUSD=X", 100, 1.0)
+    service.close()
+
+
+def test_exchange_different_currencies_accepted():
+    """USD → EURUSD=X must pass the self-exchange guard (different canonical assets)."""
+    from datetime import date
+    from portfolio_db.portfolio_service import PriceDataUnavailableError
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+    try:
+        service.exchange_currency(date(2026, 1, 2), "USD", "EURUSD=X", 100, 1.2)
+    except PriceDataUnavailableError:
+        pass  # price data absent in test env — self-exchange guard passed
+    except ValueError as exc:
+        pytest.fail(f"exchange_currency raised unexpected ValueError: {exc}")
+    finally:
+        service.close()
 
 
 def test_edit_sell_asof_date_check():
@@ -799,3 +835,45 @@ def test_price_service_does_not_print_to_stdout(monkeypatch):
 
     stdout_output = fake_stdout.getvalue()
     assert stdout_output == "", f"price_service printed to stdout: {stdout_output!r}"
+
+
+def test_runtime_modules_do_not_import_calculator():
+    """Enforce that production code modules don't import the legacy calculator."""
+    import os
+    import ast
+
+    def imports_calculator(filepath):
+        """Check if a file imports calculator."""
+        try:
+            with open(filepath, "r") as f:
+                tree = ast.parse(f.read())
+        except Exception:
+            return False
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and "calculator" in node.module:
+                    return True
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "calculator" in alias.name:
+                        return True
+        return False
+
+    portfolio_db_dir = Path(__file__).resolve().parents[1] / "portfolio_db"
+    runtime_modules = []
+
+    for root, dirs, files in os.walk(portfolio_db_dir):
+        # Skip _legacy directory
+        if "_legacy" in root.split(os.sep):
+            continue
+
+        for file in files:
+            if file.endswith(".py") and not file.startswith("test_"):
+                filepath = os.path.join(root, file)
+                if imports_calculator(filepath):
+                    runtime_modules.append(filepath)
+
+    assert (
+        not runtime_modules
+    ), f"Runtime modules import calculator (legacy): {runtime_modules}"

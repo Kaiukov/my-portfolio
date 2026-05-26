@@ -328,7 +328,7 @@ Examples:
 @click.option("--price", type=float, default=None, help="Positive price; required for BUY/SELL")
 @click.option("--currency", default="USD", show_default=True, help="Currency code for the transaction")
 @click.option("--fees", type=float, default=None, help="Non-negative fee amount")
-@click.option("--fee-currency", default="", help="Currency code for fees (default: same as --currency)")
+@click.option("--fee-currency", default=None, help="Currency code for fees; defaults to --currency")
 @click.option("--exchange", default="", help="Broker or exchange label; required for all add operations")
 @click.option("--account", default=None, help="Account label; required for TRANSFER (e.g. broker_a)")
 def add(date_str, asset, action, quantity, price, currency, fees, fee_currency, exchange, account):
@@ -873,16 +873,56 @@ Examples:
   portfolio performance --as-of-date 2026-01-01
 
   portfolio performance --benchmark QQQ
+
+  portfolio performance --from-date 2025-01-01
+
+  portfolio performance --period 1y
+
+  portfolio performance --period ytd
 """)
 @click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 @click.option("--benchmark", default=None, help=BENCHMARK_HELP)
-def performance(as_of_date, benchmark):
+@click.option("--from-date", default=None, help="Filter returns from this date (YYYY-MM-DD)")
+@click.option("--period", default=None, type=click.Choice(["1y", "6m", "3m", "ytd"]), help="Filter to a period: 1y, 6m, 3m, ytd")
+def performance(as_of_date, benchmark, from_date, period):
     """Show performance, risk, and benchmark metrics."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    today = date.today()
+
+    if period:
+        if period == "ytd":
+            resolved_from = date(today.year, 1, 1)
+        elif period == "1y":
+            resolved_from = date(today.year - 1, today.month, today.day)
+        elif period == "6m":
+            m = today.month - 6
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+        elif period == "3m":
+            m = today.month - 3
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+    elif from_date:
+        resolved_from = _parse_date(from_date, "--from-date")
+    else:
+        resolved_from = None
+
     service = None
     try:
         service = PortfolioService(read_only=True)
-        stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark)
+        stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark, from_date=resolved_from)
         concentration = service.get_concentration_metrics(as_of_date=as_of)
 
         def m(name, value):

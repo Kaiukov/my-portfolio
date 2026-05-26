@@ -1057,7 +1057,7 @@ class PortfolioDatabase:
             [start_date],
         ).fetchall()
 
-    def get_performance_stats_sql(self, as_of_date, benchmark_ticker: str, risk_free_rate_annual: float) -> dict:
+    def get_performance_stats_sql(self, as_of_date, benchmark_ticker: str, risk_free_rate_annual: float, from_date=None) -> dict:
         """Compute performance statistics directly in PostgreSQL."""
         row = self.con.execute(
             """
@@ -1065,7 +1065,8 @@ class PortfolioDatabase:
                 SELECT
                     %s::date AS as_of_date,
                     %s::text AS benchmark_ticker,
-                    %s::double precision AS risk_free_rate
+                    %s::double precision AS risk_free_rate,
+                    %s::date AS from_date
             ),
             dr AS (
                 SELECT d.date, d.portfolio_value, d.investment_return
@@ -1073,6 +1074,7 @@ class PortfolioDatabase:
                 CROSS JOIN params p
                 WHERE d.portfolio_value > 0
                   AND (p.as_of_date IS NULL OR d.date <= p.as_of_date)
+                  AND (p.from_date IS NULL OR d.date >= p.from_date)
                 ORDER BY d.date
             ),
             dr_bounds AS (
@@ -1233,7 +1235,7 @@ class PortfolioDatabase:
             CROSS JOIN monthly_median
             CROSS JOIN bench_bounds
             """,
-            [as_of_date, benchmark_ticker, risk_free_rate_annual],
+            [as_of_date, benchmark_ticker, risk_free_rate_annual, from_date],
         ).fetchone()
 
         if not row:
