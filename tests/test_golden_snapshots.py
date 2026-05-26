@@ -16,9 +16,9 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.cli import cli
-from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
-from portfolio_db.price_service import PriceService
+from portfolio_db.cli import cli  # noqa: E402
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError  # noqa: E402
+from portfolio_db.price_service import PriceService  # noqa: E402
 
 # ── Fixed prices ──────────────────────────────────────────────────────────────
 # AAPL: $150 flat, EURUSD=X: 1.1 flat

@@ -4,7 +4,6 @@ import json
 import subprocess
 import os
 import pytest
-from datetime import date, timedelta
 
 
 @pytest.fixture(scope="session", autouse=True)

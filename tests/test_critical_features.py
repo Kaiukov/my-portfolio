@@ -16,9 +16,9 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.cli import cli
-from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
-from portfolio_db.price_service import PriceService
+from portfolio_db.cli import cli  # noqa: E402
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError  # noqa: E402
+from portfolio_db.price_service import PriceService  # noqa: E402
 
 
 def fake_price_fetch(symbols, start_date, end_date):
@@ -632,7 +632,7 @@ def test_delete_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatc
     service.db.add_transaction(_date(2026, 1, 2), "USD", "DEPOSIT", 500, asset_type="cash_base")
     service.repair_prices()
     service.recalculate(force=True)
-    daily_returns_before = service.get_daily_returns()
+    daily_returns_before = service.get_daily_returns()  # noqa: F841
     refresh_state_before = service.get_refresh_state()
 
     # Get the second transaction's ID

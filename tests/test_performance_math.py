@@ -19,8 +19,8 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.portfolio_service import PortfolioService
-from portfolio_db.price_service import PriceService
+from portfolio_db.portfolio_service import PortfolioService  # noqa: E402
+from portfolio_db.price_service import PriceService  # noqa: E402
 
 # ── Price stubs ────────────────────────────────────────────────────────────────
 # AAPL: $100 on start, $110 on end (10% gain over the window)
