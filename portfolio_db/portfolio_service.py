@@ -63,11 +63,10 @@ class PortfolioService:
     RECALC_STATE_KEY = 'last_successful_recalc'
     STALE_DATA_STATE_KEY = 'stale_data'
 
-    def __init__(self, db_path: str = None, read_only: bool = False):
+    def __init__(self, read_only: bool = False):
         """Initialize service.
 
         Args:
-            db_path: PostgreSQL URL from PORTFOLIO_DB_URL env var (required), or test schema.
             read_only: Enforce read-only mode.
 
         Raises:
@@ -793,6 +792,30 @@ class PortfolioService:
             recalculate_fn=self.recalculate,
             mark_price_data_stale_fn=self._mark_price_data_stale,
         )
+
+    # ── use-case delegation (keeps CLI free of db internals) ────────────── #
+
+    def get_transaction_count(self) -> int:
+        return self.db.get_transaction_count()
+
+    def get_transaction_by_id(self, transaction_id: int) -> dict | None:
+        row = self.db.get_transaction_by_id(transaction_id)
+        return self._serialize_transaction_row(row) if row else None
+
+    def preview_delete_transaction(self, transaction_id: int) -> dict | None:
+        row = self.db.get_transaction_by_id(transaction_id)
+        if not row:
+            return None
+        return {
+            "transaction_id": row[0],
+            "date": str(row[1]),
+            "asset": row[2],
+            "action": row[3],
+            "quantity": row[4],
+        }
+
+    def sql_backup(self, dst) -> None:
+        self.db.dump_sql_backup(dst)
 
     def close(self):
         """Close database connection."""

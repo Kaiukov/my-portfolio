@@ -120,7 +120,7 @@ def migrate(csv):
     try:
         service = PortfolioService()
         service.setup_from_csv(csv)
-        count = service.db.get_transaction_count()
+        count = service.get_transaction_count()
         success("migrate", {"rows_imported": count, "source": csv})
     except Exception as e:
         error("migrate", "DB_ERROR", str(e))
@@ -212,7 +212,7 @@ def status(as_of_date):
     service = None
     try:
         service = PortfolioService(read_only=True)
-        trans_count = service.db.get_transaction_count()
+        trans_count = service.get_transaction_count()
         stats = service.get_performance_stats(as_of_date=as_of)
         data = {
             "transactions": trans_count,
@@ -324,8 +324,8 @@ Dates use DD-MM-YYYY format (e.g. 01-01-2026).
             exchange=exchange,
             account=account,
         )
-        trans = service.db.get_transaction_by_id(result["transaction_id"])
-        success("add", {"transaction": service._serialize_transaction_row(trans), "recalculated": True})
+        trans = service.get_transaction_by_id(result["transaction_id"])
+        success("add", {"transaction": trans, "recalculated": True})
     except PriceDataUnavailableError as e:
         error("add", "PRICE_DATA_ERROR", str(e))
     except ValueError as e:
@@ -407,7 +407,7 @@ Dates use DD-MM-YYYY format (e.g. 15-01-2026).
         service = None
         try:
             service = PortfolioService(read_only=True)
-            if not service.db.get_transaction_by_id(trans_id):
+            if not service.get_transaction_by_id(trans_id):
                 error("edit", "NOT_FOUND", f"Transaction ID {trans_id} not found")
             preview = service.preview_edit_transaction(trans_id, **changes)
             proposed = {k: (str(v) if v is not None else None) for k, v in changes.items() if v is not None}
@@ -425,7 +425,7 @@ Dates use DD-MM-YYYY format (e.g. 15-01-2026).
     service = None
     try:
         service = PortfolioService()
-        if not service.db.get_transaction_by_id(trans_id):
+        if not service.get_transaction_by_id(trans_id):
             error(
                 "edit",
                 "NOT_FOUND",
@@ -743,17 +743,17 @@ def delete(trans_id, confirm, dry_run, backup):
         service = None
         try:
             service = PortfolioService(read_only=True)
-            trans = service.db.get_transaction_by_id(trans_id)
-            if not trans:
+            preview = service.preview_delete_transaction(trans_id)
+            if not preview:
                 error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
             success("delete", {
                 "dry_run": True,
                 "transaction_id": trans_id,
                 "would_delete": {
-                    "date": str(trans[1]),
-                    "asset": trans[2],
-                    "action": trans[3],
-                    "quantity": trans[4],
+                    "date": preview["date"],
+                    "asset": preview["asset"],
+                    "action": preview["action"],
+                    "quantity": preview["quantity"],
                 },
             })
         except SystemExit:
@@ -768,9 +768,7 @@ def delete(trans_id, confirm, dry_run, backup):
     service = None
     try:
         service = PortfolioService()
-        trans = service.db.get_transaction_by_id(trans_id)
-
-        if not trans:
+        if not service.get_transaction_by_id(trans_id):
             error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
 
         if not confirm:
@@ -1083,8 +1081,8 @@ def backup(out):
     except FileNotFoundError:
         service = None
         try:
-            service = PortfolioService(target, read_only=True)
-            service.db.dump_sql_backup(dst)
+            service = PortfolioService(read_only=True)
+            service.sql_backup(dst)
             size_bytes = dst.stat().st_size
             log.backup_created(target, str(dst), size_bytes)
             success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes, "mode": "sql_dump"})
