@@ -7,12 +7,69 @@
 
 ## Overview
 
-Python CLI (`portfolio`) for portfolio tracking with DuckDB. Source lives in `portfolio_db/`, not `src/`.
+Python CLI (`portfolio`) for portfolio tracking with PostgreSQL. Source lives in `portfolio_db/`, not `src/`.
 
 - package manager: `uv`
 - build backend: hatchling
 - Python >= 3.13
-- library dependencies: click, duckdb, numpy, pandas, yfinance
+- database: PostgreSQL (required; DuckDB support removed)
+- library dependencies: click, psycopg2-binary, numpy, pandas, yfinance
+
+## Database Setup
+
+### Local PostgreSQL (development)
+
+```bash
+# macOS (install via Homebrew)
+brew install postgresql@16
+brew services start postgresql@16
+
+# Create portfolio database
+createdb portfolio
+createuser portfolio_user -P  # set password
+
+# Connect and initialize schema
+psql -d portfolio -U portfolio_user
+# Then in psql:
+# \i portfolio_db/sql/schema.sql
+# \i portfolio_db/sql/functions.sql
+# \i portfolio_db/sql/procedures.sql
+# \i portfolio_db/sql/views.sql
+# \i portfolio_db/sql/triggers.sql
+
+# Set environment variable
+export PORTFOLIO_DB_URL="postgresql://portfolio_user:password@localhost:5432/portfolio"
+```
+
+### Supabase PostgreSQL (cloud-hosted)
+
+1. Create project at https://supabase.com
+2. Copy PostgreSQL connection string (User > Database)
+3. Run schema initialization scripts (same as above)
+4. Set environment variable:
+   ```bash
+   export PORTFOLIO_DB_URL="postgresql://postgres:password@db.xxx.supabase.co:5432/postgres"
+   ```
+
+### DuckDB Migration (from legacy)
+
+If migrating from DuckDB:
+```bash
+# Install DuckDB support (optional)
+# Note: duckdb is no longer a core dependency; install separately if needed
+pip install duckdb
+
+# Run migration (requires PORTFOLIO_DB_URL set to target PostgreSQL)
+uv run portfolio migrate-duckdb-to-postgres \
+  --from ~/portfolio.duckdb \
+  --to $PORTFOLIO_DB_URL
+```
+
+The migration command:
+- Copies `transactions`, `daily_returns`, `price_cache` tables
+- Validates row counts match after copy
+- Resets PostgreSQL sequences for safe future inserts
+- Emits JSON progress report (dry-run available with `--dry-run`)
 
 ## Key commands
 
@@ -31,7 +88,12 @@ uv run portfolio     # run CLI
 - `portfolio_db/transaction_service.py` — add/edit/delete/exchange validation and rollback
 - `portfolio_db/calculator.py` — daily return calculation (investment_return vs portfolio_daily_return)
 - `portfolio_db/performance_service.py` — risk metrics, benchmark comparison, concentration
-- `portfolio_db/database.py` — DuckDB schema, migrations, pagination
+- `portfolio_db/database.py` — PostgreSQL connection, schema initialization, migrations, pagination
+- `portfolio_db/sql/schema.sql` — PostgreSQL DDL: tables (transactions, prices, daily_returns, refresh_log, etc.)
+- `portfolio_db/sql/functions.sql` — PostgreSQL helper functions for asset type detection, price lookups, valuations
+- `portfolio_db/sql/procedures.sql` — PostgreSQL procedures: refresh_daily_returns_sql (main calculation engine)
+- `portfolio_db/sql/views.sql` — PostgreSQL views: current_holdings, cash_balances, portfolio_allocation, portfolio_summary
+- `portfolio_db/sql/triggers.sql` — PostgreSQL triggers: auto-update timestamp columns
 - `portfolio_db/domain.py` — SINGLE SOURCE OF TRUTH for currencies, FX tickers, cash buckets, action helpers
 - `portfolio_db/response.py` — JSON envelope: `success()` exits 0, `error()` calls `sys.exit(1)` and never returns
 - `portfolio_db/logger.py` — structured JSON logs to `PORTFOLIO_LOG_PATH` (file only, never stdout)
