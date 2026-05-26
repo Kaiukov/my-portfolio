@@ -25,9 +25,10 @@ cmux send-key --surface surface:N "Enter"
 Key flags:
 - `--yolo` — bypass all permission prompts (alias for `--dangerously-skip-permissions`)
 - `--auto-accept` — auto-accept tool calls (softer than `--yolo`)
-- `--model deepseek-v4-pro` — fast/cheap model for lint, refactor, mechanical fixes
+- `--model deepseek-v4-pro` — intelligent tasks: architecture, bug fixes, reasoning
+- `--model deepseek-v4-flash` — dirty tasks: lint, imports, ruff fixes, mechanical edits
 - `-p "query"` — non-interactive single-shot mode
-- `--list-models` — show available models (`deepseek-v4-pro`, `taste-1`)
+- `--list-models` — show available models
 
 ## Overview
 
