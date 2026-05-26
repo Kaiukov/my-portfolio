@@ -4,6 +4,12 @@ import click
 import subprocess
 from datetime import datetime, date
 from pathlib import Path
+import json
+import sys
+import importlib.metadata
+import requests
+import threading
+
 from portfolio_db.database import resolve_db_target
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
@@ -72,6 +78,55 @@ Write / maintenance commands:
 Use `portfolio COMMAND --help` for command-specific details."""
 
 
+def _check_yfinance_version_background():
+    """Fetch latest yfinance version from PyPI and warn if outdated."""
+    try:
+        cache_dir = Path.home() / ".cache" / "portfolio"
+        cache_file = cache_dir / "yfinance_version_check"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        current_time = datetime.now().timestamp()
+        cache_data = {}
+
+        if cache_file.exists():
+            try:
+                cache_data = json.loads(cache_file.read_text())
+                cached_time = cache_data.get("timestamp", 0)
+                if current_time - cached_time < 86400:
+                    latest_version = cache_data.get("latest_version")
+                    if latest_version:
+                        _warn_if_outdated(latest_version)
+                    return
+            except Exception:
+                pass
+
+        response = requests.get("https://pypi.org/pypi/yfinance/json", timeout=2)
+        response.raise_for_status()
+        latest_version = response.json()["info"]["version"]
+
+        cache_data = {"timestamp": current_time, "latest_version": latest_version}
+        cache_file.write_text(json.dumps(cache_data))
+
+        _warn_if_outdated(latest_version)
+    except Exception:
+        pass
+
+
+def _warn_if_outdated(latest_version: str):
+    """Warn if current yfinance version is outdated."""
+    try:
+        current_version = importlib.metadata.version("yfinance")
+        if current_version != latest_version:
+            def _parse_version(v: str) -> tuple:
+                return tuple(int(x) for x in v.split("."))
+            if _parse_version(current_version) < _parse_version(latest_version):
+                msg = f"Note: yfinance {current_version} is out of date (latest: {latest_version}). Run: uv add yfinance>={latest_version}\n"
+                sys.stderr.write(msg)
+                sys.stderr.flush()
+    except Exception:
+        pass
+
+
 def _parse_date(value: str, flag: str) -> date:
     """Parse YYYY-MM-DD string; call error() and exit on failure."""
     try:
@@ -94,6 +149,13 @@ def _parse_legacy_date(value: str, flag: str) -> date:
 def cli():
     """Portfolio tracking CLI."""
     pass
+
+
+@cli.result_callback()
+def _check_version_after_command(result, **kwargs):
+    """Check yfinance version in background after command completes."""
+    thread = threading.Thread(target=_check_yfinance_version_background, daemon=True)
+    thread.start()
 
 
 # ─── migrate ──────────────────────────────────────────────────────────────────
