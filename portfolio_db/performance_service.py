@@ -52,7 +52,7 @@ class PerformanceService:
             pass
         return 0.0
 
-    def get_performance_stats(self, as_of_date, get_daily_returns_fn, build_snapshot_fn, risk_free_rate_annual, benchmark_ticker='SPY') -> dict:
+    def get_performance_stats(self, as_of_date, build_snapshot_fn, risk_free_rate_annual, benchmark_ticker='SPY', from_date=None) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         snapshot = build_snapshot_fn(as_of_date=as_of_date)
         as_of_date = snapshot['as_of_date']
@@ -110,7 +110,7 @@ class PerformanceService:
         if as_of_date is None:
             return empty_stats.copy()
 
-        perf = self.db.get_performance_stats_sql(as_of_date, benchmark_ticker, risk_free_rate_annual)
+        perf = self.db.get_performance_stats_sql(as_of_date, benchmark_ticker, risk_free_rate_annual, from_date=from_date)
         if not perf:
             return empty_stats.copy()
 

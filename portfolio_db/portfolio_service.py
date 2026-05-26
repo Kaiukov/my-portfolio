@@ -468,14 +468,14 @@ class PortfolioService:
         with open(output_path, 'w') as f:
             json.dump(transactions, f, indent=2)
 
-    def get_performance_stats(self, as_of_date=None, benchmark_ticker=None) -> dict:
+    def get_performance_stats(self, as_of_date=None, benchmark_ticker=None, from_date=None) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         return self._performance.get_performance_stats(
             as_of_date=as_of_date,
-            get_daily_returns_fn=self.get_daily_returns,
             build_snapshot_fn=self.build_reporting_snapshot,
             risk_free_rate_annual=self.RISK_FREE_RATE_ANNUAL,
             benchmark_ticker=benchmark_ticker or self.BENCHMARK_TICKERS[0],
+            from_date=from_date,
         )
 
     def evaluate_metric(self, metric_name: str, value: float) -> str:
