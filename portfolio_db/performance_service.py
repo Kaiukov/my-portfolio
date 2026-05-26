@@ -52,10 +52,14 @@ class PerformanceService:
             pass
         return 0.0
 
-    def get_performance_stats(self, as_of_date, get_daily_returns_fn, build_snapshot_fn, risk_free_rate_annual, benchmark_ticker='SPY') -> dict:
+    def get_performance_stats(self, as_of_date, get_daily_returns_fn, build_snapshot_fn, risk_free_rate_annual, benchmark_ticker='SPY', from_date=None) -> dict:
         """Get portfolio performance statistics with separated return metrics."""
         snapshot = build_snapshot_fn(as_of_date=as_of_date)
         as_of_date = snapshot['as_of_date']
+
+        returns_with_values = get_daily_returns_fn()
+        if from_date:
+            returns_with_values = [r for r in returns_with_values if r.get('date', '') >= str(from_date)]
 
         empty_stats = {
             'total_days': 0,
