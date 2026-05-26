@@ -1,9 +1,33 @@
 # Project specific instructions
 
-## CMUX enviroment 
-- Use cmux cli command if you are in cmux enviroment
-- cmux -v to check version
-- cmux --help to see all commands
+## CMUX environment
+
+```bash
+cmux -v                        # version
+cmux new-split right           # split right in current workspace
+cmux new-split down            # split down
+cmux close-surface --surface surface:N   # close a split
+cmux send --surface surface:N "cmd"      # send text to split
+cmux send-key --surface surface:N "Enter"
+cmux read-screen --surface surface:N --lines 20   # read split output
+cmux tree                      # show all workspaces/panes
+```
+
+## Command Code (`cmd`) in split view
+
+```bash
+# Open a new split, then run cmd with DeepSeek for fast/cheap tasks
+cmux new-split right
+cmux send --surface surface:N "cmd --model deepseek-v4-pro --yolo 'your task'"
+cmux send-key --surface surface:N "Enter"
+```
+
+Key flags:
+- `--yolo` — bypass all permission prompts (alias for `--dangerously-skip-permissions`)
+- `--auto-accept` — auto-accept tool calls (softer than `--yolo`)
+- `--model deepseek-v4-pro` — fast/cheap model for lint, refactor, mechanical fixes
+- `-p "query"` — non-interactive single-shot mode
+- `--list-models` — show available models (`deepseek-v4-pro`, `taste-1`)
 
 ## Overview
 
