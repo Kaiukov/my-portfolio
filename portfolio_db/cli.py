@@ -761,7 +761,8 @@ def delete(trans_id, confirm, dry_run, backup):
         except Exception as e:
             error("delete", "DB_ERROR", str(e))
         finally:
-            service.close()
+            if service:
+                service.close()
         return
 
     service = None
@@ -1061,9 +1062,9 @@ Examples:
 
   portfolio backup
 
-  portfolio backup --out /backups/portfolio-2026-01-01.db
+  portfolio backup --out /backups/portfolio-2026-01-01.sql
 """)
-@click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
+@click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.sql)")
 def backup(out):
     """Create a timestamped backup of the PostgreSQL database."""
     try:

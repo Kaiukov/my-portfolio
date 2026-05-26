@@ -269,5 +269,3 @@ Every calculation bug fix needs:
 
 - Skill: `.agents/skills/my-portfolio-cli/SKILL.md` — detailed workflow for CLI changes
 - Docs: `docs/transaction-spec.md`, `docs/api-response-standardization-plan.md`
-LL.md` — detailed workflow for CLI changes
-- Docs: `docs/transaction-spec.md`, `docs/api-response-standardization-plan.md`
