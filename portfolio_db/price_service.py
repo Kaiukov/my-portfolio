@@ -2,8 +2,10 @@
 
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict
+
+import portfolio_db.logger as log
 
 
 class PriceService:
@@ -99,7 +101,7 @@ class PriceService:
                     prices_data[asset] = prices.sort_index()
 
             except Exception as e:
-                print(f"Warning: Could not fetch {asset}: {e}")
+                log.failure("price_fetch_failed", str(e), ticker=asset)
 
         return prices_data
 

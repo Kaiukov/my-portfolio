@@ -115,6 +115,23 @@ class TransactionService:
             system_actions=system_actions,
         )
 
+        # SELL must not exceed holdings as-of transaction date
+        if action == 'SELL':
+            net_on_date = self.db.con.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
+                                         WHEN action='SELL' THEN -quantity
+                                         ELSE 0 END), 0)
+                FROM transactions WHERE asset = ? AND date <= ?
+                """,
+                [asset, date_obj],
+            ).fetchone()[0]
+            if quantity > net_on_date:
+                raise ValueError(
+                    f"Cannot SELL {quantity} of {asset}: "
+                    f"only {net_on_date} shares held as of {date_obj}"
+                )
+
         # Get last date BEFORE adding transaction
         last_date_before = self.db.get_last_transaction_date()
 
@@ -202,6 +219,23 @@ class TransactionService:
             system_actions=system_actions,
         )
 
+        # SELL must not exceed holdings as-of transaction date (exclude self)
+        if updated['action'] == 'SELL':
+            net_on_date = self.db.con.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
+                                         WHEN action='SELL' THEN -quantity
+                                         ELSE 0 END), 0)
+                FROM transactions WHERE asset = %s AND date <= %s AND id != %s
+                """,
+                [updated['asset'], updated['date'], transaction_id],
+            ).fetchone()[0]
+            if float(updated['quantity']) > net_on_date:
+                raise ValueError(
+                    f"Cannot SELL {updated['quantity']} of {updated['asset']}: "
+                    f"only {net_on_date} shares held as of {updated['date']}"
+                )
+
         recalc_from = min(existing[1], updated['date'])
         updated_row = self.db.update_transaction(
             transaction_id,
@@ -254,27 +288,53 @@ class TransactionService:
         }
 
     def delete_transaction(self, transaction_id: int, recalculate_fn, mark_price_data_stale_fn) -> dict:
-        """Delete transaction and auto-recalculate returns."""
-        # Get transaction before deletion
-        trans = self.db.con.execute(
-            "SELECT id, date, asset, action, quantity FROM transactions WHERE id = ?",
-            [transaction_id]
-        ).fetchone()
-
+        """Delete transaction and auto-recalculate returns with rollback on failure."""
+        trans = self.db.get_transaction_by_id(transaction_id)
         if not trans:
             raise ValueError(f"Transaction ID {transaction_id} not found")
 
         trans_date = trans[1]
 
-        # Delete transaction
+        # Capture rollback snapshot before mutating state
+        last_date_before = self.db.get_last_transaction_date()
+        remaining = self.db.con.execute(
+            "SELECT COUNT(*) FROM transactions WHERE id != ?", [transaction_id]
+        ).fetchone()[0]
+        is_full_recalc = remaining == 0 or (
+            last_date_before is not None and trans_date <= self.db.con.execute(
+                "SELECT MIN(date) FROM transactions WHERE id != %s", [transaction_id]
+            ).fetchone()[0]
+        )
+        rollback_snapshot = self._capture_rollback_snapshot(
+            from_date=trans_date,
+            is_full_recalc=is_full_recalc,
+            refresh_state=self.db.get_all_service_state(),
+        )
+
+        # Delete transaction and daily_returns
         self.db.delete_transaction_by_id(transaction_id)
         mark_price_data_stale_fn()
 
-        # Delete daily returns from that date onwards
-        self.db.delete_daily_returns_from_date(trans_date)
+        # Recalculate — restore deleted row + snapshot on failure
+        try:
+            recalc_result = recalculate_fn(from_date=trans_date)
+        except Exception:
+            # Re-insert the deleted row with original values
+            self.db.con.execute(
+                """
+                INSERT INTO transactions
+                (id, date, asset, action, quantity, asset_type, price, currency,
+                 fees, exchange, data_source, account, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                [trans[0], trans[1], trans[2], trans[3], trans[4],
+                 trans[5], trans[6], trans[7], trans[8], trans[9],
+                 trans[10], trans[11], trans[12], trans[13]],
+            )
+            self.db.con.commit()
+            self._restore_rollback_snapshot(rollback_snapshot)
+            raise
 
-        # Recalculate from that date
-        recalc_result = recalculate_fn(from_date=trans_date)
         log.transaction_delete(trans[0], trans[2], trans[3], trans[1], recalc_result.get('recalc_type', 'full'))
 
         return {
@@ -290,7 +350,7 @@ class TransactionService:
             'rows_affected': recalc_result.get('rows_affected', 0)
         }
 
-    def exchange_currency(self, date_obj, from_asset: str, to_asset: str, quantity: float, rate: float, recalculate_fn, mark_price_data_stale_fn) -> dict:
+    def exchange_currency(self, date_obj, from_asset: str, to_asset: str, quantity: float, rate: float, recalculate_fn, mark_price_data_stale_fn, account: str = None) -> dict:
         """
         Exchange one currency for another.
 
@@ -301,6 +361,19 @@ class TransactionService:
         Returns:
             {"status": "success", "from_trans_id": ..., "to_trans_id": ..., "recalc_type": ..., "from_date": ...}
         """
+        if not is_cash_like(from_asset):
+            raise ValueError(f"Exchange FROM asset must be cash-like, got {from_asset!r}")
+        if not is_cash_like(to_asset):
+            raise ValueError(f"Exchange TO asset must be cash-like, got {to_asset!r}")
+        if from_asset.upper() == to_asset.upper():
+            raise ValueError(
+                f"FROM and TO must be different assets; both are {from_asset!r}"
+            )
+        if quantity <= 0:
+            raise ValueError(f"Quantity must be positive, got {quantity}")
+        if rate <= 0:
+            raise ValueError(f"Rate must be positive, got {rate}")
+
         # Get last date BEFORE adding transaction
         last_date_before = self.db.get_last_transaction_date()
 
@@ -310,14 +383,14 @@ class TransactionService:
         from_trans_id, _ = self.db.add_transaction(
             date_obj, from_asset, 'EXCHANGE_FROM', -quantity,
             asset_type=None, price=None, currency='', fees=None,
-            exchange='', data_source=f'→ {to_asset} @ {rate}'
+            exchange='', data_source=f'→ {to_asset} @ {rate}', account=account
         )
 
         # Add EXCHANGE_TO transaction (add to target)
         to_trans_id, _ = self.db.add_transaction(
             date_obj, to_asset, 'EXCHANGE_TO', target_amount,
             asset_type=None, price=None, currency='', fees=None,
-            exchange='', data_source=f'← {from_asset} @ {rate}'
+            exchange='', data_source=f'← {from_asset} @ {rate}', account=account
         )
 
         # Determine recalculation scope

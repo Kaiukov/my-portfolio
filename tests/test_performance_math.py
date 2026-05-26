@@ -19,9 +19,8 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.portfolio_service import PortfolioService
-from portfolio_db.performance_service import PerformanceService
-from portfolio_db.price_service import PriceService
+from portfolio_db.portfolio_service import PortfolioService  # noqa: E402
+from portfolio_db.price_service import PriceService  # noqa: E402
 
 # ── Price stubs ────────────────────────────────────────────────────────────────
 # AAPL: $100 on start, $110 on end (10% gain over the window)
@@ -60,14 +59,12 @@ def half_invested_db(tmp_path: Path) -> str:
     Cash stays: 5_000
     End value: 10_500  →  portfolio gain = 5%
     """
-    db_path = str(tmp_path / "half.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 50, asset_type="stock_usd", price=100.0)
     svc.repair_prices()
     svc.recalculate(force=True)
     svc.close()
-    return db_path
 
 
 @pytest.fixture
@@ -77,28 +74,26 @@ def fully_invested_db(tmp_path: Path) -> str:
       2026-01-02  DEPOSIT  USD  10_000
       2026-01-03  BUY      AAPL 100 @ 100
     """
-    db_path = str(tmp_path / "full.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 100, asset_type="stock_usd", price=100.0)
     svc.repair_prices()
     svc.recalculate(force=True)
     svc.close()
-    return db_path
 
 
 # ── TWR formula ───────────────────────────────────────────────────────────────
 
 class TestTWR:
     def test_twr_positive_when_asset_appreciates(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert stats["time_weighted_return_pct"] > 0
 
     def test_twr_fully_invested_approaches_asset_return(self, fully_invested_db):
         """100% in AAPL (+10%) → TWR should be close to 10%."""
-        svc = PortfolioService(fully_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         # TWR may differ slightly from 10% due to multi-day compounding,
@@ -107,7 +102,7 @@ class TestTWR:
 
     def test_twr_equals_total_return_pct(self, half_invested_db):
         """time_weighted_return_pct and total_return_pct must be equal (same metric)."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert stats["time_weighted_return_pct"] == pytest.approx(
@@ -116,7 +111,7 @@ class TestTWR:
 
     def test_twr_manual_product_of_daily_returns(self, half_invested_db):
         """TWR = product of (1 + investment_return_i / 100) - 1."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         daily = svc.get_daily_returns()
         stats = svc.get_performance_stats()
         svc.close()
@@ -135,7 +130,7 @@ class TestTWR:
 class TestCAGR:
     def test_cagr_formula_from_twr_and_years(self, half_invested_db):
         """CAGR = (1 + TWR)^(1/years) - 1, annualized from actual date range."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
 
@@ -153,7 +148,7 @@ class TestCAGR:
             assert stats["cagr"] == pytest.approx(expected_cagr, rel=1e-4)
 
     def test_cagr_positive_when_twr_positive(self, fully_invested_db):
-        svc = PortfolioService(fully_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         if stats["time_weighted_return_pct"] > 0:
@@ -161,7 +156,7 @@ class TestCAGR:
 
     def test_cagr_higher_than_twr_for_short_periods(self, fully_invested_db):
         """For periods < 1 year with positive returns, CAGR > TWR (annualization amplifies)."""
-        svc = PortfolioService(fully_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         # Only check if the period is less than a year and returns are positive
@@ -181,7 +176,7 @@ class TestCAGR:
 class TestSharpe:
     def test_sharpe_formula_sr_equals_excess_return_over_volatility(self, half_invested_db):
         """Sharpe = (CAGR - rf) / hist_volatility (both in decimal)."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
 
@@ -195,7 +190,7 @@ class TestSharpe:
         assert stats["sharpe_ratio"] == pytest.approx(expected, rel=1e-4)
 
     def test_sharpe_is_float(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert isinstance(stats["sharpe_ratio"], float)
@@ -206,14 +201,14 @@ class TestSharpe:
 class TestVolatility:
     def test_hist_volatility_equals_std_dev_annualized(self, half_invested_db):
         """hist_volatility = std_dev * sqrt(252)."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         expected = stats["std_dev"] * math.sqrt(252)
         assert stats["hist_volatility"] == pytest.approx(expected, rel=1e-4)
 
     def test_std_dev_is_non_negative(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert stats["std_dev"] >= 0
@@ -225,7 +220,7 @@ class TestVolatility:
 class TestVaR:
     def test_var_99_more_extreme_than_var_95(self, half_invested_db):
         """VaR 99% must be <= VaR 95% (more extreme tail)."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         # Both are negative percentiles; 99% tail loss >= 95% tail loss in magnitude
@@ -233,14 +228,14 @@ class TestVaR:
 
     def test_cvar_more_extreme_than_var(self, half_invested_db):
         """CVaR (expected shortfall) must be <= VaR at same confidence level."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert stats["cvar_95"] <= stats["var_95"]
         assert stats["cvar_99"] <= stats["var_99"]
 
     def test_var_values_are_floats(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         for key in ("var_95", "var_99", "cvar_95", "cvar_99"):
@@ -251,20 +246,20 @@ class TestVaR:
 
 class TestDrawdown:
     def test_max_drawdown_non_negative(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert stats["max_drawdown"] >= 0
 
     def test_avg_drawdown_lte_max_drawdown(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         assert stats["avg_drawdown"] <= stats["max_drawdown"]
 
     def test_no_drawdown_on_monotonic_gain(self, fully_invested_db):
         """Monotonically rising portfolio → max_drawdown = 0."""
-        svc = PortfolioService(fully_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         # Prices go from 100 to 110 linearly — no drawdown expected
@@ -275,7 +270,7 @@ class TestDrawdown:
 
 class TestMwrVsTwr:
     def test_mwr_and_twr_both_positive(self, half_invested_db):
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         mwr = svc.get_mwr_irr()
         svc.close()
@@ -284,7 +279,7 @@ class TestMwrVsTwr:
 
     def test_mwr_is_annualized_decimal(self, half_invested_db):
         """MWR is returned as annual decimal, e.g. 0.10 = 10%."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         mwr = svc.get_mwr_irr()
         svc.close()
         # For short-period gains, annualized MWR can be very high but must be > -1
@@ -292,7 +287,7 @@ class TestMwrVsTwr:
 
     def test_single_deposit_mwr_equals_xirr(self, half_invested_db):
         """MWR with one deposit should be a valid XIRR result."""
-        svc = PortfolioService(half_invested_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         snap = svc.build_reporting_snapshot()
         mwr = svc.get_mwr_irr()
         svc.close()
@@ -322,14 +317,13 @@ class TestFXDayGain:
 
         monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fx_fetch))
 
-        db_path = str(tmp_path / "fx_gain.db")
-        svc = PortfolioService(db_path)
+        svc = PortfolioService()
         svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
         svc.repair_prices()
         svc.recalculate(force=True)
         svc.close()
 
-        svc = PortfolioService(db_path, read_only=True)
+        svc = PortfolioService(read_only=True)
         positions = svc.get_position_summary()
         svc.close()
 
@@ -348,17 +342,81 @@ class TestFXDayGain:
 
         monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(flat_fetch))
 
-        db_path = str(tmp_path / "fx_flat.db")
-        svc = PortfolioService(db_path)
+        svc = PortfolioService()
         svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
         svc.repair_prices()
         svc.recalculate(force=True)
         svc.close()
 
-        svc = PortfolioService(db_path, read_only=True)
+        svc = PortfolioService(read_only=True)
         positions = svc.get_position_summary()
         svc.close()
 
         fx_pos = next((p for p in positions if p["symbol"] == "EURUSD=X"), None)
         assert fx_pos is not None
         assert fx_pos["day_gain_pct"] == pytest.approx(0.0)
+
+
+# ── Phase 1: risk metrics use investment_return, median, date-join ────────────
+
+
+@pytest.fixture
+def deposit_only_db(tmp_path: Path) -> str:
+    """Portfolio with only a deposit — no trades. investment_return ≈ 0."""
+    svc = PortfolioService()
+    svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
+    svc.repair_prices()
+    svc.recalculate(force=True)
+    svc.close()
+
+
+class TestInvestmentReturnForRisk:
+    """Deposit-only portfolio should show near-zero risk from clean returns."""
+
+    def test_volatility_near_zero_when_no_investments(self, deposit_only_db):
+        """Deposit-only day → portfolio_daily_return spikes, investment_return ≈ 0.
+        risk metrics must use the latter, producing near-zero volatility."""
+        svc = PortfolioService(read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+
+        assert stats["hist_volatility"] < 1.0, (
+            f"hist_volatility={stats['hist_volatility']:.4f} — should be near-zero for deposit-only, "
+            f"but >1 suggests portfolio_daily_return was used instead of investment_return"
+        )
+        assert stats["std_dev"] < 0.1
+        assert stats["beta"] == 0.0  # no benchmark overlap possible
+
+
+    def test_deposit_does_not_contaminate_sharpe(self, deposit_only_db):
+        svc = PortfolioService(read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+        assert stats["sharpe_ratio"] == 0.0
+
+
+class TestMedianMonthlyReturn:
+    """median_monthly_return must be the median, not the mean, and named correctly."""
+
+    def test_median_monthly_return_field_exists(self, half_invested_db):
+        svc = PortfolioService(read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+        assert "median_monthly_return" in stats, \
+            "Field 'median_monthly_return' missing — was avg_monthly_return renamed?"
+        assert "avg_monthly_return" not in stats, \
+            "Field 'avg_monthly_return' must not exist after rename to median_monthly_return"
+
+
+class TestBenchmarkAlignment:
+    """Benchmark alignment must use date join, not array slicing."""
+
+    def test_beta_and_capture_in_bounds_after_clean_return_metrics(self, half_invested_db):
+        """With investment_return and date-join, beta and capture ratios stay bounded."""
+        svc = PortfolioService(read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+        assert isinstance(stats["up_capture_ratio"], (int, float))
+        assert isinstance(stats["down_capture_ratio"], (int, float))
+        # Beta from aligned returns must be in a sane range
+        assert -5 <= stats["beta"] <= 5

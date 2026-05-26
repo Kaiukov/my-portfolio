@@ -19,7 +19,7 @@ def success(command: str, data, count: int | None = None, pagination: dict | Non
     envelope = {"ok": True, "command": command, "data": data, "meta": meta}
     try:
         print(json.dumps(envelope, indent=2, default=str))
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError):
         # Fallback for non-serializable data
         envelope["data"] = {"error": "Response data contains non-serializable content", "raw_type": str(type(data))}
         print(json.dumps(envelope, indent=2))

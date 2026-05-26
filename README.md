@@ -1,11 +1,11 @@
 # my-portfolio
 
-A Python CLI tool for portfolio tracking powered by DuckDB. 
+A Python CLI tool for portfolio tracking powered by PostgreSQL.
 
 ## Features
 
 - **Pure JSON Output**: All commands output pure JSON, making it perfect for programmatic use, automation, and API integrations.
-- **DuckDB Powered**: Uses DuckDB for fast, robust, and local data storage and cached price series.
+- **PostgreSQL Powered**: Uses PostgreSQL for durable portfolio storage, reporting snapshots, and derived calculations.
 - **Deterministic Valuation**: Time-Weighted Return (TWR) is the primary portfolio return metric. Read-path valuation relies exclusively on cached price and FX series to ensure fast, deterministic reporting without silent outside API calls.
 - **Comprehensive Tracking**: Supports standard trade actions (`BUY`, `SELL`), cash flows (`DEPOSIT`, `WITHDRAW`, `TRANSFER`), income (`DIVIDEND`, `INTEREST`), expenses (`FEE`, `TAX`), and currency exchanges.
 - **Multi-Currency**: Base currency is USD, with robust support and FX-conversion tracking for international assets.
@@ -14,6 +14,28 @@ A Python CLI tool for portfolio tracking powered by DuckDB.
 
 - Python >= 3.13
 - [uv](https://docs.astral.sh/uv/) package manager
+
+## Database Setup
+
+This project runs on PostgreSQL only at runtime.
+
+- Set `PORTFOLIO_DB_URL` to a local PostgreSQL DSN for development or tests.
+- Set `PORTFOLIO_DB_URL` to a Supabase PostgreSQL DSN for hosted development.
+- Keep `sslmode=require` on the Supabase URL.
+- DuckDB is not supported as a runtime database; it remains only as a migration and verification fixture.
+- The CLI auto-loads a `.env` file from the current directory or any parent directory before reading `PORTFOLIO_DB_URL`.
+
+Example local DSN:
+
+```bash
+export PORTFOLIO_DB_URL=postgresql://postgres:postgres@localhost:5433/postgres
+```
+
+Example Supabase DSN:
+
+```bash
+export PORTFOLIO_DB_URL='postgresql://postgres:[YOUR-PASSWORD]@db.<project-ref>.supabase.co:5432/postgres?sslmode=require'
+```
 
 ## Installation
 

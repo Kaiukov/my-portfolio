@@ -17,9 +17,9 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
-from portfolio_db.performance_service import PerformanceService
-from portfolio_db.price_service import PriceService
+from portfolio_db.portfolio_service import PortfolioService  # noqa: E402
+from portfolio_db.performance_service import PerformanceService  # noqa: E402
+from portfolio_db.price_service import PriceService  # noqa: E402
 
 # ── Fixed price stub ───────────────────────────────────────────────────────────
 # AAPL: $100 → $110 over two days (10% gain), SPY: $400 → $404 (1% gain)
@@ -76,8 +76,7 @@ def simple_db(tmp_path: Path) -> str:
 
     SPY prices are seeded manually (400 → 404 = 1% gain).
     """
-    db_path = str(tmp_path / "simple.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=100.0)
     svc.repair_prices()
@@ -86,7 +85,6 @@ def simple_db(tmp_path: Path) -> str:
     svc.db.insert_price("SPY", date(2026, 1, 3), 404.0)
     svc.recalculate(force=True)
     svc.close()
-    return db_path
 
 
 @pytest.fixture
@@ -99,15 +97,13 @@ def multi_deposit_db(tmp_path: Path) -> str:
     End state: cash ~9_000, AAPL ~1_100 = 10_100
     MWR should be positive (AAPL appreciated 10%).
     """
-    db_path = str(tmp_path / "multi.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 5_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=100.0)
     svc.db.add_transaction(date(2026, 1, 4), "USD", "DEPOSIT", 5_000, asset_type="cash_base")
     svc.repair_prices()
     svc.recalculate(force=True)
     svc.close()
-    return db_path
 
 
 # ── XIRR unit tests (pure math, no DB) ────────────────────────────────────────
@@ -177,27 +173,26 @@ class TestCalculateXirr:
 class TestMwrIrr:
     def test_mwr_is_positive_when_portfolio_gains(self, simple_db):
         """Portfolio grew from 10_000 to 10_100 → MWR must be positive."""
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         mwr = svc.get_mwr_irr()
         svc.close()
         assert mwr > 0, f"Expected positive MWR, got {mwr}"
 
     def test_mwr_is_float(self, simple_db):
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         mwr = svc.get_mwr_irr()
         svc.close()
         assert isinstance(mwr, float)
 
     def test_mwr_empty_portfolio_returns_zero(self, tmp_path):
-        db_path = str(tmp_path / "empty.db")
-        svc = PortfolioService(db_path)
+        svc = PortfolioService()
         mwr = svc.get_mwr_irr()
         svc.close()
         assert mwr == 0.0
 
     def test_mwr_multi_deposit_positive(self, multi_deposit_db):
         """Two deposits with appreciating asset → MWR positive."""
-        svc = PortfolioService(multi_deposit_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         mwr = svc.get_mwr_irr()
         svc.close()
         assert mwr > 0
@@ -208,7 +203,7 @@ class TestMwrIrr:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance"])
         data = json.loads(result.output)
         assert data["ok"] is True
         assert "mwr_irr" in data["data"]
@@ -227,7 +222,7 @@ class TestBenchmark:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance"])
         data = json.loads(result.output)
         assert data["ok"] is True
         assert "benchmark" in data["data"]
@@ -243,7 +238,7 @@ class TestBenchmark:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance"])
         data = json.loads(result.output)
         bench = data["data"]["benchmark"]
         assert isinstance(bench["benchmark_twr_pct"], (int, float))
@@ -253,7 +248,7 @@ class TestBenchmark:
 
     def test_spy_twr_with_known_prices(self, simple_db):
         """SPY went from 400 to 404 = 1% gain → spy_twr_pct close to 1."""
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         # SPY TWR: 1% over the 2-day window
@@ -261,7 +256,7 @@ class TestBenchmark:
 
     def test_relative_return_is_portfolio_minus_spy(self, simple_db):
         """Relative return = portfolio CAGR - SPY CAGR."""
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         stats = svc.get_performance_stats()
         svc.close()
         # relative_return should be a number (positive if portfolio > SPY)
@@ -272,14 +267,14 @@ class TestBenchmark:
 
 class TestContributionByPosition:
     def test_contribution_returns_list(self, simple_db):
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         contribs = svc.get_contribution_by_position()
         svc.close()
         assert isinstance(contribs, list)
         assert len(contribs) > 0
 
     def test_contribution_has_required_fields(self, simple_db):
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         contribs = svc.get_contribution_by_position()
         svc.close()
         for item in contribs:
@@ -291,7 +286,7 @@ class TestContributionByPosition:
 
     def test_aapl_has_positive_gain(self, simple_db):
         """AAPL: bought at 100, now 110 → total_gain > 0."""
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         contribs = svc.get_contribution_by_position()
         svc.close()
         aapl = next((c for c in contribs if c["symbol"] == "AAPL"), None)
@@ -301,8 +296,7 @@ class TestContributionByPosition:
 
     def test_weights_sum_to_100(self, simple_db):
         """All position weights should sum to 100% of portfolio."""
-        svc = PortfolioService(simple_db, read_only=True)
-        snap = svc.build_reporting_snapshot()
+        svc = PortfolioService(read_only=True)
         contribs = svc.get_contribution_by_position()
         svc.close()
         total_weight = sum(c["weight_pct"] for c in contribs)
@@ -314,7 +308,7 @@ class TestContributionByPosition:
         from portfolio_db.cli import cli
         import json
         runner = CliRunner()
-        result = runner.invoke(cli, ["performance", "--db", simple_db])
+        result = runner.invoke(cli, ["performance"])
         data = json.loads(result.output)
         assert data["ok"] is True
         assert "contribution_by_position" in data["data"]
@@ -326,15 +320,14 @@ class TestContributionByPosition:
         assert "AAPL" in symbols
 
     def test_empty_portfolio_contribution_empty(self, tmp_path):
-        db_path = str(tmp_path / "empty.db")
-        svc = PortfolioService(db_path)
+        svc = PortfolioService()
         contribs = svc.get_contribution_by_position()
         svc.close()
         assert contribs == []
 
     def test_sorted_by_absolute_gain(self, simple_db):
         """Contributions are sorted by absolute total_gain descending."""
-        svc = PortfolioService(simple_db, read_only=True)
+        svc = PortfolioService(read_only=True)
         contribs = svc.get_contribution_by_position()
         svc.close()
         gains = [abs(c["total_gain"]) for c in contribs]

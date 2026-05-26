@@ -1,18 +1,21 @@
 [project]
 name = "portfolio-db"
 version = "0.1.0"
-description = "Portfolio tracking CLI with DuckDB"
+description = "Portfolio tracking CLI with PostgreSQL"
 requires-python = ">=3.13"
 dependencies = [
     "click>=8.3",
-    "duckdb>=1.4",
     "numpy>=2.0",
     "pandas>=3.0",
+    "psycopg[binary]>=3.2",
     "yfinance>=1.1",
 ]
 
 [project.scripts]
 portfolio = "portfolio_db.cli:cli"
+
+[project.optional-dependencies]
+migrate = ["duckdb>=0.9"]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,7 +30,9 @@ pythonpath = ["."]
 
 [dependency-groups]
 dev = [
+    "duckdb>=1.5.3",
     "pytest>=8.0",
+    "ruff>=0.15.14",
 ]
 
 [tool.ruff]

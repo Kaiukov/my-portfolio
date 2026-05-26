@@ -16,9 +16,9 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.cli import cli
-from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
-from portfolio_db.price_service import PriceService
+from portfolio_db.cli import cli  # noqa: E402
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError  # noqa: E402
+from portfolio_db.price_service import PriceService  # noqa: E402
 
 # ── Fixed prices ──────────────────────────────────────────────────────────────
 # AAPL: $150 flat, EURUSD=X: 1.1 flat
@@ -57,8 +57,7 @@ def golden_db(tmp_path: Path) -> str:
       2026-01-05  DIVIDEND USD  50
       2026-01-06  FEE      USD  5
     """
-    db_path = str(tmp_path / "golden.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
     svc.db.add_transaction(date(2026, 1, 5), "USD", "DIVIDEND", 50, asset_type="cash_base")
@@ -66,14 +65,13 @@ def golden_db(tmp_path: Path) -> str:
     svc.repair_prices()
     svc.recalculate(force=True)
     svc.close()
-    return db_path
 
 
 # ── Snapshot value assertions ─────────────────────────────────────────────────
 
 def test_snapshot_portfolio_value(golden_db):
     """Portfolio value = cash + AAPL market value."""
-    svc = PortfolioService(golden_db, read_only=True)
+    svc = PortfolioService(read_only=True)
     snap = svc.build_reporting_snapshot()
     svc.close()
 
@@ -87,11 +85,11 @@ def test_snapshot_portfolio_value(golden_db):
 
 
 def test_reporting_commands_share_consistent_snapshot(golden_db, runner):
-    summary_result = runner.invoke(cli, ["summary", "--db", golden_db])
-    performance_result = runner.invoke(cli, ["performance", "--db", golden_db])
-    report_result = runner.invoke(cli, ["report", "--db", golden_db, "--limit", "1"])
-    cash_result = runner.invoke(cli, ["cash", "--db", golden_db])
-    allocation_result = runner.invoke(cli, ["allocation", "--type", "all", "--db", golden_db])
+    summary_result = runner.invoke(cli, ["summary"])
+    performance_result = runner.invoke(cli, ["performance"])
+    report_result = runner.invoke(cli, ["report", "--limit", "1"])
+    cash_result = runner.invoke(cli, ["cash"])
+    allocation_result = runner.invoke(cli, ["allocation", "--type", "all"])
 
     assert summary_result.exit_code == 0, summary_result.output
     assert performance_result.exit_code == 0, performance_result.output
@@ -154,7 +152,7 @@ def test_reporting_commands_share_consistent_snapshot(golden_db, runner):
 
 
 def test_health_command_ok(golden_db, runner):
-    result = runner.invoke(cli, ["health", "--db", golden_db])
+    result = runner.invoke(cli, ["health"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -169,7 +167,7 @@ def test_health_command_ok(golden_db, runner):
 # ── Dry-run assertions ────────────────────────────────────────────────────────
 
 def test_repair_prices_dry_run(golden_db, runner):
-    result = runner.invoke(cli, ["repair_prices", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["repair_prices", "--dry-run"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -179,7 +177,7 @@ def test_repair_prices_dry_run(golden_db, runner):
 
 
 def test_recalculate_dry_run(golden_db, runner):
-    result = runner.invoke(cli, ["recalculate", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["recalculate", "--dry-run"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -190,7 +188,7 @@ def test_recalculate_dry_run(golden_db, runner):
 
 
 def test_edit_dry_run(golden_db, runner):
-    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "9999", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "9999", "--dry-run"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -203,7 +201,7 @@ def test_edit_dry_run(golden_db, runner):
     assert body["proposed_changes"]["quantity"] == "9999.0"
 
     # Verify DB was NOT modified
-    svc = PortfolioService(golden_db, read_only=True)
+    svc = PortfolioService(read_only=True)
     row = svc.db.get_transaction_by_id(1)
     svc.close()
     assert row[4] == pytest.approx(10_000.0)  # original quantity unchanged
@@ -213,8 +211,7 @@ def test_edit_dry_run(golden_db, runner):
 
 def test_multi_currency_snapshot(tmp_path):
     """Portfolio with EUR cash and USD cash returns correct total."""
-    db_path = str(tmp_path / "multicurrency.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 5_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
     svc.repair_prices()
@@ -228,8 +225,7 @@ def test_multi_currency_snapshot(tmp_path):
 
 def test_empty_portfolio_snapshot(tmp_path):
     """Empty portfolio returns zero value without error."""
-    db_path = str(tmp_path / "empty.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     snap = svc.build_reporting_snapshot()
     svc.close()
 
@@ -241,8 +237,7 @@ def test_empty_portfolio_snapshot(tmp_path):
 
 def test_missing_fx_coverage_raises_on_recalc(tmp_path):
     """Recalculate must raise explicitly when required FX prices are absent."""
-    db_path = str(tmp_path / "missing_fx.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     # EUR deposit requires EURUSD=X price — do NOT repair prices
     svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000,
                            asset_type="cash_fx", currency="EUR")
@@ -257,13 +252,12 @@ def test_missing_fx_coverage_raises_on_recalc(tmp_path):
 
 def test_missing_fx_coverage_health_shows_degraded(tmp_path, runner):
     """health command reports degraded when FX prices are missing."""
-    db_path = str(tmp_path / "missing_fx_health.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000,
                            asset_type="cash_fx", currency="EUR")
     svc.close()
 
-    result = runner.invoke(cli, ["health", "--db", db_path])
+    result = runner.invoke(cli, ["health"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["ok"] is True
@@ -273,8 +267,7 @@ def test_missing_fx_coverage_health_shows_degraded(tmp_path, runner):
 
 def test_stale_data_cleared_after_repair_and_recalc(tmp_path):
     """stale_data must be False after successful repair + recalculate."""
-    db_path = str(tmp_path / "stale.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000,
                            asset_type="cash_fx", currency="EUR")
 
@@ -297,7 +290,7 @@ def test_stale_data_cleared_after_repair_and_recalc(tmp_path):
 def test_backup_command(golden_db, runner, tmp_path):
     """backup command creates a copy and returns correct envelope."""
     out = str(tmp_path / "backup.db")
-    result = runner.invoke(cli, ["backup", "--db", golden_db, "--out", out])
+    result = runner.invoke(cli, ["backup", "--out", out])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -312,8 +305,7 @@ def test_backup_command(golden_db, runner, tmp_path):
 
 def test_stale_prices_health_shows_degraded(tmp_path, runner):
     """Prices cached only for past dates → verify_prices detects gap, health degraded."""
-    db_path = str(tmp_path / "stale_prices.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
     # Cache AAPL prices but only up to an old date (simulate stale cache)
@@ -321,7 +313,7 @@ def test_stale_prices_health_shows_degraded(tmp_path, runner):
     svc.db.insert_price("AAPL", date(2026, 1, 4), 150.0)
     svc.close()  # must close before CLI opens the same DB
 
-    result = runner.invoke(cli, ["health", "--db", db_path])
+    result = runner.invoke(cli, ["health"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["ok"] is True
@@ -330,14 +322,13 @@ def test_stale_prices_health_shows_degraded(tmp_path, runner):
 
 def test_stale_prices_verify_detects_gap(tmp_path, runner):
     """verify_prices reports AAPL as having issues when no prices are cached at all."""
-    db_path = str(tmp_path / "stale_verify.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
     # No repair_prices → AAPL has zero cached prices
     svc.close()
 
-    result = runner.invoke(cli, ["verify_prices", "--db", db_path])
+    result = runner.invoke(cli, ["verify_prices"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["ok"] is True
@@ -349,8 +340,7 @@ def test_stale_prices_verify_detects_gap(tmp_path, runner):
 
 def test_stale_prices_repair_fills_gap(tmp_path):
     """repair_prices fills the gap detected in stale cache."""
-    db_path = str(tmp_path / "stale_repair.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
     svc.db.insert_price("AAPL", date(2026, 1, 3), 150.0)
@@ -369,8 +359,7 @@ def test_stale_prices_repair_fills_gap(tmp_path):
 
 def test_repair_prices_caches_spy(tmp_path):
     """repair_prices always fetches BENCHMARK_TICKERS (SPY) even when not in portfolio."""
-    db_path = str(tmp_path / "spy_cache.db")
-    svc = PortfolioService(db_path)
+    svc = PortfolioService()
     svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     svc.db.add_transaction(date(2026, 1, 3), "AAPL", "BUY", 10, asset_type="stock_usd", price=150.0)
 
@@ -383,7 +372,7 @@ def test_repair_prices_caches_spy(tmp_path):
     svc.close()
 
     # After repair: SPY must be present in prices cache
-    svc2 = PortfolioService(db_path, read_only=True)
+    svc2 = PortfolioService(read_only=True)
     post_count = svc2.db.get_prices_by_ticker_count()
     svc2.close()
     spy_after = next((r for r in post_count if r[0] == "SPY"), None)
@@ -392,7 +381,7 @@ def test_repair_prices_caches_spy(tmp_path):
 
 def test_delete_dry_run(golden_db, runner):
     """delete --dry-run shows would_delete without removing the transaction."""
-    result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run", "--db", golden_db])
+    result = runner.invoke(cli, ["delete", "--id", "1", "--dry-run"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
 
@@ -404,7 +393,7 @@ def test_delete_dry_run(golden_db, runner):
     assert body["would_delete"]["action"] == "DEPOSIT"
 
     # Transaction must still exist
-    svc = PortfolioService(golden_db, read_only=True)
+    svc = PortfolioService(read_only=True)
     row = svc.db.get_transaction_by_id(1)
     svc.close()
     assert row is not None
