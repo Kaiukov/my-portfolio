@@ -29,7 +29,7 @@ WITH cash_txns AS (
         CASE
             WHEN asset LIKE 'CASH %' THEN asset
             WHEN get_asset_type_sql(asset) = 'cash_base' THEN 'CASH USD'
-            WHEN get_asset_type_sql(asset) = 'cash_fx' THEN 'CASH ' || currency
+            WHEN get_asset_type_sql(asset) = 'cash_fx' THEN 'CASH ' || cash_display_currency_sql(get_cash_key_for_asset_sql(asset, get_asset_type_sql(asset)))
             ELSE NULL
         END AS display_bucket,
         CASE

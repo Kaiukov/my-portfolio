@@ -9,6 +9,7 @@ IMMUTABLE
 AS $$
     SELECT CASE
         WHEN ticker = 'USD' THEN 'cash_base'
+        WHEN ticker IN ('EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'JPY') THEN 'cash_fx'
         WHEN RIGHT(ticker, 5) = 'USD=X' THEN 'cash_fx'
         WHEN RIGHT(ticker, 4) = '-USD' THEN 'crypto'
         WHEN RIGHT(ticker, 2) = '.L' THEN 'stock_gbp'
