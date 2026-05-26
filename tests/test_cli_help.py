@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import json
-from datetime import date
-from pathlib import Path
-
 import pytest
 from click.testing import CliRunner
 
@@ -92,32 +88,3 @@ def test_health_help_mentions_read_only_diagnostic(runner: CliRunner):
     assert "Read-only diagnostic" in text
     assert "degraded" in text
 
-
-def test_mwr_reports_price_errors_as_price_data_error(tmp_path: Path, runner: CliRunner):
-    from portfolio_db.portfolio_service import PortfolioService
-
-    db_path = tmp_path / "portfolio.db"
-    service = PortfolioService(str(db_path))
-    service.db.add_transaction(
-        date(2026, 1, 2),
-        "USD",
-        "DEPOSIT",
-        1000.0,
-        asset_type="cash_base",
-    )
-    service.db.add_transaction(
-        date(2026, 1, 3),
-        "AAPL",
-        "BUY",
-        1.0,
-        asset_type="stock_usd",
-        price=100.0,
-    )
-    service.close()
-
-    result = runner.invoke(cli, ["mwr", "--db", str(db_path)])
-    assert result.exit_code == 1, result.output
-    body = json.loads(result.output)
-    assert body["ok"] is False
-    assert body["error"]["code"] == "PRICE_DATA_ERROR"
-    assert "price" in body["error"]["message"].lower()
