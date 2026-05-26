@@ -14,7 +14,7 @@ Use this skill for any task that changes or explains the `portfolio` command lin
 - `portfolio_db/reporting_service.py` - as-of valuation, cash/position reporting
 - `portfolio_db/transaction_service.py` - add/edit/delete/exchange behavior
 - `portfolio_db/price_cache_service.py` - cached prices, repair flows, stale-state handling
-- `portfolio_db/database.py` - DuckDB schema and pagination queries
+- `portfolio_db/database.py` - PostgreSQL persistence layer: connection, schema setup, migrations, all repository/query methods (no direct SQL outside this file)
 - `portfolio_db/validators.py` - shared validation rules and limits
 - `portfolio_db/response.py` - JSON envelope and error shape
 - `tests/test_cli_help.py` and pytest coverage - verify the public contract

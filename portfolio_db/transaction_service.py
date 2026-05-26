@@ -117,15 +117,7 @@ class TransactionService:
 
         # SELL must not exceed holdings as-of transaction date
         if action == 'SELL':
-            net_on_date = self.db.con.execute(
-                """
-                SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
-                                         WHEN action='SELL' THEN -quantity
-                                         ELSE 0 END), 0)
-                FROM transactions WHERE asset = ? AND date <= ?
-                """,
-                [asset, date_obj],
-            ).fetchone()[0]
+            net_on_date = self.db.get_net_holdings_as_of(asset, date_obj)
             if quantity > net_on_date:
                 raise ValueError(
                     f"Cannot SELL {quantity} of {asset}: "
@@ -221,15 +213,7 @@ class TransactionService:
 
         # SELL must not exceed holdings as-of transaction date (exclude self)
         if updated['action'] == 'SELL':
-            net_on_date = self.db.con.execute(
-                """
-                SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
-                                         WHEN action='SELL' THEN -quantity
-                                         ELSE 0 END), 0)
-                FROM transactions WHERE asset = %s AND date <= %s AND id != %s
-                """,
-                [updated['asset'], updated['date'], transaction_id],
-            ).fetchone()[0]
+            net_on_date = self.db.get_net_holdings_as_of(updated['asset'], updated['date'], exclude_id=transaction_id)
             if float(updated['quantity']) > net_on_date:
                 raise ValueError(
                     f"Cannot SELL {updated['quantity']} of {updated['asset']}: "
@@ -297,13 +281,11 @@ class TransactionService:
 
         # Capture rollback snapshot before mutating state
         last_date_before = self.db.get_last_transaction_date()
-        remaining = self.db.con.execute(
-            "SELECT COUNT(*) FROM transactions WHERE id != ?", [transaction_id]
-        ).fetchone()[0]
+        remaining = self.db.count_transactions_excluding(transaction_id)
+        earliest_other = self.db.get_earliest_other_transaction_date(transaction_id)
         is_full_recalc = remaining == 0 or (
-            last_date_before is not None and trans_date <= self.db.con.execute(
-                "SELECT MIN(date) FROM transactions WHERE id != %s", [transaction_id]
-            ).fetchone()[0]
+            last_date_before is not None and earliest_other is not None
+            and trans_date <= earliest_other
         )
         rollback_snapshot = self._capture_rollback_snapshot(
             from_date=trans_date,
@@ -320,18 +302,7 @@ class TransactionService:
             recalc_result = recalculate_fn(from_date=trans_date)
         except Exception:
             # Re-insert the deleted row with original values
-            self.db.con.execute(
-                """
-                INSERT INTO transactions
-                (id, date, asset, action, quantity, asset_type, price, currency,
-                 fees, exchange, data_source, account, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                [trans[0], trans[1], trans[2], trans[3], trans[4],
-                 trans[5], trans[6], trans[7], trans[8], trans[9],
-                 trans[10], trans[11], trans[12], trans[13]],
-            )
-            self.db.con.commit()
+            self.db.re_insert_transaction_row(trans)
             self._restore_rollback_snapshot(rollback_snapshot)
             raise
 

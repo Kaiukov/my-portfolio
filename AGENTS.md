@@ -127,26 +127,30 @@ uv run ruff check .  # lint
 uv run portfolio     # run CLI
 ```
 
-## Architecture
+## Architecture layers
 
-- `portfolio_db/cli.py` — Click CLI commands and help text
-- `portfolio_db/portfolio_service.py` — main orchestrator; reporting snapshots, write flows
-- `portfolio_db/reporting_service.py` — as-of valuation, cash/position reporting
-- `portfolio_db/transaction_service.py` — add/edit/delete/exchange validation and rollback
-- `portfolio_db/calculator.py` — daily return calculation (investment_return vs portfolio_daily_return)
-- `portfolio_db/performance_service.py` — risk metrics, benchmark comparison, concentration
-- `portfolio_db/database.py` — PostgreSQL connection, schema initialization, migrations, pagination
-- `portfolio_db/sql/schema.sql` — PostgreSQL DDL: tables (transactions, prices, daily_returns, refresh_log, etc.)
-- `portfolio_db/sql/functions.sql` — PostgreSQL helper functions for asset type detection, price lookups, valuations
-- `portfolio_db/sql/procedures.sql` — PostgreSQL procedures: refresh_daily_returns_sql (main calculation engine)
-- `portfolio_db/sql/views.sql` — PostgreSQL views: current_holdings, cash_balances, portfolio_allocation, portfolio_summary
-- `portfolio_db/sql/triggers.sql` — PostgreSQL triggers: auto-update timestamp columns
-- `portfolio_db/domain.py` — SINGLE SOURCE OF TRUTH for currencies, FX tickers, cash buckets, action helpers
-- `portfolio_db/response.py` — JSON envelope: `success()` exits 0, `error()` calls `sys.exit(1)` and never returns
-- `portfolio_db/logger.py` — structured JSON logs to `PORTFOLIO_LOG_PATH` (file only, never stdout)
-- `portfolio_db/validators.py` — shared validation
-- `portfolio_db/price_service.py` — yfinance wrapper with reverse-quoted FX inversion
-- `portfolio_db/price_cache_service.py` — cached prices, repair flows, stale-state
+Three layers. Each owns its domain. No layer reaches into a layer below it that is not its direct dependency.
+
+### PostgreSQL persistence (portfolio_db/database.py)
+Owns: SQL, psycopg driver, schema setup, migrations, connection lifecycle, PORTFOLIO_DB_URL resolution, all repository/query methods.
+Rule: No caller outside this file may use `db.con` directly.
+
+### Shared service / use-case layer
+Files: portfolio_service.py, transaction_service.py, reporting_service.py, recalculation_service.py, performance_service.py, price_service.py, price_cache_service.py, calculator.py, domain.py, validators.py
+Owns: business logic, financial invariants, transaction rules (SELL-as-of-date, exchange validation), recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior.
+Rule: No financial invariant lives in CLI or API adapters. This layer is callable by CLI now and by MCP/API adapters later without modification.
+
+### Adapter layer (current: CLI only)
+Files: portfolio_db/cli.py
+Owns: Click argument parsing, light user-facing validation (format checks, required flags), calling shared use-case layer, serializing pure JSON responses via response.py.
+Rules:
+- No SQL or psycopg imports.
+- No business/financial logic.
+- No duplication of service logic.
+- Future MCP/API adapters must be able to reuse all shared use-case layer directly without copying CLI code.
+
+### Future adapters (NOT in this PR)
+MCP and REST API are future adapters. They will call the same shared service/use-case layer. No implementation in this PR; no new heavy dependencies.
 
 ## CLI JSON contract
 
@@ -183,11 +187,11 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 
 ## Financial correctness rules
 
-These are hard-won invariants. Violating any of them produces wrong JSON that looks correct.
+These are the invariants future changes must preserve.
 
 ### Single source of truth — domain.py
 
-All currencies, FX tickers, cash bucket defaults, cash display names, and action groupings live only in `domain.py`. Do NOT redeclare `CASH_FX_SYMBOLS`, `CASH_BUCKET_DEFAULTS`, `CASH_DISPLAY_CURRENCY`, or action sets in `portfolio_service.py` or `calculator.py`. The class-level shadows in `PortfolioService` (lines 60-71) are stale subsets — they must be removed and imports from `domain.py` used instead.
+All currencies, FX tickers, cash bucket defaults, cash display names, and action groupings live in `domain.py`. Service and calculator code may import or re-export those symbols, but they must not maintain parallel copies or drift from `domain.py`.
 
 ### Metric documentation
 
@@ -199,58 +203,43 @@ Every metric MUST document:
 
 ### Fees policy
 
-CLI accepts `--fees` on BUY/SELL but the calculator and reporting layer ignore fees for trade cash movements (`quantity * price` only, no fee subtraction). Fees are only accounted as standalone `FEE` transactions. Either:
-- Prohibit `--fees` on BUY/SELL, OR
-- Apply fees to cash balance, cost basis, realized gain, and total profit.
+BUY/SELL fees are part of the financial model and must flow consistently through cash movement, cost basis, realized gain, and total profit. Standalone `FEE` transactions remain part of reporting totals.
 
-A half-supported `--fees` on trades is misleading. Pick one.
+### Risk and benchmark math
 
-### Risk metrics: use investment_return, not portfolio_daily_return
+Risk metrics and monthly aggregation must use `investment_return`. Benchmark-relative metrics must be joined on `date`, not aligned by array position.
 
-`portfolio_daily_return` includes deposit/withdrawal impact. All risk metrics (volatility, VaR, beta, Sharpe, Sortino, Treynor, IR, capture ratios) and monthly aggregation must use `investment_return` instead. Currently `performance_service.py:146` uses `portfolio_daily_return` — this contaminates every downstream metric.
+### Monthly return naming
 
-### Benchmark alignment: join by date, never by array index
+Public performance output uses `median_monthly_return`. Do not reintroduce `avg_monthly_return` in emitted JSON.
 
-SPY and portfolio return arrays must be joined on date, not aligned via `[-n:]` array slicing. Array alignment breaks on weekends, holidays, crypto trading days, and cash-only days. Currently `performance_service.py:211-213` and `:316-319` use array-position alignment.
+### Transaction rules
 
-### `avg_monthly_return` is a median
+SELL validation is as-of-date based. `exchange_currency` validation lives in the service layer. CLI checks are only UX validation.
 
-`performance_service.py:380` returns `sorted(monthly_returns)[len(monthly_returns)//2]` — this is the median, not average. Either rename to `median_monthly_return` or compute the mean.
+### Mutation safety
 
-### SELL validation must use as-of-date
+`add`, `edit`, `exchange`, and `delete` must restore state if recalculation fails.
 
-CLI SELL conflict check (`cli.py:309`) queries total net holdings without date filtering. A backdated SELL can pass because future BUY transactions inflate the net. The invariant "cannot sell more than held on transaction date" must live in the service layer with a date-aware query.
+### Service layer purity
 
-### `exchange_currency` validation at service layer
+Service code must not print directly. Structured output and errors go through the logging and JSON response layers.
 
-From/to assets must be cash-like, quantity > 0, rate > 0, from != to. CLI currently only checks from != to. Move these checks to `transaction_service.py:exchange_currency`.
+### Price cache errors
 
-### All mutating commands must be rollback-safe
+Missing or failed price fetches and inserts must surface in verification and repair output.
 
-`add`, `edit`, and `exchange` capture rollback snapshots and restore on recalc failure. `delete` does NOT (`transaction_service.py:256-291`) — it deletes the row, then deletes daily_returns, then recalculates. If recalc fails, state is broken. Give `delete` the same rollback treatment.
-
-### CLI validation is NOT the source of truth
-
-Every financial invariant that must hold for correctness (SELL-as-of-date, exchange validation, cash-like asset rules, quantity/price constraints) must live in the service layer. CLI validation is a UX convenience, not a safety net.
-
-### No `print()` from service layer
-
-`price_service.py:102` prints a warning to stdout. This breaks the "pure JSON output" contract. Route through structured logging (`logger.py`) instead.
-
-### Price cache must surface errors
-
-Failed price fetches/inserts must appear in structured status (repair log, verify_prices output). Silent swallowing produces wrong valuations.
-
-### Bug fix template: three tests
+### Test template
 
 Every calculation bug fix needs:
-1. Hand-calculated fixture test (independent verification)
-2. Regression test (specific scenario that was broken)
-3. CLI JSON snapshot test (end-to-end contract)
+1. A hand-calculated fixture test
+2. A regression test for the broken scenario
+3. A CLI JSON snapshot test
 
-### Calculator action constants
+### Open issue #22 items
 
-`calculator.py:18-22` redeclares action groupings (`EXTERNAL_INFLOW_ACTIONS`, etc.) that duplicate `PortfolioService` and `domain.py`. These must come from a single source.
+- Time-based stale-price max-age is still not enforced.
+- Read/report and write/recalc date formats are still split (`YYYY-MM-DD` vs `DD-MM-YYYY`).
 
 ## Style
 
