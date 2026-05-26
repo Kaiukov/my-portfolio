@@ -553,7 +553,7 @@ def test_portfolio_service_constants_from_domain():
 
 def test_calculator_uses_domain_action_constants():
     from portfolio_db import domain
-    from portfolio_db import calculator
+    from portfolio_db._legacy import calculator
 
     assert calculator.EXTERNAL_INFLOW_ACTIONS is domain.EXTERNAL_INFLOW_ACTIONS
     assert calculator.EXTERNAL_OUTFLOW_ACTIONS is domain.EXTERNAL_OUTFLOW_ACTIONS
@@ -799,3 +799,45 @@ def test_price_service_does_not_print_to_stdout(monkeypatch):
 
     stdout_output = fake_stdout.getvalue()
     assert stdout_output == "", f"price_service printed to stdout: {stdout_output!r}"
+
+
+def test_runtime_modules_do_not_import_calculator():
+    """Enforce that production code modules don't import the legacy calculator."""
+    import os
+    import ast
+
+    def imports_calculator(filepath):
+        """Check if a file imports calculator."""
+        try:
+            with open(filepath, "r") as f:
+                tree = ast.parse(f.read())
+        except Exception:
+            return False
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and "calculator" in node.module:
+                    return True
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "calculator" in alias.name:
+                        return True
+        return False
+
+    portfolio_db_dir = Path(__file__).resolve().parents[1] / "portfolio_db"
+    runtime_modules = []
+
+    for root, dirs, files in os.walk(portfolio_db_dir):
+        # Skip _legacy directory
+        if "_legacy" in root.split(os.sep):
+            continue
+
+        for file in files:
+            if file.endswith(".py") and not file.startswith("test_"):
+                filepath = os.path.join(root, file)
+                if imports_calculator(filepath):
+                    runtime_modules.append(filepath)
+
+    assert (
+        not runtime_modules
+    ), f"Runtime modules import calculator (legacy): {runtime_modules}"

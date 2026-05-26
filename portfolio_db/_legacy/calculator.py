@@ -1,4 +1,10 @@
-"""Daily return calculation with separated investment returns vs cash flows."""
+"""LEGACY: Non-runtime reference implementation. Do not import from production code.
+
+Daily return calculation with separated investment returns vs cash flows.
+
+This is a reference implementation that has been superseded by PostgreSQL-based
+calculations. It is retained for testing and historical reference only.
+"""
 
 import pandas as pd
 from datetime import datetime
