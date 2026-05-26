@@ -68,13 +68,10 @@ class _ConnectionAdapter:
         self._read_only = read_only
 
     def execute(self, sql: str, params=None):
-        """Execute SQL. Supports ? placeholders (converted to %s for psycopg)."""
-        # Convert ? to %s for psycopg compatibility
-        # NOTE: This is a temporary measure. SQL should use %s placeholders directly.
-        normalized_sql = sql.replace("?", "%s")
+        """Execute SQL with psycopg %s placeholders."""
         if params is None:
-            return self._conn.execute(normalized_sql)
-        return self._conn.execute(normalized_sql, params)
+            return self._conn.execute(sql)
+        return self._conn.execute(sql, params)
 
     def commit(self):
         self._conn.commit()
@@ -114,7 +111,7 @@ class PortfolioDatabase:
             SELECT 1
             FROM information_schema.tables
             WHERE table_schema = current_schema()
-              AND table_name = ?
+              AND table_name = %s
             """,
             [table_name],
         ).fetchone()
@@ -140,11 +137,11 @@ class PortfolioDatabase:
                  AND tc.table_schema = kcu.table_schema
                  AND tc.table_name = kcu.table_name
                 WHERE tc.table_schema = current_schema()
-                  AND tc.table_name = ?
+                  AND tc.table_name = %s
                   AND tc.constraint_type = 'PRIMARY KEY'
             ) pk ON pk.column_name = c.column_name
             WHERE c.table_schema = current_schema()
-              AND c.table_name = ?
+              AND c.table_name = %s
             ORDER BY c.ordinal_position
             """,
             [table_name, table_name],
@@ -674,10 +671,10 @@ class PortfolioDatabase:
         params = []
         where = []
         if start_date:
-            where.append("date >= ?")
+            where.append("date >= %s")
             params.append(start_date)
         if end_date:
-            where.append("date <= ?")
+            where.append("date <= %s")
             params.append(end_date)
         where_clause = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -690,7 +687,7 @@ class PortfolioDatabase:
         rows = self.con.execute(
             f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
                        account, created_at, updated_at
-                FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?""",
+                FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT %s OFFSET %s""",
             params_page,
         ).fetchall()
         rows = list(reversed(rows))
@@ -807,7 +804,7 @@ class PortfolioDatabase:
     def get_price(self, ticker: str, date_obj) -> float:
         """Get price for ticker on specific date."""
         result = self.con.execute(
-            "SELECT price FROM prices WHERE ticker = ? AND date = ? LIMIT 1",
+            "SELECT price FROM prices WHERE ticker = %s AND date = %s LIMIT 1",
             [ticker, date_obj],
         ).fetchone()
         return float(result[0]) if result else None
@@ -928,10 +925,10 @@ class PortfolioDatabase:
         params = []
         where = []
         if start_date:
-            where.append("date >= ?")
+            where.append("date >= %s")
             params.append(start_date)
         if end_date:
-            where.append("date <= ?")
+            where.append("date <= %s")
             params.append(end_date)
         where_clause = ("WHERE " + " AND ".join(where)) if where else ""
 

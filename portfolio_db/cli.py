@@ -1,10 +1,10 @@
 """CLI interface for portfolio_db."""
 
 import click
-import shutil
 import subprocess
 from datetime import datetime, date
 from pathlib import Path
+from psycopg import sql as pgsql
 from portfolio_db.database import resolve_db_target
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
@@ -54,7 +54,7 @@ def _sql_literal(value) -> str:
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, datetime):
-        return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S')}'"
+        return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')}'"
     if isinstance(value, date):
         return f"DATE '{value.isoformat()}'"
     if isinstance(value, (int, float)):
@@ -84,13 +84,25 @@ def _dump_postgres_backup(target: str, dst: Path):
             for table, columns in table_columns:
                 if not service.db._table_exists(table):
                     continue
-                fp.write(f"DELETE FROM {table};\n")
+                delete_stmt = pgsql.SQL("DELETE FROM {};").format(pgsql.Identifier(table))
+                fp.write(delete_stmt.as_string(service.db.con) + "\n")
+
+                col_list = pgsql.SQL(", ").join([pgsql.Identifier(col) for col in columns])
+                select_stmt = pgsql.SQL("SELECT {} FROM {} ORDER BY 1").format(
+                    col_list,
+                    pgsql.Identifier(table)
+                )
                 rows = service.db.con.execute(
-                    f"SELECT {', '.join(columns)} FROM {table} ORDER BY 1"
+                    select_stmt.as_string(service.db.con)
                 ).fetchall()
                 for row in rows:
                     values = ", ".join(_sql_literal(value) for value in row)
-                    fp.write(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({values});\n")
+                    insert_stmt = pgsql.SQL("INSERT INTO {} ({}) VALUES ({});").format(
+                        pgsql.Identifier(table),
+                        pgsql.SQL(", ").join([pgsql.Identifier(col) for col in columns]),
+                        pgsql.SQL(values)
+                    )
+                    fp.write(insert_stmt.as_string(service.db.con) + "\n")
             fp.write("COMMIT;\n")
     finally:
         if service:
