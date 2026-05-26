@@ -513,7 +513,7 @@ class PortfolioService:
             build_snapshot_fn=self.build_reporting_snapshot,
         )
 
-    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, exchange: str = '', data_source: str = '', account: str = None) -> dict:
+    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, fee_currency: str = '', exchange: str = '', data_source: str = '', account: str = None) -> dict:
         """
         Add transaction and auto-trigger smart recalculation.
 
@@ -536,7 +536,7 @@ class PortfolioService:
         if normalized_action == 'TRANSFER' and not account:
             raise ValueError("TRANSFER requires an account label (use --account)")
         return self._transactions.add_transaction(
-            date_obj, asset, action, quantity, price, asset_type, currency, fees, exchange, data_source, account,
+            date_obj, asset, action, quantity, price, asset_type, currency, fees, fee_currency, exchange, data_source, account,
             validate_action_fn=self.validate_action,
             derive_asset_type_fn=self.derive_asset_type,
             recalculate_fn=self.recalculate,

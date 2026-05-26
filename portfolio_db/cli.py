@@ -328,9 +328,10 @@ Examples:
 @click.option("--price", type=float, default=None, help="Positive price; required for BUY/SELL")
 @click.option("--currency", default="USD", show_default=True, help="Currency code for the transaction")
 @click.option("--fees", type=float, default=None, help="Non-negative fee amount")
+@click.option("--fee-currency", default="", help="Currency code for fees (default: same as --currency)")
 @click.option("--exchange", default="", help="Broker or exchange label; required for all add operations")
 @click.option("--account", default=None, help="Account label; required for TRANSFER (e.g. broker_a)")
-def add(date_str, asset, action, quantity, price, currency, fees, exchange, account):
+def add(date_str, asset, action, quantity, price, currency, fees, fee_currency, exchange, account):
     """Add a transaction and recalculate reporting data.
 
 Dates use DD-MM-YYYY format (e.g. 01-01-2026).
@@ -383,6 +384,7 @@ Dates use DD-MM-YYYY format (e.g. 01-01-2026).
             price=price,
             currency=currency,
             fees=fees,
+            fee_currency=fee_currency,
             exchange=exchange,
             account=account,
         )
