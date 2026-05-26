@@ -24,8 +24,8 @@ END) <> 0;
 CREATE OR REPLACE VIEW cash_balances AS
 WITH cash_txns AS (
     SELECT
-        get_cash_key_for_asset_sql(asset, COALESCE(asset_type, get_asset_type_sql(asset))) AS cash_key,
-        cash_display_currency_sql(get_cash_key_for_asset_sql(asset, COALESCE(asset_type, get_asset_type_sql(asset)))) AS currency,
+        get_cash_key_for_asset_sql(asset, get_asset_type_sql(asset)) AS cash_key,
+        cash_display_currency_sql(get_cash_key_for_asset_sql(asset, get_asset_type_sql(asset))) AS currency,
         CASE
             WHEN asset LIKE 'CASH %' THEN asset
             WHEN get_asset_type_sql(asset) = 'cash_base' THEN 'CASH USD'
@@ -98,9 +98,8 @@ ORDER BY v.value_usd DESC;
 CREATE OR REPLACE VIEW portfolio_summary AS
 SELECT
     (SELECT COUNT(DISTINCT asset) FROM current_holdings) AS holding_count,
-    (SELECT SUM(net_quantity) FROM cash_balances) AS total_cash_usd,
+    (SELECT SUM(balance) FROM cash_balances) AS total_cash_usd,
     (SELECT SUM(value_usd) FROM portfolio_allocation) AS portfolio_value_usd,
     (SELECT MAX(date) FROM transactions) AS last_transaction_date,
     (SELECT COUNT(*) FROM transactions) AS transaction_count,
     CURRENT_TIMESTAMP AS generated_at;
-TIMESTAMP AS generated_at;

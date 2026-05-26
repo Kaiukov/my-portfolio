@@ -54,7 +54,7 @@ BEGIN
     ON CONFLICT (asset) DO NOTHING;
 
     INSERT INTO holdings (asset, qty)
-    SELECT DISTINCT get_cash_key_for_asset_sql(asset, COALESCE(asset_type, get_asset_type_sql(asset))), 0
+    SELECT DISTINCT get_cash_key_for_asset_sql(asset, get_asset_type_sql(asset)), 0
     FROM transactions
     ON CONFLICT (asset) DO NOTHING;
 
@@ -67,7 +67,7 @@ BEGIN
             WHERE date = v_date
             ORDER BY id
         LOOP
-            v_asset_type := COALESCE(tx.asset_type, get_asset_type_sql(tx.asset));
+            v_asset_type := get_asset_type_sql(tx.asset);
             v_cash_key := get_cash_key_for_asset_sql(tx.asset, v_asset_type);
 
             INSERT INTO holdings (asset, qty)
@@ -135,7 +135,7 @@ BEGIN
             FROM transactions
             WHERE date = v_date
         LOOP
-            v_asset_type := COALESCE(tx.asset_type, get_asset_type_sql(tx.asset));
+            v_asset_type := get_asset_type_sql(tx.asset);
             IF is_cash_like_sql(tx.asset) THEN
                 IF upper(tx.action) = 'DEPOSIT' THEN
                     v_cash_flow_impact := v_cash_flow_impact + cash_amount_to_usd_sql(tx.asset, tx.quantity, v_date);

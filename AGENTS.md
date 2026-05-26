@@ -13,6 +13,15 @@ cmux read-screen --surface surface:N --lines 20   # read split output
 cmux tree                      # show all workspaces/panes
 ```
 
+### Agetns deployment
+
+- for most task utilize `deepseek v4 flash` (fast, cheap, good for lint, imports, mechanical edits)
+- for complex reasoning, architecture, bug fixes, use `deepseek v4 pro` (more expensive, better at reasoning and code generation)
+- use `--yolo` flag to bypass all permission prompts for maximum speed (only for trusted commands)
+- agents must be pro-active and creating for speed up proccess. 
+- main agent must deligatee task to agents via cmux cli commands and to be an orcestrator of the process.
+- orcestrator agent must spawn, steer and kill agents as needed, and be responsible for final output.
+
 ## Command Code (`cmd`) in split view
 
 ```bash
