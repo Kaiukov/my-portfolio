@@ -17,7 +17,7 @@ for module_name in list(sys.modules):
     if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
         del sys.modules[module_name]
 
-from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
+from portfolio_db.portfolio_service import PortfolioService
 from portfolio_db.performance_service import PerformanceService
 from portfolio_db.price_service import PriceService
 
@@ -302,7 +302,6 @@ class TestContributionByPosition:
     def test_weights_sum_to_100(self, simple_db):
         """All position weights should sum to 100% of portfolio."""
         svc = PortfolioService(simple_db, read_only=True)
-        snap = svc.build_reporting_snapshot()
         contribs = svc.get_contribution_by_position()
         svc.close()
         total_weight = sum(c["weight_pct"] for c in contribs)

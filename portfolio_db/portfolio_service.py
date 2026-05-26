@@ -2,14 +2,12 @@
 
 import json
 import os
-from datetime import datetime, date, timezone
-from pathlib import Path
+from datetime import datetime, date
 
 from portfolio_db.database import PortfolioDatabase
 from portfolio_db.database import resolve_db_target
 from portfolio_db.price_service import PriceService
 from portfolio_db.domain import (
-    BASE_CURRENCY,
     CASH_FX_SYMBOLS as _CASH_FX_SYMBOLS,
     CASH_BUCKET_DEFAULTS as _CASH_BUCKET_DEFAULTS,
     CASH_DISPLAY_CURRENCY as _CASH_DISPLAY_CURRENCY,

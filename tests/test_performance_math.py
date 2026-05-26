@@ -20,7 +20,6 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from portfolio_db.portfolio_service import PortfolioService
-from portfolio_db.performance_service import PerformanceService
 from portfolio_db.price_service import PriceService
 
 # ── Price stubs ────────────────────────────────────────────────────────────────

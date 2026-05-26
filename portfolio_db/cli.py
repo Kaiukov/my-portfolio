@@ -3,10 +3,9 @@
 import click
 import shutil
 import subprocess
-import sys
 from datetime import datetime, date
 from pathlib import Path
-from portfolio_db.database import is_postgres_url, resolve_db_target
+from portfolio_db.database import resolve_db_target
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
 from portfolio_db.response import success, error, build_pagination
 from portfolio_db.validators import (
@@ -16,7 +15,6 @@ from portfolio_db.validators import (
     validate_non_negative_float,
     validate_positive_int,
     validate_file_exists,
-    validate_non_empty,
 )
 import portfolio_db.logger as log
 
@@ -703,15 +701,6 @@ def delete(trans_id, confirm, dry_run, backup):
             service.close()
         return
 
-    if backup:
-        src = Path(db)
-        if src.exists():
-            from datetime import datetime as _dt
-            ts = _dt.now().strftime("%Y%m%d-%H%M%S")
-            dst = src.parent / f"{src.stem}.backup-{ts}.db"
-            shutil.copy2(src, dst)
-            log.backup_created(str(src), str(dst), dst.stat().st_size)
-
     service = None
     try:
         service = PortfolioService()
@@ -990,40 +979,24 @@ Examples:
 """)
 @click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.db)")
 def backup(out):
-    """Create a timestamped copy of the portfolio database."""
-    target = resolve_db_target(db)
-    if is_postgres_url(target):
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        dst = Path(out) if out else Path(f"portfolio.backup-{timestamp}.sql")
-        cmd = ["pg_dump", target, "-f", str(dst)]
+    """Create a timestamped backup of the PostgreSQL database."""
+    target = resolve_db_target()
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst = Path(out) if out else Path(f"portfolio.backup-{timestamp}.sql")
+    cmd = ["pg_dump", target, "-f", str(dst)]
+    try:
+        subprocess.run(cmd, check=True)
+        size_bytes = dst.stat().st_size
+        log.backup_created(target, str(dst), size_bytes)
+        success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes})
+    except FileNotFoundError:
         try:
-            subprocess.run(cmd, check=True)
+            _dump_postgres_backup(target, dst)
             size_bytes = dst.stat().st_size
             log.backup_created(target, str(dst), size_bytes)
-            success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes})
-        except FileNotFoundError:
-            try:
-                _dump_postgres_backup(target, dst)
-                size_bytes = dst.stat().st_size
-                log.backup_created(target, str(dst), size_bytes)
-                success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes, "mode": "sql_dump"})
-            except Exception as e:
-                error("backup", "IO_ERROR", str(e))
+            success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes, "mode": "sql_dump"})
         except Exception as e:
             error("backup", "IO_ERROR", str(e))
-        return
-
-    validate_file_exists(db, "--db", "backup")
-    src = Path(db)
-    if out is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        dst = src.parent / f"{src.stem}.backup-{timestamp}.db"
-    else:
-        dst = Path(out)
-    try:
-        shutil.copy2(src, dst)
-        log.backup_created(str(src), str(dst), dst.stat().st_size)
-        success("backup", {"source": str(src), "backup": str(dst), "size_bytes": dst.stat().st_size})
     except Exception as e:
         error("backup", "IO_ERROR", str(e))
 
@@ -1034,13 +1007,10 @@ def backup(out):
 def init():
     """Initialize a new portfolio database (idempotent)."""
     try:
-        target = resolve_db_target(db)
+        target = resolve_db_target()
         service = PortfolioService(target)
         service.close()
-        if is_postgres_url(target):
-            success("init", {"db_target": "postgresql", "status": "ready"})
-        else:
-            success("init", {"db_path": str(Path(db).resolve()), "status": "ready"})
+        success("init", {"db_target": "postgresql", "status": "ready"})
     except Exception as e:
         error("init", "DB_ERROR", str(e))
 

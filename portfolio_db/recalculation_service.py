@@ -115,7 +115,6 @@ class RecalculationService:
             is_full_recalc = False
 
         # Get date range - always extend to today
-        max_trans_date = transactions[-1][1]
         max_date = date.today()
 
         # Combine assets and FX currencies for cached price loading

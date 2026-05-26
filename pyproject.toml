@@ -28,6 +28,7 @@ pythonpath = ["."]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.15.14",
 ]
 
 [tool.ruff]

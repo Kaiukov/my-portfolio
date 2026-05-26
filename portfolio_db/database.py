@@ -1061,13 +1061,6 @@ class PortfolioDatabase:
             [start_date, end_date],
         ).fetchall()
 
-    def get_last_transaction_date(self):
-        """Get date of most recent transaction."""
-        result = self.con.execute(
-            "SELECT MAX(date) FROM transactions"
-        ).fetchone()
-        return result[0] if result and result[0] else None
-
     def get_daily_returns_from_date(self, start_date):
         """Get daily returns from specific date onwards with separated metrics."""
         return self.con.execute(

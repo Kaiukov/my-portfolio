@@ -2,7 +2,7 @@
 
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict
 
 import portfolio_db.logger as log

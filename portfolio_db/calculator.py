@@ -6,10 +6,8 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 from portfolio_db.domain import (
-    BASE_CURRENCY,
     LEGACY_CASH_TO_FX,
     ASSET_TYPE_TO_CASH,
-    SUPPORTED_FX_TICKERS,
     EXTERNAL_INFLOW_ACTIONS,
     TRANSFER_ACTIONS,
     EXTERNAL_OUTFLOW_ACTIONS,
