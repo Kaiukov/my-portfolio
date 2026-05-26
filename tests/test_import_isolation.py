@@ -25,3 +25,18 @@ def test_workspace_sentinel():
 def test_version_present():
     assert hasattr(portfolio_db, "__version__")
     assert portfolio_db.__version__ == "0.1.0"
+
+
+def test_cli_has_no_direct_db_con_access():
+    """CLI adapter must not call db.con directly — all SQL must go through database.py methods."""
+    import ast
+    import pathlib
+    cli_src = pathlib.Path(__file__).resolve().parents[1] / "portfolio_db" / "cli.py"
+    tree = ast.parse(cli_src.read_text())
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            # flag any .con.execute or .con.cursor chain
+            if node.attr in ("execute", "cursor") and isinstance(node.value, ast.Attribute) and node.value.attr == "con":
+                violations.append(f"line {node.lineno}: db.con.{node.attr}() call")
+    assert not violations, "CLI must not call db.con directly:\n" + "\n".join(violations)

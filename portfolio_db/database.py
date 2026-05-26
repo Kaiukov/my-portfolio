@@ -1,6 +1,7 @@
 """Database setup and transaction management."""
 
 import os
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
@@ -2422,6 +2423,132 @@ class PortfolioDatabase:
             """,
             [limit],
         ).fetchall()
+
+    def re_insert_transaction_row(self, trans: tuple) -> None:
+        """Re-insert a previously deleted transaction row for rollback.
+
+        trans is the full tuple returned by get_transaction_by_id:
+        (id, date, asset, action, quantity, asset_type, price, currency,
+         fees, exchange, data_source, account, created_at, updated_at)
+        """
+        self.con.execute(
+            """
+            INSERT INTO transactions
+            (id, date, asset, action, quantity, asset_type, price, currency,
+             fees, exchange, data_source, account, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [trans[0], trans[1], trans[2], trans[3], trans[4],
+             trans[5], trans[6], trans[7], trans[8], trans[9],
+             trans[10], trans[11], trans[12], trans[13]],
+        )
+        self.con.commit()
+
+    def get_net_holdings_as_of(self, asset: str, as_of_date, exclude_id: int = None) -> float:
+        """Return net BUY-minus-SELL quantity for asset up to and including as_of_date.
+
+        exclude_id: skip this transaction row (used by edit_transaction to exclude self).
+        """
+        if exclude_id is not None:
+            row = self.con.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN quantity
+                                         WHEN action = 'SELL' THEN -quantity
+                                         ELSE 0 END), 0)
+                FROM transactions
+                WHERE asset = %s AND date <= %s AND id != %s
+                """,
+                [asset, as_of_date, exclude_id],
+            ).fetchone()
+        else:
+            row = self.con.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN quantity
+                                         WHEN action = 'SELL' THEN -quantity
+                                         ELSE 0 END), 0)
+                FROM transactions
+                WHERE asset = %s AND date <= %s
+                """,
+                [asset, as_of_date],
+            ).fetchone()
+        return float(row[0]) if row else 0.0
+
+    def count_transactions_excluding(self, exclude_id: int) -> int:
+        """Return count of all transactions except the one with exclude_id."""
+        row = self.con.execute(
+            "SELECT COUNT(*) FROM transactions WHERE id != %s",
+            [exclude_id],
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def get_earliest_other_transaction_date(self, exclude_id: int):
+        """Return the earliest transaction date ignoring exclude_id, or None."""
+        row = self.con.execute(
+            "SELECT MIN(date) FROM transactions WHERE id != %s",
+            [exclude_id],
+        ).fetchone()
+        return row[0] if row else None
+
+    def dump_sql_backup(self, dst: Path) -> None:
+        """Write a restorable SQL backup when pg_dump is unavailable.
+
+        Uses psycopg's Identifier quoting to safely handle table/column names.
+        Called by the CLI backup command as the pg_dump fallback.
+        """
+        from psycopg import sql as pgsql  # noqa: PLC0415
+
+        table_columns = [
+            ("transactions", ["id", "date", "asset", "action", "quantity", "asset_type", "price", "currency", "fees", "exchange", "data_source", "account", "created_at", "updated_at"]),
+            ("prices", ["date", "ticker", "price"]),
+            ("daily_returns", ["date", "portfolio_value", "portfolio_daily_return", "investment_return", "cash_flow_impact", "adjusted_base"]),
+            ("refresh_log", ["refresh_id", "refresh_date", "refresh_type", "rows_affected", "timestamp"]),
+            ("recalc_cache", ["cache_key", "last_calc_date", "transaction_count", "prices_hash", "timestamp"]),
+            ("service_state", ["state_key", "state_value", "updated_at"]),
+            ("repair_log", ["repair_id", "ticker", "start_date", "end_date", "status", "rows_loaded", "message", "timestamp"]),
+        ]
+
+        def _sql_literal(value) -> str:
+            from datetime import datetime, date as date_cls
+            if value is None:
+                return "NULL"
+            if isinstance(value, bool):
+                return "TRUE" if value else "FALSE"
+            if isinstance(value, datetime):
+                return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')}'"
+            if isinstance(value, date_cls):
+                return f"DATE '{value.isoformat()}'"
+            if isinstance(value, (int, float)):
+                if isinstance(value, float) and value != value:
+                    return "NULL"
+                return repr(value)
+            return "'" + str(value).replace("'", "''") + "'"
+
+        with dst.open("w", encoding="utf-8") as fp:
+            fp.write("-- PostgreSQL backup generated by portfolio backup\n")
+            fp.write("BEGIN;\n")
+            for table, columns in table_columns:
+                if not self._table_exists(table):
+                    continue
+                delete_stmt = pgsql.SQL("DELETE FROM {};").format(pgsql.Identifier(table))
+                fp.write(delete_stmt.as_string(self.con._conn) + "\n")
+
+                col_list = pgsql.SQL(", ").join([pgsql.Identifier(col) for col in columns])
+                select_stmt = pgsql.SQL("SELECT {} FROM {} ORDER BY 1").format(
+                    col_list,
+                    pgsql.Identifier(table),
+                )
+                rows = self.con.execute(
+                    select_stmt.as_string(self.con._conn)
+                ).fetchall()
+                for row in rows:
+                    values = ", ".join(_sql_literal(v) for v in row)
+                    insert_stmt = pgsql.SQL("INSERT INTO {} ({}) VALUES ({});").format(
+                        pgsql.Identifier(table),
+                        pgsql.SQL(", ").join([pgsql.Identifier(col) for col in columns]),
+                        pgsql.SQL(values),
+                    )
+                    fp.write(insert_stmt.as_string(self.con._conn) + "\n")
+            fp.write("COMMIT;\n")
 
     def close(self):
         """Close database connection."""
