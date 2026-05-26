@@ -640,7 +640,7 @@ class PortfolioDatabase:
                 """
                 INSERT INTO transactions
                 (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 [
                     row['date'].date(),
@@ -814,7 +814,7 @@ class PortfolioDatabase:
         self.con.execute(
             """
             INSERT INTO prices (ticker, date, price)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             ON CONFLICT (date, ticker) DO UPDATE SET
                 price = EXCLUDED.price
             """,
@@ -830,7 +830,7 @@ class PortfolioDatabase:
             """
             INSERT INTO daily_returns
             (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (date) DO UPDATE SET
                 portfolio_value = EXCLUDED.portfolio_value,
                 portfolio_daily_return = EXCLUDED.portfolio_daily_return,
@@ -866,7 +866,7 @@ class PortfolioDatabase:
                 self.con.execute("DELETE FROM daily_returns")
             else:
                 self.con.execute(
-                    "DELETE FROM daily_returns WHERE date >= ?",
+                    "DELETE FROM daily_returns WHERE date >= %s",
                     [start_date],
                 )
 
@@ -876,7 +876,7 @@ class PortfolioDatabase:
                         """
                         INSERT INTO daily_returns
                         (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (date) DO UPDATE SET
                             portfolio_value = EXCLUDED.portfolio_value,
                             portfolio_daily_return = EXCLUDED.portfolio_daily_return,
@@ -903,7 +903,7 @@ class PortfolioDatabase:
         """Rebuild daily_returns using the PostgreSQL stored procedure."""
         try:
             row = self.con.execute(
-                "SELECT refresh_daily_returns_sql(?)",
+                "SELECT refresh_daily_returns_sql(%s)",
                 [from_date],
             ).fetchone()
             self.con.commit()
@@ -942,7 +942,7 @@ class PortfolioDatabase:
             f"""SELECT date, portfolio_value, portfolio_daily_return, investment_return,
                        cash_flow_impact, adjusted_base
                 FROM daily_returns {where_clause}
-                ORDER BY date DESC LIMIT ? OFFSET ?""",
+                ORDER BY date DESC LIMIT %s OFFSET %s""",
             params_page,
         ).fetchall()
         rows = list(reversed(rows))
@@ -993,7 +993,7 @@ class PortfolioDatabase:
             """
             INSERT INTO transactions
             (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source, account)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account],
@@ -1010,7 +1010,7 @@ class PortfolioDatabase:
             SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
-            WHERE id = ?
+            WHERE id = %s
             """,
             [transaction_id],
         ).fetchone()
@@ -1035,10 +1035,10 @@ class PortfolioDatabase:
         self.con.execute(
             """
             UPDATE transactions
-            SET date = ?, asset = ?, action = ?, quantity = ?, asset_type = ?, price = ?,
-                currency = ?, fees = ?, exchange = ?, data_source = ?, account = ?,
+            SET date = %s, asset = %s, action = %s, quantity = %s, asset_type = %s, price = %s,
+                currency = %s, fees = %s, exchange = %s, data_source = %s, account = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = %s
             """,
             [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account, transaction_id],
         )
@@ -1052,7 +1052,7 @@ class PortfolioDatabase:
             SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
-            WHERE date >= ? AND date <= ?
+            WHERE date >= %s AND date <= %s
             ORDER BY date, id
             """,
             [start_date, end_date],
@@ -1062,7 +1062,7 @@ class PortfolioDatabase:
         """Get daily returns from specific date onwards with separated metrics."""
         return self.con.execute(
             """SELECT date, portfolio_value, portfolio_daily_return, investment_return,
-                      cash_flow_impact, adjusted_base FROM daily_returns WHERE date >= ? ORDER BY date""",
+                      cash_flow_impact, adjusted_base FROM daily_returns WHERE date >= %s ORDER BY date""",
             [start_date],
         ).fetchall()
 
@@ -1072,9 +1072,9 @@ class PortfolioDatabase:
             """
             WITH params AS (
                 SELECT
-                    ?::date AS as_of_date,
-                    ?::text AS benchmark_ticker,
-                    ?::double precision AS risk_free_rate
+                    %s::date AS as_of_date,
+                    %s::text AS benchmark_ticker,
+                    %s::double precision AS risk_free_rate
             ),
             dr AS (
                 SELECT d.date, d.portfolio_value, d.investment_return
@@ -1292,7 +1292,7 @@ class PortfolioDatabase:
                 SELECT investment_return
                 FROM daily_returns
                 WHERE portfolio_value > 0
-                  AND (?::date IS NULL OR date <= ?::date)
+                  AND (%s::date IS NULL OR date <= %s::date)
             ),
             threshold AS (
                 SELECT PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY investment_return) AS p95,
@@ -1315,9 +1315,9 @@ class PortfolioDatabase:
                 SELECT investment_return
                 FROM daily_returns
                 WHERE portfolio_value > 0
-                  AND (?::date IS NULL OR date <= ?::date)
+                  AND (%s::date IS NULL OR date <= %s::date)
             )
-            SELECT COALESCE(SQRT(AVG(POWER(investment_return - ?, 2)) FILTER (WHERE investment_return < ?)), 0.0)
+            SELECT COALESCE(SQRT(AVG(POWER(investment_return - %s, 2)) FILTER (WHERE investment_return < %s)), 0.0)
             FROM dr
             """,
             [as_of_date, as_of_date, target_daily_pct, target_daily_pct],
@@ -1410,7 +1410,7 @@ class PortfolioDatabase:
                     fees,
                     COALESCE(asset_type, get_asset_type_sql(asset)) AS resolved_asset_type
                 FROM transactions
-                WHERE date <= ?
+                WHERE date <= %s
             ),
             trades AS (
                 SELECT
@@ -1438,14 +1438,14 @@ class PortfolioDatabase:
                 LEFT JOIN LATERAL (
                     SELECT p.price
                     FROM prices p
-                    WHERE p.ticker = t.asset AND p.date <= ?
+                    WHERE p.ticker = t.asset AND p.date <= %s
                     ORDER BY p.date DESC
                     LIMIT 1
                 ) latest ON TRUE
                 LEFT JOIN LATERAL (
                     SELECT p.price
                     FROM prices p
-                    WHERE p.ticker = t.asset AND p.date <= ?
+                    WHERE p.ticker = t.asset AND p.date <= %s
                     ORDER BY p.date DESC
                     OFFSET 1
                     LIMIT 1
@@ -1453,14 +1453,14 @@ class PortfolioDatabase:
                 LEFT JOIN LATERAL (
                     SELECT p.price
                     FROM prices p
-                    WHERE p.ticker = cash_currency_for_asset_type_sql(t.asset_type) AND p.date <= ?
+                    WHERE p.ticker = cash_currency_for_asset_type_sql(t.asset_type) AND p.date <= %s
                     ORDER BY p.date DESC
                     LIMIT 1
                 ) fx_latest ON TRUE
                 LEFT JOIN LATERAL (
                     SELECT p.price
                     FROM prices p
-                    WHERE p.ticker = cash_currency_for_asset_type_sql(t.asset_type) AND p.date <= ?
+                    WHERE p.ticker = cash_currency_for_asset_type_sql(t.asset_type) AND p.date <= %s
                     ORDER BY p.date DESC
                     OFFSET 1
                     LIMIT 1
@@ -1572,7 +1572,7 @@ class PortfolioDatabase:
                     ) / NULLIF(sell_quantity * (buy_cost / buy_quantity), 0) * 100.0
                 ELSE 0.0 END AS realized_gain_pct
             FROM priced
-            WHERE ?::boolean OR shares <> 0
+            WHERE %s::boolean OR shares <> 0
             ORDER BY market_value DESC, symbol
             """,
             [as_of_date, as_of_date, as_of_date, as_of_date, as_of_date, include_closed],
@@ -1594,7 +1594,7 @@ class PortfolioDatabase:
                     fees,
                     COALESCE(asset_type, get_asset_type_sql(asset)) AS resolved_asset_type
                 FROM transactions
-                WHERE date <= ?
+                WHERE date <= %s
             ),
             contribs AS (
                 SELECT
@@ -1646,7 +1646,7 @@ class PortfolioDatabase:
                         ELSE (
                             SELECT p.price
                             FROM prices p
-                            WHERE p.ticker = c.symbol AND p.date <= ?
+                            WHERE p.ticker = c.symbol AND p.date <= %s
                             ORDER BY p.date DESC
                             LIMIT 1
                         )
@@ -1654,14 +1654,14 @@ class PortfolioDatabase:
                     (
                         SELECT p.price
                         FROM prices p
-                        WHERE p.ticker = c.symbol AND p.date <= ?
+                        WHERE p.ticker = c.symbol AND p.date <= %s
                         ORDER BY p.date DESC
                         LIMIT 1
                     ) AS latest_px,
                     (
                         SELECT p.price
                         FROM prices p
-                        WHERE p.ticker = c.symbol AND p.date <= ?
+                        WHERE p.ticker = c.symbol AND p.date <= %s
                         ORDER BY p.date DESC
                         OFFSET 1
                         LIMIT 1
@@ -2113,9 +2113,9 @@ class PortfolioDatabase:
                         ELSE quantity
                     END AS amount
                 FROM transactions
-                WHERE date <= ? AND upper(action) IN ('DEPOSIT', 'WITHDRAW')
+                WHERE date <= %s AND upper(action) IN ('DEPOSIT', 'WITHDRAW')
                 UNION ALL
-                SELECT ?::date AS flow_date, ?::double precision AS amount
+                SELECT %s::date AS flow_date, %s::double precision AS amount
             ),
             ordered AS (
                 SELECT flow_date, amount
@@ -2214,7 +2214,7 @@ class PortfolioDatabase:
     def delete_daily_returns_from_date(self, start_date):
         """Delete daily returns from specific date onwards."""
         self.con.execute(
-            "DELETE FROM daily_returns WHERE date >= ?",
+            "DELETE FROM daily_returns WHERE date >= %s",
             [start_date],
         )
         self.con.commit()
@@ -2225,7 +2225,7 @@ class PortfolioDatabase:
         self.con.execute(
             """
             INSERT INTO refresh_log (refresh_date, refresh_type, rows_affected)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             """,
             [date.today(), refresh_type, rows_affected],
         )
@@ -2234,7 +2234,7 @@ class PortfolioDatabase:
     def get_cache(self, cache_key: str):
         """Get cache entry if exists."""
         result = self.con.execute(
-            "SELECT cache_key, last_calc_date, transaction_count FROM recalc_cache WHERE cache_key = ?",
+            "SELECT cache_key, last_calc_date, transaction_count FROM recalc_cache WHERE cache_key = %s",
             [cache_key],
         ).fetchone()
         return result
@@ -2244,7 +2244,7 @@ class PortfolioDatabase:
         self.con.execute(
             """
             INSERT INTO recalc_cache (cache_key, last_calc_date, transaction_count, prices_hash)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (cache_key) DO UPDATE SET
                 last_calc_date = EXCLUDED.last_calc_date,
                 transaction_count = EXCLUDED.transaction_count,
@@ -2291,13 +2291,13 @@ class PortfolioDatabase:
 
     def get_price_coverage(self, ticker: str, start_date=None, end_date=None) -> dict:
         """Get cached coverage stats for one ticker and date range."""
-        where = ["ticker = ?"]
+        where = ["ticker = %s"]
         params = [ticker]
         if start_date is not None:
-            where.append("date >= ?")
+            where.append("date >= %s")
             params.append(start_date)
         if end_date is not None:
-            where.append("date <= ?")
+            where.append("date <= %s")
             params.append(end_date)
 
         row = self.con.execute(
@@ -2324,15 +2324,15 @@ class PortfolioDatabase:
         if not tickers:
             return {}
 
-        placeholders = ", ".join(["?"] * len(tickers))
+        placeholders = ", ".join(["%s"] * len(tickers))
         params = list(tickers)
         where = [f"ticker IN ({placeholders})"]
 
         if start_date is not None:
-            where.append("date >= ?")
+            where.append("date >= %s")
             params.append(start_date)
         if end_date is not None:
-            where.append("date <= ?")
+            where.append("date <= %s")
             params.append(end_date)
 
         rows = self.con.execute(
@@ -2364,7 +2364,7 @@ class PortfolioDatabase:
         """Delete a transaction by ID."""
         # Check if transaction exists
         result = self.con.execute(
-            "SELECT id FROM transactions WHERE id = ?",
+            "SELECT id FROM transactions WHERE id = %s",
             [transaction_id]
         ).fetchone()
 
@@ -2373,7 +2373,7 @@ class PortfolioDatabase:
 
         # Delete the transaction
         self.con.execute(
-            "DELETE FROM transactions WHERE id = ?",
+            "DELETE FROM transactions WHERE id = %s",
             [transaction_id]
         )
         self.con.commit()
@@ -2385,7 +2385,7 @@ class PortfolioDatabase:
         self.con.execute(
             """
             INSERT INTO service_state (state_key, state_value, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT (state_key) DO UPDATE SET
                 state_value = excluded.state_value,
                 updated_at = excluded.updated_at
@@ -2397,7 +2397,7 @@ class PortfolioDatabase:
     def get_service_state(self, state_key: str):
         """Get one service state value."""
         row = self.con.execute(
-            "SELECT state_value, updated_at FROM service_state WHERE state_key = ?",
+            "SELECT state_value, updated_at FROM service_state WHERE state_key = %s",
             [state_key],
         ).fetchone()
         if not row:
@@ -2419,7 +2419,7 @@ class PortfolioDatabase:
         self.con.execute(
             """
             INSERT INTO repair_log (ticker, start_date, end_date, status, rows_loaded, message)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
             [ticker, start_date, end_date, status, rows_loaded, message],
         )
@@ -2432,7 +2432,7 @@ class PortfolioDatabase:
             SELECT repair_id, ticker, start_date, end_date, status, rows_loaded, message, timestamp
             FROM repair_log
             ORDER BY timestamp DESC, repair_id DESC
-            LIMIT ?
+            LIMIT %s
             """,
             [limit],
         ).fetchall()
