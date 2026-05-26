@@ -419,7 +419,8 @@ Dates use DD-MM-YYYY format (e.g. 15-01-2026).
         except Exception as e:
             error("edit", "DB_ERROR", str(e))
         finally:
-            service.close()
+            if service:
+                service.close()
         return
 
     service = None
