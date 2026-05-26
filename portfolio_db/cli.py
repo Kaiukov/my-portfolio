@@ -30,6 +30,48 @@ USER_ACTION_CHOICES = [
     "TRANSFER",
 ]
 
+REPORT_LIMIT_HELP = "Max rows to return (default: 50; max: 10,000)"
+REPORT_OFFSET_HELP = "Rows to skip (default: 0)"
+REPORT_DATE_HELP = "YYYY-MM-DD"
+SNAPSHOT_DATE_HELP = "Snapshot date in YYYY-MM-DD; if omitted, uses the latest reporting snapshot"
+WRITE_DATE_HELP = "Transaction date in DD-MM-YYYY"
+MIGRATE_CSV_HELP = "Source CSV file (semicolon-separated; destructive import)"
+BENCHMARK_HELP = (
+    "Benchmark ticker; if omitted, uses the first entry from PORTFOLIO_BENCHMARK_TICKERS "
+    "(SPY if the variable is unset)"
+)
+TOP_LEVEL_HELP = """Portfolio tracking with PostgreSQL.
+
+All commands emit JSON only.
+PORTFOLIO_DB_URL environment variable configures the database connection.
+Read/report commands use YYYY-MM-DD dates.
+Write and recalc commands use DD-MM-YYYY dates where a date is accepted.
+
+Read-only commands:
+  report          Paginated daily returns.
+  transactions    Paginated transaction list.
+  status          Current portfolio status snapshot.
+  allocation      Asset/cash allocation summary.
+  cash            Cash balances converted to USD.
+  summary         Position summary with gains/losses.
+  performance     Full return/risk report.
+  mwr             Money-weighted return (XIRR).
+  verify_prices   Price cache schema and coverage diagnostics.
+  health          High-level DB and data health.
+
+Write / maintenance commands:
+  add             Insert a transaction and recalculate.
+  edit            Update a transaction and recalculate.
+  delete          Remove a transaction and recalculate.
+  exchange        Record a currency exchange as two legs.
+  migrate         Import transactions from CSV and rebuild reporting data.
+  repair_prices   Fetch and cache missing or stale prices.
+  recalculate     Rebuild daily returns from cached data.
+  backup          Copy the PostgreSQL database to a backup.
+  init            Initialize the PostgreSQL schema (idempotent).
+
+Use `portfolio COMMAND --help` for command-specific details."""
+
 
 def _parse_date(value: str, flag: str) -> date:
     """Parse YYYY-MM-DD string; call error() and exit on failure."""
@@ -109,32 +151,31 @@ def _dump_postgres_backup(target: str, dst: Path):
             service.close()
 
 
-@click.group(epilog="""
-Date format conventions:
-
-  Write commands (add, edit, exchange, recalculate):
-      Use DD-MM-YYYY (e.g. 01-01-2026) for --date / --from-date.
-
-  Read-only commands (report, transactions, status, allocation, cash,
-    performance, mwr, summary, repair_prices):
-      Use YYYY-MM-DD (e.g. 2026-01-01) for --start-date / --end-date / --as-of-date.
-"""
-)
+@click.group(help=TOP_LEVEL_HELP)
 def cli():
-    """Portfolio tracking CLI.
-
-Write commands use DD-MM-YYYY (add, edit, exchange, recalculate).
-Read commands use YYYY-MM-DD (report, status, summary, performance, mwr, allocation, cash).
-"""
+    """Portfolio tracking CLI."""
     pass
 
 
 # ─── migrate ──────────────────────────────────────────────────────────────────
 
-@cli.command()
-@click.option("--csv", default="yfiance-transactions/transactions.csv", help="Path to CSV file")
+@cli.command(epilog="""
+Warning:
+  This command is destructive. It clears existing transactions and daily_returns
+  before importing the CSV, then fetches prices and rebuilds reporting data.
+
+Notes:
+  The CSV must be semicolon-separated and use DD-MM-YYYY dates.
+
+Examples:
+
+  portfolio migrate --csv ./transactions.csv
+
+  portfolio migrate --csv ./exports/q1-transactions.csv
+""")
+@click.option("--csv", default="yfiance-transactions/transactions.csv", show_default=True, help=MIGRATE_CSV_HELP)
 def migrate(csv):
-    """Migrate transactions from CSV to the configured database."""
+    """Import transactions from CSV, fetch prices, and rebuild reporting data."""
     validate_file_exists(csv, "--csv", "migrate")
     service = None
     try:
@@ -152,12 +193,12 @@ def migrate(csv):
 # ─── report ───────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.option("--limit", default=50, type=int, help="Max rows (default 50)")
-@click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
-@click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
-@click.option("--end-date", default=None, help="Filter to date (YYYY-MM-DD)")
+@click.option("--limit", default=50, type=int, show_default=True, help=REPORT_LIMIT_HELP)
+@click.option("--offset", default=0, type=int, show_default=True, help=REPORT_OFFSET_HELP)
+@click.option("--start-date", default=None, help=f"Filter from date ({REPORT_DATE_HELP})")
+@click.option("--end-date", default=None, help=f"Filter to date ({REPORT_DATE_HELP})")
 def report(limit, offset, start_date, end_date):
-    """Show daily returns report."""
+    """List daily returns in a paginated report."""
     validate_pagination(limit, offset, "report")
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
@@ -178,6 +219,10 @@ def report(limit, offset, start_date, end_date):
 # ─── transactions ─────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  Pagination is inclusive on the date filters.
+  `--limit` is capped at 10,000 rows.
+
 Examples:
 
   portfolio transactions
@@ -186,12 +231,12 @@ Examples:
 
   portfolio transactions --start-date 2026-01-01 --end-date 2026-03-31
 """)
-@click.option("--limit", default=50, type=int, help="Max rows (default 50)")
-@click.option("--offset", default=0, type=int, help="Rows to skip (default 0)")
-@click.option("--start-date", default=None, help="Filter from date (YYYY-MM-DD)")
-@click.option("--end-date", default=None, help="Filter to date (YYYY-MM-DD)")
+@click.option("--limit", default=50, type=int, show_default=True, help=REPORT_LIMIT_HELP)
+@click.option("--offset", default=0, type=int, show_default=True, help=REPORT_OFFSET_HELP)
+@click.option("--start-date", default=None, help=f"Filter from date ({REPORT_DATE_HELP})")
+@click.option("--end-date", default=None, help=f"Filter to date ({REPORT_DATE_HELP})")
 def transactions(limit, offset, start_date, end_date):
-    """List transactions."""
+    """List transactions in chronological order with pagination."""
     validate_pagination(limit, offset, "transactions")
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
@@ -212,15 +257,18 @@ def transactions(limit, offset, start_date, end_date):
 # ─── status ───────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  If `--as-of-date` is omitted, the latest reporting snapshot is used.
+
 Examples:
 
   portfolio status
 
   portfolio status --as-of-date 2026-01-01
 """)
-@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 def status(as_of_date):
-    """Show portfolio status."""
+    """Show a compact portfolio snapshot."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
@@ -258,26 +306,31 @@ def status(as_of_date):
 \b
 Date format: DD-MM-YYYY
 
+Notes:
+  `--exchange` is required.
+  `--account` is required for TRANSFER transactions.
+
 Examples:
 
-  portfolio add --date 01-01-2026 --asset AAPL --action buy --quantity 10 --price 150
+  portfolio add --date 01-01-2026 --asset AAPL --action buy --quantity 10 --price 150 --exchange Interactive
 
-  portfolio add --date 01-01-2026 --asset USD --action deposit --quantity 10000
+  portfolio add --date 01-01-2026 --asset USD --action deposit --quantity 10000 --exchange Interactive
 
-  portfolio add --date 01-01-2026 --asset AAPL --action sell --quantity 5 --price 180 --fees 1.5
+  portfolio add --date 01-01-2026 --asset AAPL --action sell --quantity 5 --price 180 --fees 1.5 --exchange Interactive
 """)
-@click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
-@click.option("--asset", required=True, help="Asset symbol")
+@click.option("--date", "date_str", required=True, help=WRITE_DATE_HELP)
+@click.option("--asset", required=True, help="Asset or cash ticker")
 @click.option("--action", required=True,
-              type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False))
-@click.option("--quantity", required=True, type=float)
-@click.option("--price", type=float, default=None)
-@click.option("--currency", default="USD")
-@click.option("--fees", type=float, default=None)
-@click.option("--exchange", default="")
-@click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
+              type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False),
+              help="Transaction action")
+@click.option("--quantity", required=True, type=float, help="Positive quantity")
+@click.option("--price", type=float, default=None, help="Positive price; required for BUY/SELL")
+@click.option("--currency", default="USD", show_default=True, help="Currency code for the transaction")
+@click.option("--fees", type=float, default=None, help="Non-negative fee amount")
+@click.option("--exchange", default="", help="Broker or exchange label; required for all add operations")
+@click.option("--account", default=None, help="Account label; required for TRANSFER (e.g. broker_a)")
 def add(date_str, asset, action, quantity, price, currency, fees, exchange, account):
-    """Add a transaction and auto-recalculate returns.
+    """Add a transaction and recalculate reporting data.
 
 Dates use DD-MM-YYYY format (e.g. 01-01-2026).
 """
@@ -351,6 +404,9 @@ Dates use DD-MM-YYYY format (e.g. 01-01-2026).
 \b
 Date format: DD-MM-YYYY
 
+Notes:
+  `--dry-run` validates and previews changes without writing to the DB.
+
 Examples:
 
   portfolio edit --id 42 --price 155.50
@@ -359,20 +415,20 @@ Examples:
 
   portfolio edit --id 42 --date 15-01-2026 --fees 2.0
 """)
-@click.option("--id", "trans_id", required=True, type=int)
-@click.option("--date", "date_str", default=None, help="Transaction date (DD-MM-YYYY)")
-@click.option("--asset", default=None, help="Asset symbol")
-@click.option("--action", default=None, type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False))
-@click.option("--quantity", default=None, type=float)
-@click.option("--price", default=None, type=float)
-@click.option("--currency", default=None)
-@click.option("--fees", default=None, type=float)
-@click.option("--exchange", default=None)
-@click.option("--data-source", default=None)
-@click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
+@click.option("--id", "trans_id", required=True, type=int, help="Transaction ID to edit")
+@click.option("--date", "date_str", default=None, help=WRITE_DATE_HELP)
+@click.option("--asset", default=None, help="Asset or cash ticker")
+@click.option("--action", default=None, type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False), help="Replacement transaction action")
+@click.option("--quantity", default=None, type=float, help="Positive quantity")
+@click.option("--price", default=None, type=float, help="Positive price")
+@click.option("--currency", default=None, help="Replacement currency code")
+@click.option("--fees", default=None, type=float, help="Non-negative fee amount")
+@click.option("--exchange", default=None, help="Replacement broker or exchange label")
+@click.option("--data-source", default=None, help="Replacement data source label")
+@click.option("--account", default=None, help="Account label; required for TRANSFER")
 @click.option("--dry-run", is_flag=True, help="Show what would change without applying")
 def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run):
-    """Edit an existing transaction and recalculate returns.
+    """Edit an existing transaction and recalculate reporting data.
 
 Dates use DD-MM-YYYY format (e.g. 15-01-2026).
 """
@@ -459,14 +515,16 @@ Dates use DD-MM-YYYY format (e.g. 15-01-2026).
 # ─── verify_prices ────────────────────────────────────────────────────────────
 
 @cli.command(name="verify_prices", epilog="""
+Notes:
+  Diagnostic only. No prices are fetched or repaired.
+  Coverage gaps are reported in `coverage_issues`.
+
 Examples:
 
   portfolio verify_prices
-
-  portfolio verify_prices --db custom.db
 """)
 def verify_prices():
-    """Verify prices table structure and storage."""
+    """Inspect price-cache schema, coverage, and repair history."""
     service = None
     try:
         service = PortfolioService(read_only=True)
@@ -498,6 +556,10 @@ def verify_prices():
 # ─── repair_prices ────────────────────────────────────────────────────────────
 
 @cli.command(name="repair_prices", epilog="""
+Notes:
+  Without `--ticker`, this refreshes all required portfolio tickers plus
+  benchmark tickers and extends the end date to today.
+
 Examples:
 
   portfolio repair_prices
@@ -506,12 +568,12 @@ Examples:
 
   portfolio repair_prices --start-date 2026-01-01 --dry-run
 """)
-@click.option("--ticker", "tickers", multiple=True, help="Specific ticker(s) to refresh")
-@click.option("--start-date", default=None, help="Refresh from date (YYYY-MM-DD)")
-@click.option("--end-date", default=None, help="Refresh to date (YYYY-MM-DD)")
+@click.option("--ticker", "tickers", multiple=True, help="Specific ticker to refresh; repeat to target multiple tickers")
+@click.option("--start-date", default=None, help=f"Refresh from date ({REPORT_DATE_HELP})")
+@click.option("--end-date", default=None, help=f"Refresh to date ({REPORT_DATE_HELP})")
 @click.option("--dry-run", is_flag=True, help="Show what would be repaired without fetching")
 def repair_prices(tickers, start_date, end_date, dry_run):
-    """Fetch and cache missing/incomplete price series."""
+    """Fetch and cache missing or stale price series."""
     sd = _parse_date(start_date, "--start-date") if start_date else None
     ed = _parse_date(end_date, "--end-date") if end_date else None
     validate_date_range(sd, ed, "repair_prices")
@@ -553,6 +615,10 @@ def repair_prices(tickers, start_date, end_date, dry_run):
 \b
 Date format: DD-MM-YYYY
 
+Notes:
+  Uses cached prices only.
+  May return a cached result unless `--force` is set.
+
 Examples:
 
   portfolio recalculate
@@ -561,11 +627,11 @@ Examples:
 
   portfolio recalculate --force --dry-run
 """)
-@click.option("--force", is_flag=True)
-@click.option("--from-date", default=None, help="Recalculate from date (DD-MM-YYYY)")
+@click.option("--force", is_flag=True, help="Ignore cache checks and recompute everything")
+@click.option("--from-date", default=None, help=WRITE_DATE_HELP)
 @click.option("--dry-run", is_flag=True, help="Show what would be recalculated without executing")
 def recalculate(force, from_date, dry_run):
-    """Recalculate portfolio returns.
+    """Recalculate daily returns from cached prices.
 
 Dates use DD-MM-YYYY format (e.g. 01-01-2026).
 """
@@ -615,6 +681,10 @@ Dates use DD-MM-YYYY format (e.g. 01-01-2026).
 # ─── allocation ───────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  `--type assets` and `--type cash` return percentages within that slice.
+  `--type all` uses total portfolio value as the denominator.
+
 Examples:
 
   portfolio allocation
@@ -624,8 +694,11 @@ Examples:
   portfolio allocation --type cash --as-of-date 2026-01-01
 """)
 @click.option("--type", "allocation_type",
-              type=click.Choice(["assets", "cash", "all"]), default="all")
-@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
+              type=click.Choice(["assets", "cash", "all"]),
+              default="all",
+              show_default=True,
+              help="Allocation slice to return")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 def allocation(allocation_type, as_of_date):
     """Show portfolio allocation breakdown."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
@@ -646,15 +719,18 @@ def allocation(allocation_type, as_of_date):
 # ─── cash ─────────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  The `balance` field is in the original currency; `usd_value` is converted.
+
 Examples:
 
   portfolio cash
 
   portfolio cash --as-of-date 2026-01-01
 """)
-@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 def cash(as_of_date):
-    """Show actual cash balances (converted to USD)."""
+    """Show actual cash balances converted to USD."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
@@ -705,6 +781,10 @@ def cash(as_of_date):
 # ─── delete ───────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  `--confirm` is required for real deletions.
+  `--dry-run` does not require confirmation.
+
 Examples:
 
   portfolio delete --id 42 --dry-run
@@ -713,12 +793,12 @@ Examples:
 
   portfolio delete --id 42 --confirm --backup
 """)
-@click.option("--id", "trans_id", required=True, type=int)
-@click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
+@click.option("--id", "trans_id", required=True, type=int, help="Transaction ID to delete")
+@click.option("--confirm", is_flag=True, help="Skip the confirmation prompt and delete immediately")
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted without executing")
 @click.option("--backup", is_flag=True, help="Create a DB backup before deleting")
 def delete(trans_id, confirm, dry_run, backup):
-    """Delete a transaction by ID and auto-recalculate returns."""
+    """Delete a transaction by ID and recalculate reporting data."""
     validate_positive_int(trans_id, "--id", "delete")
     if dry_run:
         service = None
@@ -782,6 +862,10 @@ def delete(trans_id, confirm, dry_run, backup):
 # ─── performance ──────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  If `--benchmark` is omitted, the first value from PORTFOLIO_BENCHMARK_TICKERS
+  is used, falling back to SPY when the variable is unset.
+
 Examples:
 
   portfolio performance
@@ -790,10 +874,10 @@ Examples:
 
   portfolio performance --benchmark QQQ
 """)
-@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
-@click.option("--benchmark", default=None, help="Benchmark ticker (default: SPY)")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+@click.option("--benchmark", default=None, help=BENCHMARK_HELP)
 def performance(as_of_date, benchmark):
-    """Show performance metrics."""
+    """Show performance, risk, and benchmark metrics."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
@@ -893,17 +977,21 @@ def performance(as_of_date, benchmark):
 # ─── mwr ──────────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  Returns MWR as a percent value. If no date is provided, the latest reporting
+  snapshot is used.
+
 Examples:
 
   portfolio mwr
 
   portfolio mwr --as-of-date 2026-01-01
 
-  portfolio mwr --db /data/portfolio.db --as-of-date 2025-12-31
+  portfolio mwr --as-of-date 2025-12-31
 """)
-@click.option("--as-of-date", default=None, help="Calculate MWR as of date (YYYY-MM-DD)")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 def mwr(as_of_date):
-    """Show Money-Weighted Return (XIRR / IRR)."""
+    """Show money-weighted return (XIRR / IRR)."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
@@ -917,6 +1005,8 @@ def mwr(as_of_date):
             "net_contributions": snap.get("net_contributions", 0.0),
             "note": "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
         })
+    except PriceDataUnavailableError as e:
+        error("mwr", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
         error("mwr", "DB_ERROR", str(e))
     finally:
@@ -927,6 +1017,9 @@ def mwr(as_of_date):
 # ─── summary ──────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  `--filter open` suppresses closed positions; `--filter all` keeps them.
+
 Examples:
 
   portfolio summary
@@ -936,10 +1029,13 @@ Examples:
   portfolio summary --as-of-date 2026-01-01
 """)
 @click.option("--filter", "position_filter",
-              type=click.Choice(["open", "all"]), default="all")
-@click.option("--as-of-date", default=None, help="Report as of date (YYYY-MM-DD)")
+              type=click.Choice(["open", "all"]),
+              default="all",
+              show_default=True,
+              help="Limit to open positions or include closed positions too")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 def summary(position_filter, as_of_date):
-    """Show portfolio position summary with gains/losses."""
+    """Show portfolio position summary with gains and losses."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
@@ -963,19 +1059,23 @@ def summary(position_filter, as_of_date):
 \b
 Date format: DD-MM-YYYY
 
+Notes:
+  `--from` and `--to` must be different.
+  The command creates EXCHANGE_FROM and EXCHANGE_TO legs internally.
+
 Examples:
 
-  portfolio exchange --date 01-01-2026 --from USD --to EUR --quantity 1000 --rate 0.92
+  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
 
   portfolio exchange --date 01-01-2026 --from EURUSD=X --to USD --quantity 500 --rate 1.09
 """)
-@click.option("--date", "date_str", required=True, help="Transaction date (DD-MM-YYYY)")
-@click.option("--from", "from_asset", required=True)
-@click.option("--to", "to_asset", required=True)
-@click.option("--quantity", required=True, type=float)
-@click.option("--rate", required=True, type=float)
+@click.option("--date", "date_str", required=True, help=WRITE_DATE_HELP)
+@click.option("--from", "from_asset", required=True, help="Source asset or cash-like symbol")
+@click.option("--to", "to_asset", required=True, help="Different target asset or cash-like symbol")
+@click.option("--quantity", required=True, type=float, help="Positive quantity to convert")
+@click.option("--rate", required=True, type=float, help="Positive exchange rate")
 def exchange(date_str, from_asset, to_asset, quantity, rate):
-    """Exchange one currency for another.
+    """Record a currency exchange as two linked transactions.
 
 Dates use DD-MM-YYYY format (e.g. 01-01-2026).
 """
@@ -1059,7 +1159,7 @@ def backup(out):
 
 @cli.command()
 def init():
-    """Initialize a new portfolio database (idempotent)."""
+    """Initialize or verify the portfolio database schema."""
     try:
         target = resolve_db_target()
         service = PortfolioService(target)
@@ -1072,14 +1172,15 @@ def init():
 # ─── health ───────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+Notes:
+  Read-only diagnostic. Returns `ok` or `degraded` in JSON.
+
 Examples:
 
   portfolio health
-
-  portfolio health --db custom.db
 """)
 def health():
-    """Show DB and data health: recalc freshness, price coverage, stale state."""
+    """Show DB reachability, stale data, and price coverage health."""
     service = None
     try:
         service = PortfolioService(read_only=True)
