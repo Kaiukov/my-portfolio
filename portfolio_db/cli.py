@@ -1070,5 +1070,45 @@ def health():
             service.close()
 
 
+@cli.command()
+@click.option("--from", "duckdb_path", required=True, help="Path to DuckDB file (e.g., ~/portfolio.duckdb)")
+@click.option("--to", "postgres_url", envvar="PORTFOLIO_DB_URL", help="PostgreSQL URL (default: PORTFOLIO_DB_URL env var)")
+@click.option("--dry-run", is_flag=True, help="Validate without inserting data")
+def migrate_duckdb_to_postgres(duckdb_path: str, postgres_url: str, dry_run: bool):
+    """Migrate data from DuckDB to PostgreSQL.
+
+  Copies transactions, daily_returns, prices, and audit tables.
+  Validates row counts match after copy.
+  Resets PostgreSQL sequences for safe future inserts.
+
+  Example:
+    # Dry run (validate only)
+    portfolio migrate-duckdb-to-postgres --from ~/portfolio.duckdb --dry-run
+
+    # Live migration
+    export PORTFOLIO_DB_URL="postgresql://user:pass@localhost:5432/portfolio"
+    portfolio migrate-duckdb-to-postgres --from ~/portfolio.duckdb
+  """
+    if not postgres_url:
+        error("migrate-duckdb-to-postgres", "ENV_ERROR", "PORTFOLIO_DB_URL not set and --to not provided")
+        return
+
+    from portfolio_db.migration_service import migrate_duckdb_to_postgres as do_migrate
+
+    try:
+        result = do_migrate(duckdb_path, postgres_url, dry_run=dry_run)
+        if result.get("ok"):
+            success("migrate-duckdb-to-postgres", {
+                "status": "completed",
+                "dry_run": dry_run,
+                "rows_migrated": result.get("rows_migrated", {}),
+            })
+        else:
+            error_msg = result.get("error", "Migration failed")
+            error("migrate-duckdb-to-postgres", "MIGRATION_ERROR", error_msg)
+    except Exception as e:
+        error("migrate-duckdb-to-postgres", "MIGRATION_ERROR", str(e))
+
+
 if __name__ == "__main__":
     cli()
