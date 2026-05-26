@@ -93,7 +93,7 @@ class TransactionService:
             if quantity <= 0:
                 raise ValueError("EXCHANGE_TO requires a positive quantity")
 
-    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float, asset_type: str, currency: str, fees: float, exchange: str, data_source: str, account: str, validate_action_fn, derive_asset_type_fn, recalculate_fn, mark_price_data_stale_fn, trade_actions, external_inflow_actions, external_outflow_actions, transfer_actions, income_actions, expense_actions, system_actions) -> dict:
+    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float, asset_type: str, currency: str, fees: float, fee_currency: str, exchange: str, data_source: str, account: str, validate_action_fn, derive_asset_type_fn, recalculate_fn, mark_price_data_stale_fn, trade_actions, external_inflow_actions, external_outflow_actions, transfer_actions, income_actions, expense_actions, system_actions) -> dict:
         """
         Add transaction and auto-trigger smart recalculation.
 
@@ -135,7 +135,7 @@ class TransactionService:
         trans_id, is_old = self.db.add_transaction(
             date_obj, asset, action, quantity,
             asset_type=asset_type, price=price,
-            currency=currency, fees=fees,
+            currency=currency, fees=fees, fee_currency=fee_currency,
             exchange=exchange, data_source=data_source, account=account,
         )
 

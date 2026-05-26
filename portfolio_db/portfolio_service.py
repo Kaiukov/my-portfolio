@@ -336,7 +336,7 @@ class PortfolioService:
         """Convert a DB transaction tuple into the standard response shape."""
         col_names = [
             'id', 'date', 'asset', 'action', 'quantity',
-            'asset_type', 'price', 'currency', 'fees', 'exchange', 'data_source',
+            'asset_type', 'price', 'currency', 'fees', 'fee_currency', 'exchange', 'data_source',
             'account', 'created_at', 'updated_at',
         ]
         return {
@@ -513,7 +513,7 @@ class PortfolioService:
             build_snapshot_fn=self.build_reporting_snapshot,
         )
 
-    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, exchange: str = '', data_source: str = '', account: str = None) -> dict:
+    def add_transaction(self, date_obj, asset: str, action: str, quantity: float, price: float = None, asset_type: str = None, currency: str = 'USD', fees: float = None, fee_currency: str = None, exchange: str = '', data_source: str = '', account: str = None) -> dict:
         """
         Add transaction and auto-trigger smart recalculation.
 
@@ -526,6 +526,7 @@ class PortfolioService:
             asset_type: Asset type (optional, will be detected if not provided)
             currency: Currency code (default USD)
             fees: Transaction fees (optional)
+            fee_currency: Currency code for fees (defaults to currency)
             exchange: Exchange name (optional)
             data_source: Data source (optional)
 
@@ -536,7 +537,7 @@ class PortfolioService:
         if normalized_action == 'TRANSFER' and not account:
             raise ValueError("TRANSFER requires an account label (use --account)")
         return self._transactions.add_transaction(
-            date_obj, asset, action, quantity, price, asset_type, currency, fees, exchange, data_source, account,
+            date_obj, asset, action, quantity, price, asset_type, currency, fees, fee_currency, exchange, data_source, account,
             validate_action_fn=self.validate_action,
             derive_asset_type_fn=self.derive_asset_type,
             recalculate_fn=self.recalculate,

@@ -648,7 +648,7 @@ class PortfolioDatabase:
     def get_transactions(self):
         """Get all transactions."""
         return self.con.execute(
-            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            """SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                       account, created_at, updated_at
                FROM transactions ORDER BY date, id"""
         ).fetchall()
@@ -672,7 +672,7 @@ class PortfolioDatabase:
 
         params_page = params + [limit, offset]
         rows = self.con.execute(
-            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            f"""SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                        account, created_at, updated_at
                 FROM transactions {where_clause} ORDER BY date DESC, id DESC LIMIT %s OFFSET %s""",
             params_page,
@@ -961,7 +961,7 @@ class PortfolioDatabase:
         ).fetchone()
         return result[0] if result and result[0] else None
 
-    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, exchange='', data_source='', account=None) -> tuple:
+    def add_transaction(self, date, asset, action, quantity, asset_type=None, price=None, currency='USD', fees=None, fee_currency=None, exchange='', data_source='', account=None) -> tuple:
         """
         Add single transaction and return (transaction_id, is_old_transaction).
         is_old_transaction = True if transaction date < last existing transaction date.
@@ -979,11 +979,11 @@ class PortfolioDatabase:
         result = self.con.execute(
             """
             INSERT INTO transactions
-            (date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source, account)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source, account)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, exchange, data_source, account],
+            [date, asset, action.upper(), quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source, account],
         ).fetchone()
         self.con.commit()
         trans_id = result[0] if result else None
@@ -994,7 +994,7 @@ class PortfolioDatabase:
         """Get a single transaction row by id."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
             WHERE id = %s
@@ -1036,7 +1036,7 @@ class PortfolioDatabase:
         """Get all transactions within an inclusive date range."""
         return self.con.execute(
             """
-            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, exchange, data_source,
+            SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source,
                    account, created_at, updated_at
             FROM transactions
             WHERE date >= %s AND date <= %s
