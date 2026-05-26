@@ -1,5 +1,22 @@
 """Shared domain constants and helpers for asset/cash/FX classification."""
 
+EXTERNAL_INFLOW_ACTIONS = frozenset({'DEPOSIT'})
+EXTERNAL_OUTFLOW_ACTIONS = frozenset({'WITHDRAW'})
+TRANSFER_ACTIONS = frozenset({'TRANSFER'})
+INCOME_ACTIONS = frozenset({'DIVIDEND', 'INTEREST'})
+EXPENSE_ACTIONS = frozenset({'FEE', 'TAX'})
+TRADE_ACTIONS = frozenset({'BUY', 'SELL'})
+SYSTEM_ACTIONS = frozenset({'EXCHANGE_FROM', 'EXCHANGE_TO'})
+SUPPORTED_ACTIONS = frozenset(
+    EXTERNAL_INFLOW_ACTIONS
+    | EXTERNAL_OUTFLOW_ACTIONS
+    | TRANSFER_ACTIONS
+    | INCOME_ACTIONS
+    | EXPENSE_ACTIONS
+    | TRADE_ACTIONS
+    | SYSTEM_ACTIONS
+)
+
 BASE_CURRENCY = 'USD'
 LEGACY_CASH_TO_FX = {
     'CASH EUR': 'EURUSD=X',

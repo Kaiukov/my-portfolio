@@ -1,13 +1,13 @@
 [project]
 name = "portfolio-db"
 version = "0.1.0"
-description = "Portfolio tracking CLI with DuckDB"
+description = "Portfolio tracking CLI with PostgreSQL"
 requires-python = ">=3.13"
 dependencies = [
     "click>=8.3",
-    "duckdb>=1.4",
     "numpy>=2.0",
     "pandas>=3.0",
+    "psycopg[binary]>=3.2",
     "yfinance>=1.1",
 ]
 

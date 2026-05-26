@@ -1,32 +1,133 @@
-"""DuckDB database setup and transaction management."""
+"""Database setup and transaction management."""
 
-import duckdb
-from datetime import date, datetime, timedelta
+import hashlib
+import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 import pandas as pd
-from pathlib import Path
+
+
+def is_postgres_url(target: str) -> bool:
+    """Return True when target points to a PostgreSQL connection string."""
+    return target.startswith(("postgres://", "postgresql://"))
+
+
+def resolve_db_target(db_path: str = "portfolio.db") -> str:
+    """Resolve the effective DB target for CLI/service entrypoints."""
+    env_target = os.getenv("PORTFOLIO_DB_URL")
+    if env_target:
+        if db_path != "portfolio.db" and not is_postgres_url(db_path):
+            parsed = urlsplit(env_target)
+            query_items = parse_qsl(parsed.query, keep_blank_values=True)
+            query = {k: v for k, v in query_items if k not in {"schema", "search_path"}}
+            schema_name = f"test_{hashlib.sha1(str(db_path).encode('utf-8')).hexdigest()[:12]}"
+            query["schema"] = schema_name
+            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+        return env_target
+    return db_path
+
+
+class _ConnectionAdapter:
+    """Small connection wrapper for PostgreSQL usage."""
+
+    def __init__(self, target: str, read_only: bool = False):
+        if not is_postgres_url(target):
+            raise ValueError(
+                "PORTFOLIO_DB_URL must be a PostgreSQL connection string "
+                "(postgresql:// or postgres://)"
+            )
+
+        import psycopg
+
+        parsed = urlsplit(target)
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        query = {}
+        schema_name = None
+        for key, value in query_items:
+            if key in {"schema", "search_path"}:
+                schema_name = value
+            else:
+                query[key] = value
+        clean_target = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+        self._conn = psycopg.connect(clean_target)
+        self._conn.autocommit = False
+        if schema_name:
+            self._conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+            self._conn.execute(f'SET search_path TO "{schema_name}"')
+
+    def execute(self, sql: str, params=None):
+        """Execute SQL using psycopg placeholder syntax."""
+        sql = sql.replace("?", "%s")
+        if params is None:
+            return self._conn.execute(sql)
+        return self._conn.execute(sql, params)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
 
 
 class PortfolioDatabase:
-    """DuckDB-based portfolio database."""
+    """Portfolio database backed by PostgreSQL."""
 
     def __init__(self, db_path: str = "portfolio.db", read_only: bool = False):
         """Initialize database connection."""
         self.db_path = db_path
         self.read_only = read_only
-        self.con = duckdb.connect(db_path, read_only=read_only)
+        self.con = _ConnectionAdapter(db_path, read_only=read_only)
         if not read_only:
             self._create_schema()
 
+    def _table_exists(self, table_name: str) -> bool:
+        """Return True when a table exists in the current schema."""
+        row = self.con.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_name = ?
+            """,
+            [table_name],
+        ).fetchone()
+        return bool(row)
+
+    def _table_info(self, table_name: str):
+        """Return column metadata in a PRAGMA-like shape."""
+        return self.con.execute(
+            """
+            SELECT
+                c.ordinal_position - 1 AS cid,
+                c.column_name,
+                c.data_type,
+                CASE WHEN c.is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull,
+                c.column_default AS dflt_value,
+                CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS pk
+            FROM information_schema.columns c
+            LEFT JOIN (
+                SELECT kcu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                 AND tc.table_name = kcu.table_name
+                WHERE tc.table_schema = current_schema()
+                  AND tc.table_name = ?
+                  AND tc.constraint_type = 'PRIMARY KEY'
+            ) pk ON pk.column_name = c.column_name
+            WHERE c.table_schema = current_schema()
+              AND c.table_name = ?
+            ORDER BY c.ordinal_position
+            """,
+            [table_name, table_name],
+        ).fetchall()
+
     def _create_schema(self):
         """Create database schema if not exists."""
-        # Create sequences first
-        self.con.execute("""
-            CREATE SEQUENCE IF NOT EXISTS seq_transaction_id START 1 INCREMENT 1
-        """)
-        self.con.execute("""
-            CREATE SEQUENCE IF NOT EXISTS seq_repair_log_id START 1 INCREMENT 1
-        """)
-
         # Migrate existing daily_returns table if needed
         self._migrate_daily_returns_schema()
 
@@ -39,15 +140,15 @@ class PortfolioDatabase:
         # Create transactions table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
-                id INTEGER PRIMARY KEY DEFAULT nextval('seq_transaction_id'),
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                 date DATE NOT NULL,
                 asset VARCHAR NOT NULL,
                 action VARCHAR NOT NULL,
-                quantity DOUBLE NOT NULL,
+                quantity DOUBLE PRECISION NOT NULL,
                 asset_type VARCHAR,
-                price DOUBLE,
+                price DOUBLE PRECISION,
                 currency VARCHAR,
-                fees DOUBLE,
+                fees DOUBLE PRECISION,
                 exchange VARCHAR,
                 data_source VARCHAR,
                 account VARCHAR,
@@ -61,7 +162,7 @@ class PortfolioDatabase:
             CREATE TABLE IF NOT EXISTS prices (
                 date DATE NOT NULL,
                 ticker VARCHAR NOT NULL,
-                price DOUBLE NOT NULL,
+                price DOUBLE PRECISION NOT NULL,
                 PRIMARY KEY (date, ticker)
             )
         """)
@@ -75,18 +176,18 @@ class PortfolioDatabase:
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS daily_returns (
                 date DATE PRIMARY KEY,
-                portfolio_value DOUBLE NOT NULL,
-                portfolio_daily_return DOUBLE,
-                investment_return DOUBLE,
-                cash_flow_impact DOUBLE,
-                adjusted_base DOUBLE
+                portfolio_value DOUBLE PRECISION NOT NULL,
+                portfolio_daily_return DOUBLE PRECISION,
+                investment_return DOUBLE PRECISION,
+                cash_flow_impact DOUBLE PRECISION,
+                adjusted_base DOUBLE PRECISION
             )
         """)
 
         # Create refresh log table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS refresh_log (
-                refresh_id INTEGER PRIMARY KEY DEFAULT nextval('seq_transaction_id'),
+                refresh_id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                 refresh_date DATE NOT NULL,
                 refresh_type VARCHAR NOT NULL,
                 rows_affected INTEGER,
@@ -117,7 +218,7 @@ class PortfolioDatabase:
         # Create repair log table for operator visibility
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS repair_log (
-                repair_id INTEGER PRIMARY KEY DEFAULT nextval('seq_repair_log_id'),
+                repair_id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                 ticker VARCHAR NOT NULL,
                 start_date DATE,
                 end_date DATE,
@@ -128,7 +229,381 @@ class PortfolioDatabase:
             )
         """)
 
+        # Create SQL helper functions that mirror the Python domain helpers.
+        self._create_sql_helpers()
+
+        # Create the PostgreSQL recalculation procedure for daily returns.
+        self._create_daily_returns_refresh_function()
+
         self.con.commit()
+
+    def _create_sql_helpers(self):
+        """Create SQL helper functions used by database-side calculations."""
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION get_asset_type_sql(ticker TEXT)
+            RETURNS TEXT
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT CASE
+                    WHEN ticker = 'USD' THEN 'cash_base'
+                    WHEN RIGHT(ticker, 5) = 'USD=X' THEN 'cash_fx'
+                    WHEN RIGHT(ticker, 4) = '-USD' THEN 'crypto'
+                    WHEN RIGHT(ticker, 2) = '.L' THEN 'stock_gbp'
+                    WHEN RIGHT(ticker, 3) = '.DE' THEN 'stock_eur'
+                    WHEN RIGHT(ticker, 2) = '.T' THEN 'stock_jpy'
+                    WHEN RIGHT(ticker, 3) = '.SW' THEN 'stock_chf'
+                    WHEN RIGHT(ticker, 3) = '.TO' THEN 'stock_cad'
+                    WHEN RIGHT(ticker, 3) = '.AX' THEN 'stock_aud'
+                    WHEN RIGHT(ticker, 3) = '.HK' THEN 'stock_hkd'
+                    WHEN RIGHT(ticker, 3) = '.SG' THEN 'stock_sgd'
+                    ELSE 'stock_usd'
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION is_cash_like_sql(asset TEXT)
+            RETURNS BOOLEAN
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT get_asset_type_sql(asset) IN ('cash_base', 'cash_fx')
+                    OR asset LIKE 'CASH %%'
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION normalize_cash_asset_sql(asset TEXT, asset_type TEXT)
+            RETURNS TEXT
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT CASE
+                    WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
+                    WHEN asset_type = 'cash_fx' THEN asset
+                    WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
+                    WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
+                    WHEN asset = 'CASH UAH' THEN 'UAHUSD=X'
+                    ELSE asset
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION get_cash_key_for_asset_sql(asset TEXT, asset_type TEXT)
+            RETURNS TEXT
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT CASE
+                    WHEN asset_type = 'cash_fx' THEN asset
+                    WHEN asset_type = 'stock_eur' THEN 'EURUSD=X'
+                    WHEN asset_type = 'stock_gbp' THEN 'GBPUSD=X'
+                    WHEN asset_type = 'stock_jpy' THEN 'JPYUSD=X'
+                    WHEN asset_type = 'stock_chf' THEN 'CHFUSD=X'
+                    WHEN asset_type = 'stock_cad' THEN 'CADUSD=X'
+                    WHEN asset_type = 'stock_aud' THEN 'AUDUSD=X'
+                    WHEN asset_type = 'stock_hkd' THEN 'HKDUSD=X'
+                    WHEN asset_type = 'stock_sgd' THEN 'SGDUSD=X'
+                    WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
+                    WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
+                    WHEN asset = 'CASH UAH' THEN 'UAHUSD=X'
+                    ELSE 'USD'
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION cash_currency_for_asset_type_sql(asset_type TEXT)
+            RETURNS TEXT
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT CASE
+                    WHEN asset_type = 'stock_eur' THEN 'EURUSD=X'
+                    WHEN asset_type = 'stock_gbp' THEN 'GBPUSD=X'
+                    WHEN asset_type = 'stock_jpy' THEN 'JPYUSD=X'
+                    WHEN asset_type = 'stock_chf' THEN 'CHFUSD=X'
+                    WHEN asset_type = 'stock_cad' THEN 'CADUSD=X'
+                    WHEN asset_type = 'stock_aud' THEN 'AUDUSD=X'
+                    WHEN asset_type = 'stock_hkd' THEN 'HKDUSD=X'
+                    WHEN asset_type = 'stock_sgd' THEN 'SGDUSD=X'
+                    ELSE 'USD'
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION cash_display_currency_sql(symbol TEXT)
+            RETURNS TEXT
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT CASE
+                    WHEN symbol = 'USD' THEN 'USD'
+                    WHEN symbol = 'EURUSD=X' THEN 'EUR'
+                    WHEN symbol = 'GBPUSD=X' THEN 'GBP'
+                    WHEN symbol = 'UAHUSD=X' THEN 'UAH'
+                    WHEN symbol = 'JPYUSD=X' THEN 'JPY'
+                    WHEN symbol = 'CHFUSD=X' THEN 'CHF'
+                    WHEN symbol = 'CADUSD=X' THEN 'CAD'
+                    WHEN symbol = 'AUDUSD=X' THEN 'AUD'
+                    WHEN symbol = 'HKDUSD=X' THEN 'HKD'
+                    WHEN symbol = 'SGDUSD=X' THEN 'SGD'
+                    ELSE symbol
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION price_asof_sql(p_ticker TEXT, p_as_of_date DATE)
+            RETURNS DOUBLE PRECISION
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT p.price
+                FROM prices p
+                WHERE p.ticker = p_ticker
+                  AND p.date <= p_as_of_date
+                ORDER BY p.date DESC
+                LIMIT 1
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION cash_amount_to_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
+            RETURNS DOUBLE PRECISION
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT CASE
+                    WHEN normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset)) = 'USD' THEN p_quantity
+                    ELSE p_quantity * price_asof_sql(
+                        normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset)),
+                        p_as_of_date
+                    )
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION asset_market_value_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
+            RETURNS DOUBLE PRECISION
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT CASE
+                    WHEN get_asset_type_sql(p_asset) = 'cash_base' THEN p_quantity
+                    WHEN get_asset_type_sql(p_asset) = 'cash_fx' THEN p_quantity * price_asof_sql(p_asset, p_as_of_date)
+                    WHEN get_asset_type_sql(p_asset) IN (
+                        'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                        'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                    ) THEN p_quantity * price_asof_sql(p_asset, p_as_of_date) * price_asof_sql(
+                        cash_currency_for_asset_type_sql(get_asset_type_sql(p_asset)),
+                        p_as_of_date
+                    )
+                    ELSE p_quantity * price_asof_sql(p_asset, p_as_of_date)
+                END
+            $$;
+        """)
+
+    def _create_daily_returns_refresh_function(self):
+        """Create the PostgreSQL function that rebuilds daily_returns."""
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION refresh_daily_returns_sql(p_from_date DATE DEFAULT NULL)
+            RETURNS INTEGER
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                v_min_date DATE;
+                v_max_date DATE;
+                v_date DATE;
+                v_prev_value DOUBLE PRECISION := 0;
+                v_portfolio_value DOUBLE PRECISION := 0;
+                v_cash_flow_impact DOUBLE PRECISION := 0;
+                v_portfolio_daily_return DOUBLE PRECISION := 0;
+                v_investment_return DOUBLE PRECISION := 0;
+                v_adjusted_base DOUBLE PRECISION := 0;
+                v_rows INTEGER := 0;
+                tx RECORD;
+                h RECORD;
+                v_asset_type TEXT;
+                v_cash_key TEXT;
+                v_asset_value DOUBLE PRECISION;
+            BEGIN
+                IF p_from_date IS NULL THEN
+                    DELETE FROM daily_returns;
+                ELSE
+                    DELETE FROM daily_returns WHERE date >= p_from_date;
+                END IF;
+
+                SELECT MIN(date), MAX(date)
+                  INTO v_min_date, v_max_date
+                FROM transactions;
+
+                IF v_min_date IS NULL THEN
+                    RETURN 0;
+                END IF;
+
+                IF v_max_date < CURRENT_DATE THEN
+                    v_max_date := CURRENT_DATE;
+                END IF;
+
+                CREATE TEMP TABLE holdings (
+                    asset TEXT PRIMARY KEY,
+                    qty DOUBLE PRECISION NOT NULL DEFAULT 0
+                ) ON COMMIT DROP;
+
+                INSERT INTO holdings (asset, qty)
+                SELECT DISTINCT asset, 0
+                FROM transactions
+                ON CONFLICT (asset) DO NOTHING;
+
+                INSERT INTO holdings (asset, qty)
+                SELECT DISTINCT get_cash_key_for_asset_sql(asset, COALESCE(asset_type, get_asset_type_sql(asset))), 0
+                FROM transactions
+                ON CONFLICT (asset) DO NOTHING;
+
+                FOR v_date IN
+                    SELECT generate_series(v_min_date, v_max_date, interval '1 day')::date
+                LOOP
+                    FOR tx IN
+                        SELECT id, asset, action, quantity, price, fees, asset_type
+                        FROM transactions
+                        WHERE date = v_date
+                        ORDER BY id
+                    LOOP
+                        v_asset_type := COALESCE(tx.asset_type, get_asset_type_sql(tx.asset));
+                        v_cash_key := get_cash_key_for_asset_sql(tx.asset, v_asset_type);
+
+                        INSERT INTO holdings (asset, qty)
+                        VALUES (tx.asset, 0)
+                        ON CONFLICT (asset) DO NOTHING;
+                        INSERT INTO holdings (asset, qty)
+                        VALUES (v_cash_key, 0)
+                        ON CONFLICT (asset) DO NOTHING;
+
+                        CASE upper(tx.action)
+                            WHEN 'BUY' THEN
+                                UPDATE holdings
+                                SET qty = qty + tx.quantity
+                                WHERE asset = tx.asset;
+
+                                IF NOT is_cash_like_sql(tx.asset) AND tx.price IS NOT NULL THEN
+                                    UPDATE holdings
+                                    SET qty = qty - (tx.quantity * tx.price + COALESCE(tx.fees, 0))
+                                    WHERE asset = v_cash_key;
+                                END IF;
+                            WHEN 'SELL' THEN
+                                UPDATE holdings
+                                SET qty = qty - tx.quantity
+                                WHERE asset = tx.asset;
+
+                                IF NOT is_cash_like_sql(tx.asset) AND tx.price IS NOT NULL THEN
+                                    UPDATE holdings
+                                    SET qty = qty + (tx.quantity * tx.price - COALESCE(tx.fees, 0))
+                                    WHERE asset = v_cash_key;
+                                END IF;
+                            WHEN 'DEPOSIT', 'TRANSFER', 'DIVIDEND', 'INTEREST', 'EXCHANGE_TO' THEN
+                                UPDATE holdings
+                                SET qty = qty + tx.quantity
+                                WHERE asset = v_cash_key;
+                            WHEN 'WITHDRAW', 'FEE', 'TAX' THEN
+                                UPDATE holdings
+                                SET qty = qty - tx.quantity
+                                WHERE asset = v_cash_key;
+                            WHEN 'EXCHANGE_FROM' THEN
+                                UPDATE holdings
+                                SET qty = qty + tx.quantity
+                                WHERE asset = v_cash_key;
+                            ELSE
+                                NULL;
+                        END CASE;
+                    END LOOP;
+
+                    v_portfolio_value := 0;
+                    FOR h IN
+                        SELECT asset, qty
+                        FROM holdings
+                        WHERE qty <> 0
+                        ORDER BY asset
+                    LOOP
+                        v_asset_value := asset_market_value_usd_sql(h.asset, h.qty, v_date);
+                        IF h.qty <> 0 AND v_asset_value IS NULL THEN
+                            RAISE EXCEPTION USING MESSAGE = 'Price unavailable for ' || h.asset || ' as of ' || v_date;
+                        END IF;
+                        v_portfolio_value := v_portfolio_value + COALESCE(v_asset_value, 0);
+                    END LOOP;
+
+                    v_cash_flow_impact := 0;
+                    FOR tx IN
+                        SELECT asset, action, quantity, asset_type
+                        FROM transactions
+                        WHERE date = v_date
+                    LOOP
+                        v_asset_type := COALESCE(tx.asset_type, get_asset_type_sql(tx.asset));
+                        IF is_cash_like_sql(tx.asset) THEN
+                            IF upper(tx.action) = 'DEPOSIT' THEN
+                                v_cash_flow_impact := v_cash_flow_impact + cash_amount_to_usd_sql(tx.asset, tx.quantity, v_date);
+                            ELSIF upper(tx.action) = 'WITHDRAW' THEN
+                                v_cash_flow_impact := v_cash_flow_impact - cash_amount_to_usd_sql(tx.asset, tx.quantity, v_date);
+                            END IF;
+                        END IF;
+                    END LOOP;
+
+                    IF v_rows = 0 THEN
+                        v_portfolio_daily_return := 0;
+                        v_investment_return := 0;
+                        v_adjusted_base := v_portfolio_value;
+                        v_cash_flow_impact := 0;
+                    ELSE
+                        IF v_prev_value > 0 THEN
+                            v_portfolio_daily_return := ((v_portfolio_value - v_prev_value) / v_prev_value) * 100;
+                        ELSE
+                            v_portfolio_daily_return := 0;
+                        END IF;
+
+                        IF v_adjusted_base > 0 THEN
+                            v_investment_return := ((v_portfolio_value - v_prev_value - v_cash_flow_impact) / v_adjusted_base) * 100;
+                        ELSE
+                            v_investment_return := 0;
+                        END IF;
+
+                        v_adjusted_base := v_adjusted_base + v_cash_flow_impact;
+                    END IF;
+
+                    INSERT INTO daily_returns (
+                        date,
+                        portfolio_value,
+                        portfolio_daily_return,
+                        investment_return,
+                        cash_flow_impact,
+                        adjusted_base
+                    )
+                    VALUES (
+                        v_date,
+                        v_portfolio_value,
+                        v_portfolio_daily_return,
+                        v_investment_return,
+                        v_cash_flow_impact,
+                        v_adjusted_base
+                    )
+                    ON CONFLICT (date) DO UPDATE SET
+                        portfolio_value = EXCLUDED.portfolio_value,
+                        portfolio_daily_return = EXCLUDED.portfolio_daily_return,
+                        investment_return = EXCLUDED.investment_return,
+                        cash_flow_impact = EXCLUDED.cash_flow_impact,
+                        adjusted_base = EXCLUDED.adjusted_base;
+
+                    v_prev_value := v_portfolio_value;
+                    v_rows := v_rows + 1;
+                END LOOP;
+
+                RETURN v_rows;
+            END;
+            $$;
+        """)
 
     def migrate_from_csv(self, csv_path: str):
         """Migrate transactions from CSV file."""
@@ -138,7 +613,7 @@ class PortfolioDatabase:
         # Parse dates
         df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y')
 
-        # Insert into DuckDB
+        # Insert into PostgreSQL
         for _, row in df.iterrows():
             self.con.execute(
                 """
@@ -215,15 +690,13 @@ class PortfolioDatabase:
     def _migrate_daily_returns_schema(self):
         """Migrate daily_returns table to include new columns if needed."""
         # Check if table exists
-        table_exists = self.con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='daily_returns'"
-        ).fetchone()
+        table_exists = self._table_exists("daily_returns")
 
         if not table_exists:
             return  # Table doesn't exist yet, will be created by normal schema
 
         # Check which columns exist
-        columns = self.con.execute("PRAGMA table_info(daily_returns)").fetchall()
+        columns = self._table_info("daily_returns")
         column_names = {col[1] for col in columns}
 
         # Add missing columns
@@ -246,9 +719,7 @@ class PortfolioDatabase:
         """Migrate CASH format to Yahoo Finance format."""
         try:
             # Check if transactions table exists
-            table_exists = self.con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
-            ).fetchone()
+            table_exists = self._table_exists("transactions")
 
             if not table_exists:
                 return  # Table doesn't exist yet
@@ -282,13 +753,11 @@ class PortfolioDatabase:
     def _migrate_transaction_audit_columns(self):
         """Add account, created_at, updated_at columns to transactions if missing."""
         try:
-            table_exists = self.con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
-            ).fetchone()
+            table_exists = self._table_exists("transactions")
             if not table_exists:
                 return
 
-            columns = self.con.execute("PRAGMA table_info(transactions)").fetchall()
+            columns = self._table_info("transactions")
             existing = {col[1] for col in columns}
 
             for col_name, col_def in [
@@ -323,8 +792,10 @@ class PortfolioDatabase:
         """Insert price for ticker on specific date."""
         self.con.execute(
             """
-            INSERT OR REPLACE INTO prices (ticker, date, price)
+            INSERT INTO prices (ticker, date, price)
             VALUES (?, ?, ?)
+            ON CONFLICT (date, ticker) DO UPDATE SET
+                price = EXCLUDED.price
             """,
             [ticker, date_obj, price],
         )
@@ -336,9 +807,15 @@ class PortfolioDatabase:
         """Insert daily return record with separated return metrics."""
         self.con.execute(
             """
-            INSERT OR REPLACE INTO daily_returns
+            INSERT INTO daily_returns
             (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
             VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (date) DO UPDATE SET
+                portfolio_value = EXCLUDED.portfolio_value,
+                portfolio_daily_return = EXCLUDED.portfolio_daily_return,
+                investment_return = EXCLUDED.investment_return,
+                cash_flow_impact = EXCLUDED.cash_flow_impact,
+                adjusted_base = EXCLUDED.adjusted_base
             """,
             [date_obj, portfolio_value, daily_return, investment_return, cash_flow_impact, adjusted_base],
         )
@@ -361,7 +838,6 @@ class PortfolioDatabase:
     def replace_daily_returns(self, rows, start_date=None):
         """Replace all or part of daily_returns in one transaction."""
         batch_rows = self._normalize_daily_return_rows(rows)
-        batch_name = "_daily_returns_batch"
 
         self.con.execute("BEGIN TRANSACTION")
         try:
@@ -374,34 +850,47 @@ class PortfolioDatabase:
                 )
 
             if batch_rows:
-                df = pd.DataFrame(
-                    batch_rows,
-                    columns=[
-                        'date',
-                        'portfolio_value',
-                        'portfolio_daily_return',
-                        'investment_return',
-                        'cash_flow_impact',
-                        'adjusted_base',
-                    ],
-                )
-                self.con.register(batch_name, df)
-                try:
+                for row in batch_rows:
                     self.con.execute(
-                        f"""
-                        INSERT OR REPLACE INTO daily_returns
-                        (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
-                        SELECT date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base
-                        FROM {batch_name}
                         """
+                        INSERT INTO daily_returns
+                        (date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact, adjusted_base)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (date) DO UPDATE SET
+                            portfolio_value = EXCLUDED.portfolio_value,
+                            portfolio_daily_return = EXCLUDED.portfolio_daily_return,
+                            investment_return = EXCLUDED.investment_return,
+                            cash_flow_impact = EXCLUDED.cash_flow_impact,
+                            adjusted_base = EXCLUDED.adjusted_base
+                        """,
+                        [
+                            row['date'],
+                            row['portfolio_value'],
+                            row['portfolio_daily_return'],
+                            row['investment_return'],
+                            row['cash_flow_impact'],
+                            row['adjusted_base'],
+                        ],
                     )
-                finally:
-                    self.con.unregister(batch_name)
 
             self.con.commit()
         except Exception:
             self.con.rollback()
             raise
+
+    def refresh_daily_returns_sql(self, from_date=None) -> int:
+        """Rebuild daily_returns using the PostgreSQL stored procedure."""
+        try:
+            row = self.con.execute(
+                "SELECT refresh_daily_returns_sql(?)",
+                [from_date],
+            ).fetchone()
+            self.con.commit()
+            return int(row[0]) if row and row[0] is not None else 0
+        except Exception as exc:
+            self.con.rollback()
+            message = str(exc).strip()
+            raise ValueError(message) from exc
 
     def get_daily_returns(self):
         """Get all daily returns with separated metrics."""
@@ -563,6 +1052,1151 @@ class PortfolioDatabase:
             [start_date],
         ).fetchall()
 
+    def get_performance_stats_sql(self, as_of_date, benchmark_ticker: str, risk_free_rate_annual: float) -> dict:
+        """Compute performance statistics directly in PostgreSQL."""
+        row = self.con.execute(
+            """
+            WITH params AS (
+                SELECT
+                    ?::date AS as_of_date,
+                    ?::text AS benchmark_ticker,
+                    ?::double precision AS risk_free_rate
+            ),
+            dr AS (
+                SELECT d.date, d.portfolio_value, d.investment_return
+                FROM daily_returns d
+                CROSS JOIN params p
+                WHERE d.portfolio_value > 0
+                  AND (p.as_of_date IS NULL OR d.date <= p.as_of_date)
+                ORDER BY d.date
+            ),
+            dr_bounds AS (
+                SELECT
+                    COUNT(*)::integer AS total_days,
+                    MIN(date) AS start_date,
+                    MAX(date) AS end_date,
+                    (ARRAY_AGG(portfolio_value ORDER BY date))[1] AS start_value,
+                    (ARRAY_AGG(portfolio_value ORDER BY date DESC))[1] AS end_value,
+                    AVG(investment_return) AS avg_daily_return,
+                    STDDEV_POP(investment_return) AS std_dev,
+                    PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY investment_return) AS var_95,
+                    PERCENTILE_CONT(0.01) WITHIN GROUP (ORDER BY investment_return) AS var_99,
+                    EXP(SUM(LN(GREATEST(1.0 + investment_return / 100.0, 1e-12)))) - 1 AS twr
+                FROM dr
+            ),
+            drawdowns AS (
+                SELECT
+                    date,
+                    portfolio_value,
+                    MAX(portfolio_value) OVER (
+                        ORDER BY date
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS running_max
+                FROM dr
+            ),
+            drawdown_values AS (
+                SELECT
+                    date,
+                    CASE
+                        WHEN running_max > 0 THEN ((running_max - portfolio_value) / running_max) * 100.0
+                        ELSE 0.0
+                    END AS drawdown
+                FROM drawdowns
+            ),
+            drawdown_periods AS (
+                SELECT grp, COUNT(*)::double precision AS duration
+                FROM (
+                    SELECT
+                        date,
+                        drawdown,
+                        SUM(CASE WHEN drawdown = 0 THEN 1 ELSE 0 END) OVER (
+                            ORDER BY date
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                        ) AS grp
+                    FROM drawdown_values
+                    WHERE drawdown > 0
+                ) x
+                GROUP BY grp
+            ),
+            drawdown_stats AS (
+                SELECT
+                    MAX(drawdown) AS max_drawdown,
+                    AVG(drawdown) FILTER (WHERE drawdown > 0) AS avg_drawdown,
+                    (SELECT AVG(duration) FROM drawdown_periods) AS avg_drawdown_duration
+                FROM drawdown_values
+            ),
+            bench_prices AS (
+                SELECT
+                    p.date,
+                    p.price,
+                    LAG(p.price) OVER (ORDER BY p.date) AS prev_price
+                FROM prices p
+                CROSS JOIN params prm
+                WHERE p.ticker = prm.benchmark_ticker
+                  AND (prm.as_of_date IS NULL OR p.date <= prm.as_of_date)
+                ORDER BY p.date
+            ),
+            bench_returns AS (
+                SELECT
+                    date,
+                    ((price - prev_price) / prev_price) * 100.0 AS return_pct
+                FROM bench_prices
+                WHERE prev_price > 0
+            ),
+            bench_bounds AS (
+                SELECT
+                    (ARRAY_AGG(price ORDER BY date))[1] AS spy_start,
+                    (ARRAY_AGG(price ORDER BY date DESC))[1] AS spy_end
+                FROM bench_prices
+            ),
+            aligned AS (
+                SELECT
+                    d.date,
+                    d.investment_return AS port_ret,
+                    b.return_pct AS bench_ret
+                FROM dr d
+                INNER JOIN bench_returns b USING (date)
+            ),
+            aligned_avg AS (
+                SELECT
+                    AVG(port_ret) AS avg_port,
+                    AVG(bench_ret) AS avg_spy
+                FROM aligned
+            ),
+            aligned_metrics AS (
+                SELECT
+                    COUNT(*)::integer AS aligned_days,
+                    AVG((a.port_ret - avg.avg_port) * (a.bench_ret - avg.avg_spy)) AS covariance,
+                    AVG(POWER(a.bench_ret - avg.avg_spy, 2)) AS variance_market,
+                    AVG(a.port_ret - a.bench_ret) AS avg_excess_daily,
+                    SQRT(AVG(POWER(a.port_ret - a.bench_ret, 2))) AS tracking_error_daily,
+                    SUM(CASE WHEN a.bench_ret > 0 THEN a.port_ret ELSE 0 END) AS up_port_sum,
+                    SUM(CASE WHEN a.bench_ret > 0 THEN a.bench_ret ELSE 0 END) AS up_bench_sum,
+                    SUM(CASE WHEN a.bench_ret < 0 THEN a.port_ret ELSE 0 END) AS down_port_sum,
+                    SUM(CASE WHEN a.bench_ret < 0 THEN a.bench_ret ELSE 0 END) AS down_bench_sum
+                FROM aligned a
+                CROSS JOIN aligned_avg avg
+            ),
+            monthly_returns AS (
+                SELECT
+                    date_trunc('month', date)::date AS month_start,
+                    EXP(SUM(LN(GREATEST(1.0 + investment_return / 100.0, 1e-12)))) - 1 AS month_return
+                FROM dr
+                GROUP BY 1
+            ),
+            monthly_median AS (
+                SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY month_return) AS median_monthly_return
+                FROM monthly_returns
+            )
+            SELECT
+                dr_bounds.total_days,
+                dr_bounds.start_date,
+                dr_bounds.end_date,
+                dr_bounds.start_value,
+                dr_bounds.end_value,
+                (dr_bounds.end_value - dr_bounds.start_value) AS total_gain,
+                dr_bounds.avg_daily_return,
+                dr_bounds.std_dev,
+                dr_bounds.var_95,
+                dr_bounds.var_99,
+                drawdown_stats.max_drawdown,
+                COALESCE(drawdown_stats.avg_drawdown, 0.0) AS avg_drawdown,
+                COALESCE(drawdown_stats.avg_drawdown_duration, 0.0) AS avg_drawdown_duration,
+                COALESCE(dr_bounds.twr * 100.0, 0.0) AS time_weighted_return_pct,
+                COALESCE(dr_bounds.twr * 100.0, 0.0) AS total_return_pct,
+                COALESCE(dr_bounds.twr, 0.0) AS twr_decimal,
+                COALESCE(monthly_median.median_monthly_return * 100.0, 0.0) AS median_monthly_return,
+                CASE
+                    WHEN dr_bounds.start_date IS NOT NULL AND dr_bounds.end_date IS NOT NULL AND dr_bounds.end_date > dr_bounds.start_date THEN
+                        ((dr_bounds.twr + 1.0) ^ (1.0 / ((dr_bounds.end_date - dr_bounds.start_date)::double precision / 365.25)) - 1.0) * 100.0
+                    ELSE 0.0
+                END AS cagr,
+                COALESCE(aligned_metrics.aligned_days, 0) AS aligned_days,
+                COALESCE(aligned_metrics.covariance, 0.0) AS covariance,
+                COALESCE(aligned_metrics.variance_market, 0.0) AS variance_market,
+                COALESCE(aligned_metrics.avg_excess_daily, 0.0) AS avg_excess_daily,
+                COALESCE(aligned_metrics.tracking_error_daily, 0.0) AS tracking_error_daily,
+                COALESCE(aligned_metrics.up_port_sum, 0.0) AS up_port_sum,
+                COALESCE(aligned_metrics.up_bench_sum, 0.0) AS up_bench_sum,
+                COALESCE(aligned_metrics.down_port_sum, 0.0) AS down_port_sum,
+                COALESCE(aligned_metrics.down_bench_sum, 0.0) AS down_bench_sum,
+                COALESCE(bench_bounds.spy_start, 0.0) AS spy_start,
+                COALESCE(bench_bounds.spy_end, 0.0) AS spy_end
+            FROM dr_bounds
+            CROSS JOIN drawdown_stats
+            CROSS JOIN aligned_metrics
+            CROSS JOIN monthly_median
+            CROSS JOIN bench_bounds
+            """,
+            [as_of_date, benchmark_ticker, risk_free_rate_annual],
+        ).fetchone()
+
+        if not row:
+            return {}
+
+        (
+            total_days,
+            start_date,
+            end_date,
+            start_value,
+            end_value,
+            total_gain,
+            avg_daily_return,
+            std_dev,
+            var_95,
+            var_99,
+            max_drawdown,
+            avg_drawdown,
+            avg_drawdown_duration,
+            time_weighted_return_pct,
+            total_return_pct,
+            twr_decimal,
+            median_monthly_return,
+            cagr,
+            aligned_days,
+            covariance,
+            variance_market,
+            avg_excess_daily,
+            tracking_error_daily,
+            up_port_sum,
+            up_bench_sum,
+            down_port_sum,
+            down_bench_sum,
+            spy_start,
+            spy_end,
+        ) = row
+
+        rf = float(risk_free_rate_annual or 0.0)
+        cagr_decimal = float(cagr) / 100.0
+        hist_volatility = float(std_dev or 0.0) * (252 ** 0.5)
+        cvar_95 = float(var_95 or 0.0)
+        cvar_99 = float(var_99 or 0.0)
+
+        tail_95 = self.con.execute(
+            """
+            WITH dr AS (
+                SELECT investment_return
+                FROM daily_returns
+                WHERE portfolio_value > 0
+                  AND (?::date IS NULL OR date <= ?::date)
+            ),
+            threshold AS (
+                SELECT PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY investment_return) AS p95,
+                       PERCENTILE_CONT(0.01) WITHIN GROUP (ORDER BY investment_return) AS p99
+                FROM dr
+            )
+            SELECT
+                COALESCE((SELECT AVG(investment_return) FROM dr, threshold WHERE investment_return <= threshold.p95), 0.0),
+                COALESCE((SELECT AVG(investment_return) FROM dr, threshold WHERE investment_return <= threshold.p99), 0.0)
+            """,
+            [as_of_date, as_of_date],
+        ).fetchone()
+        if tail_95:
+            cvar_95, cvar_99 = tail_95
+
+        target_daily_pct = (rf / 252.0) * 100.0
+        downside_row = self.con.execute(
+            """
+            WITH dr AS (
+                SELECT investment_return
+                FROM daily_returns
+                WHERE portfolio_value > 0
+                  AND (?::date IS NULL OR date <= ?::date)
+            )
+            SELECT COALESCE(SQRT(AVG(POWER(investment_return - ?, 2)) FILTER (WHERE investment_return < ?)), 0.0)
+            FROM dr
+            """,
+            [as_of_date, as_of_date, target_daily_pct, target_daily_pct],
+        ).fetchone()
+        downside_deviation_daily = float(downside_row[0]) if downside_row and downside_row[0] is not None else 0.0
+        sortino_ratio = 0.0
+        if downside_deviation_daily > 0:
+            sortino_ratio = ((float(avg_daily_return or 0.0) - target_daily_pct) / downside_deviation_daily) * (252 ** 0.5)
+
+        beta = float(covariance or 0.0) / float(variance_market or 0.0) if float(variance_market or 0.0) > 0 else 0.0
+        spy_total_return = ((float(spy_end or 0.0) - float(spy_start or 0.0)) / float(spy_start or 0.0)) if float(spy_start or 0.0) > 0 else 0.0
+        spy_twr_pct = spy_total_return * 100.0
+        spy_cagr = 0.0
+        if float(spy_start or 0.0) > 0 and float(spy_end or 0.0) > 0 and start_date and end_date and end_date > start_date and spy_total_return > -1:
+            years = (end_date - start_date).days / 365.25
+            if years > 0:
+                spy_cagr = ((1.0 + spy_total_return) ** (1.0 / years) - 1.0)
+        tracking_error_annual = float(tracking_error_daily or 0.0) * (252 ** 0.5) / 100.0
+        avg_excess_annual = float(avg_excess_daily or 0.0) * 252.0 / 100.0
+        information_ratio = (avg_excess_annual / tracking_error_annual) if tracking_error_annual > 0 else 0.0
+        sharpe_ratio = ((cagr_decimal - rf) / (hist_volatility / 100.0)) if hist_volatility > 0 else 0.0
+        treynor_ratio = ((cagr_decimal - rf) / beta) if beta != 0 else 0.0
+        jensens_alpha = (cagr_decimal - (rf + beta * (spy_cagr - rf))) * 100.0
+        relative_return = (cagr_decimal - spy_cagr) * 100.0
+        up_capture = (float(up_port_sum or 0.0) / float(up_bench_sum or 0.0)) if float(up_bench_sum or 0.0) != 0 else 0.0
+        down_capture = (float(down_port_sum or 0.0) / float(down_bench_sum or 0.0)) if float(down_bench_sum or 0.0) != 0 else 0.0
+
+        return {
+            'total_days': int(total_days or 0),
+            'start_date': start_date,
+            'end_date': end_date,
+            'start_value': float(start_value or 0.0),
+            'end_value': float(end_value or 0.0),
+            'total_gain': float(total_gain or 0.0),
+            'net_gain': float(total_gain or 0.0),
+            'deposits': 0.0,
+            'withdrawals': 0.0,
+            'net_contributions': 0.0,
+            'dividends': 0.0,
+            'interest': 0.0,
+            'fees': 0.0,
+            'taxes': 0.0,
+            'income': 0.0,
+            'realized_gain': 0.0,
+            'unrealized_gain': 0.0,
+            'time_weighted_return_pct': float(time_weighted_return_pct or 0.0),
+            'total_cash_flow': 0.0,
+            'total_invested': 0.0,
+            'total_return_pct': float(total_return_pct or 0.0),
+            'avg_daily_return': float(avg_daily_return or 0.0),
+            'median_monthly_return': float(median_monthly_return or 0.0),
+            'cagr': float(cagr or 0.0),
+            'avg_investment_return': float(avg_daily_return or 0.0),
+            'std_dev': float(std_dev or 0.0),
+            'hist_volatility': float(hist_volatility or 0.0),
+            'beta': float(beta or 0.0),
+            'sharpe_ratio': float(sharpe_ratio or 0.0),
+            'sortino_ratio': float(sortino_ratio or 0.0),
+            'treynor_ratio': float(treynor_ratio or 0.0),
+            'information_ratio': float(information_ratio or 0.0),
+            'jensens_alpha': float(jensens_alpha or 0.0),
+            'relative_return': float(relative_return or 0.0),
+            'tracking_error': float(tracking_error_annual * 100.0 if tracking_error_annual else 0.0),
+            'var_95': float(var_95 or 0.0),
+            'var_99': float(var_99 or 0.0),
+            'cvar_95': float(cvar_95 or 0.0),
+            'cvar_99': float(cvar_99 or 0.0),
+            'max_drawdown': float(max_drawdown or 0.0),
+            'avg_drawdown': float(avg_drawdown or 0.0),
+            'avg_drawdown_duration': float(avg_drawdown_duration or 0.0),
+            'spy_twr_pct': float(spy_twr_pct or 0.0),
+            'spy_cagr_pct': float(spy_cagr * 100.0 if spy_cagr else 0.0),
+            'up_capture_ratio': float(up_capture or 0.0),
+            'down_capture_ratio': float(down_capture or 0.0),
+        }
+
+    def get_position_snapshot_rows(self, as_of_date, include_closed: bool = True):
+        """Return position snapshot rows computed in PostgreSQL."""
+        rows = self.con.execute(
+            """
+            WITH tx AS (
+                SELECT
+                    id,
+                    date,
+                    asset,
+                    upper(action) AS action,
+                    quantity,
+                    asset_type,
+                    price,
+                    fees,
+                    COALESCE(asset_type, get_asset_type_sql(asset)) AS resolved_asset_type
+                FROM transactions
+                WHERE date <= ?
+            ),
+            trades AS (
+                SELECT
+                    asset,
+                    MIN(date) FILTER (WHERE action = 'BUY') AS first_buy_date,
+                    SUM(CASE WHEN action = 'BUY' THEN quantity ELSE -quantity END) AS shares,
+                    SUM(CASE WHEN action = 'BUY' THEN quantity ELSE 0 END) AS buy_quantity,
+                    SUM(CASE WHEN action = 'BUY' THEN quantity * price + COALESCE(fees, 0) ELSE 0 END) AS buy_cost,
+                    SUM(CASE WHEN action = 'SELL' THEN quantity ELSE 0 END) AS sell_quantity,
+                    SUM(CASE WHEN action = 'SELL' THEN quantity * price - COALESCE(fees, 0) ELSE 0 END) AS sell_proceeds,
+                    MAX(price) FILTER (WHERE price IS NOT NULL) AS last_price_from_trans,
+                    MAX(resolved_asset_type) AS asset_type
+                FROM tx
+                WHERE action IN ('BUY', 'SELL')
+                GROUP BY asset
+            ),
+            priced AS (
+                SELECT
+                    t.*,
+                    latest.price AS latest_price,
+                    prev.price AS prev_price,
+                    fx_latest.price AS fx_latest_price,
+                    fx_prev.price AS fx_prev_price
+                FROM trades t
+                LEFT JOIN LATERAL (
+                    SELECT p.price
+                    FROM prices p
+                    WHERE p.ticker = t.asset AND p.date <= ?
+                    ORDER BY p.date DESC
+                    LIMIT 1
+                ) latest ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT p.price
+                    FROM prices p
+                    WHERE p.ticker = t.asset AND p.date <= ?
+                    ORDER BY p.date DESC
+                    OFFSET 1
+                    LIMIT 1
+                ) prev ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT p.price
+                    FROM prices p
+                    WHERE p.ticker = cash_currency_for_asset_type_sql(t.asset_type) AND p.date <= ?
+                    ORDER BY p.date DESC
+                    LIMIT 1
+                ) fx_latest ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT p.price
+                    FROM prices p
+                    WHERE p.ticker = cash_currency_for_asset_type_sql(t.asset_type) AND p.date <= ?
+                    ORDER BY p.date DESC
+                    OFFSET 1
+                    LIMIT 1
+                ) fx_prev ON TRUE
+            )
+            SELECT
+                asset AS symbol,
+                CASE WHEN shares > 0 THEN 'OPEN' ELSE 'CLOSED' END AS status,
+                CASE WHEN ABS(shares) < 0.01 THEN 0.0 ELSE shares END AS shares,
+                CASE
+                    WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                        THEN COALESCE(latest_price, last_price_from_trans) * COALESCE(fx_latest_price, 1.0)
+                    ELSE COALESCE(latest_price, last_price_from_trans)
+                END AS last_price,
+                CASE WHEN buy_quantity > 0 THEN buy_cost / buy_quantity ELSE 0.0 END AS avg_cost_per_share,
+                CASE WHEN shares > 0 THEN shares * (CASE WHEN buy_quantity > 0 THEN buy_cost / buy_quantity ELSE 0.0 END) ELSE 0.0 END AS total_cost,
+                CASE
+                    WHEN shares > 0 THEN shares * (
+                        CASE
+                            WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                THEN COALESCE(latest_price, last_price_from_trans) * COALESCE(fx_latest_price, 1.0)
+                            ELSE COALESCE(latest_price, last_price_from_trans)
+                        END
+                    )
+                    ELSE 0.0
+                END AS market_value,
+                0.0 AS dividend_income,
+                CASE
+                    WHEN shares > 0
+                     AND latest_price IS NOT NULL
+                     AND prev_price IS NOT NULL
+                    THEN
+                        (
+                            (
+                                CASE
+                                    WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                        THEN COALESCE(latest_price, last_price_from_trans) * COALESCE(fx_latest_price, 1.0)
+                                    ELSE COALESCE(latest_price, last_price_from_trans)
+                                END
+                                -
+                                CASE
+                                    WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                        THEN prev_price * COALESCE(fx_prev_price, 1.0)
+                                    ELSE prev_price
+                                END
+                            )
+                            /
+                            NULLIF(
+                                CASE
+                                    WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                        THEN prev_price * COALESCE(fx_prev_price, 1.0)
+                                    ELSE prev_price
+                                END,
+                                0
+                            )
+                        ) * 100.0
+                    ELSE 0.0
+                END AS day_gain_pct,
+                CASE
+                    WHEN shares > 0
+                     AND latest_price IS NOT NULL
+                     AND prev_price IS NOT NULL
+                    THEN shares * (
+                        (
+                            CASE
+                                WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                    THEN COALESCE(latest_price, last_price_from_trans) * COALESCE(fx_latest_price, 1.0)
+                                ELSE COALESCE(latest_price, last_price_from_trans)
+                            END
+                            -
+                            CASE
+                                WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                    THEN prev_price * COALESCE(fx_prev_price, 1.0)
+                                ELSE prev_price
+                            END
+                        )
+                    )
+                    ELSE 0.0
+                END AS day_gain_value,
+                CASE
+                    WHEN shares > 0 THEN (
+                        (
+                            CASE
+                                WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                    THEN COALESCE(latest_price, last_price_from_trans) * COALESCE(fx_latest_price, 1.0)
+                                ELSE COALESCE(latest_price, last_price_from_trans)
+                            END
+                            * shares - (CASE WHEN buy_quantity > 0 THEN buy_cost / buy_quantity ELSE 0.0 END) * shares
+                        ) / NULLIF((CASE WHEN buy_quantity > 0 THEN buy_cost / buy_quantity ELSE 0.0 END) * shares, 0)
+                    ) * 100.0
+                    ELSE 0.0
+                END AS total_gain_pct,
+                CASE
+                    WHEN shares > 0 THEN
+                        (
+                            CASE
+                                WHEN asset_type IN ('stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf', 'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd')
+                                    THEN COALESCE(latest_price, last_price_from_trans) * COALESCE(fx_latest_price, 1.0)
+                                ELSE COALESCE(latest_price, last_price_from_trans)
+                            END
+                            * shares - (CASE WHEN buy_quantity > 0 THEN buy_cost / buy_quantity ELSE 0.0 END) * shares
+                        )
+                    ELSE 0.0
+                END AS total_gain_value,
+                CASE WHEN sell_quantity > 0 THEN sell_proceeds - (sell_quantity * CASE WHEN buy_quantity > 0 THEN buy_cost / buy_quantity ELSE 0.0 END) ELSE 0.0 END AS realized_gain_value,
+                CASE WHEN sell_quantity > 0 AND buy_quantity > 0 THEN
+                    (
+                        sell_proceeds - (sell_quantity * (buy_cost / buy_quantity))
+                    ) / NULLIF(sell_quantity * (buy_cost / buy_quantity), 0) * 100.0
+                ELSE 0.0 END AS realized_gain_pct
+            FROM priced
+            WHERE ?::boolean OR shares <> 0
+            ORDER BY market_value DESC, symbol
+            """,
+            [as_of_date, as_of_date, as_of_date, as_of_date, as_of_date, include_closed],
+        ).fetchall()
+        return rows
+
+    def get_cash_snapshot_rows(self, as_of_date):
+        """Return cash snapshot rows computed in PostgreSQL."""
+        rows = self.con.execute(
+            """
+            WITH tx AS (
+                SELECT
+                    id,
+                    date,
+                    asset,
+                    upper(action) AS action,
+                    quantity,
+                    price,
+                    fees,
+                    COALESCE(asset_type, get_asset_type_sql(asset)) AS resolved_asset_type
+                FROM transactions
+                WHERE date <= ?
+            ),
+            contribs AS (
+                SELECT
+                    CASE
+                        WHEN upper(action) IN ('BUY', 'SELL') THEN get_cash_key_for_asset_sql(asset, resolved_asset_type)
+                        WHEN upper(action) IN ('DEPOSIT', 'TRANSFER', 'DIVIDEND', 'INTEREST', 'WITHDRAW', 'FEE', 'TAX', 'EXCHANGE_FROM', 'EXCHANGE_TO')
+                            AND (resolved_asset_type IN ('cash_base', 'cash_fx') OR asset LIKE 'CASH %%')
+                            THEN normalize_cash_asset_sql(asset, resolved_asset_type)
+                        ELSE NULL
+                    END AS symbol,
+                    SUM(CASE WHEN upper(action) = 'DEPOSIT' THEN quantity ELSE 0 END) AS deposits,
+                    SUM(CASE WHEN upper(action) = 'TRANSFER' THEN quantity ELSE 0 END) AS transfers_in,
+                    SUM(CASE WHEN upper(action) = 'WITHDRAW' THEN quantity ELSE 0 END) AS withdrawals,
+                    SUM(CASE WHEN upper(action) = 'BUY' THEN quantity * price + COALESCE(fees, 0) ELSE 0 END) AS spent,
+                    SUM(CASE WHEN upper(action) = 'SELL' THEN quantity * price - COALESCE(fees, 0) ELSE 0 END) AS received,
+                    SUM(CASE WHEN upper(action) = 'DIVIDEND' THEN quantity ELSE 0 END) AS dividends,
+                    SUM(CASE WHEN upper(action) = 'INTEREST' THEN quantity ELSE 0 END) AS interest,
+                    SUM(CASE WHEN upper(action) = 'FEE' THEN quantity ELSE 0 END) AS fees,
+                    SUM(CASE WHEN upper(action) = 'TAX' THEN quantity ELSE 0 END) AS taxes,
+                    SUM(
+                        CASE
+                            WHEN upper(action) = 'DEPOSIT' THEN quantity
+                            WHEN upper(action) = 'TRANSFER' THEN quantity
+                            WHEN upper(action) = 'WITHDRAW' THEN -quantity
+                            WHEN upper(action) = 'DIVIDEND' THEN quantity
+                            WHEN upper(action) = 'INTEREST' THEN quantity
+                            WHEN upper(action) = 'BUY' THEN -(quantity * price + COALESCE(fees, 0))
+                            WHEN upper(action) = 'SELL' THEN quantity * price - COALESCE(fees, 0)
+                            WHEN upper(action) = 'FEE' THEN -quantity
+                            WHEN upper(action) = 'TAX' THEN -quantity
+                            WHEN upper(action) = 'EXCHANGE_FROM' THEN quantity
+                            WHEN upper(action) = 'EXCHANGE_TO' THEN quantity
+                            ELSE 0
+                        END
+                    ) AS balance
+                FROM tx
+                GROUP BY symbol
+            ),
+            filtered AS (
+                SELECT *
+                FROM contribs
+                WHERE symbol IS NOT NULL
+            ),
+            priced AS (
+                SELECT
+                    c.*,
+                    CASE
+                        WHEN symbol = 'USD' THEN 1.0
+                        ELSE (
+                            SELECT p.price
+                            FROM prices p
+                            WHERE p.ticker = c.symbol AND p.date <= ?
+                            ORDER BY p.date DESC
+                            LIMIT 1
+                        )
+                    END AS fx_rate,
+                    (
+                        SELECT p.price
+                        FROM prices p
+                        WHERE p.ticker = c.symbol AND p.date <= ?
+                        ORDER BY p.date DESC
+                        LIMIT 1
+                    ) AS latest_px,
+                    (
+                        SELECT p.price
+                        FROM prices p
+                        WHERE p.ticker = c.symbol AND p.date <= ?
+                        ORDER BY p.date DESC
+                        OFFSET 1
+                        LIMIT 1
+                    ) AS prev_px
+                FROM filtered c
+            )
+            SELECT
+                symbol,
+                CASE
+                    WHEN symbol = 'USD' THEN 'USD'
+                    WHEN symbol = 'EURUSD=X' THEN 'EUR'
+                    WHEN symbol = 'GBPUSD=X' THEN 'GBP'
+                    WHEN symbol = 'UAHUSD=X' THEN 'UAH'
+                    WHEN symbol = 'JPYUSD=X' THEN 'JPY'
+                    WHEN symbol = 'CHFUSD=X' THEN 'CHF'
+                    WHEN symbol = 'CADUSD=X' THEN 'CAD'
+                    WHEN symbol = 'AUDUSD=X' THEN 'AUD'
+                    WHEN symbol = 'HKDUSD=X' THEN 'HKD'
+                    WHEN symbol = 'SGDUSD=X' THEN 'SGD'
+                    ELSE symbol
+                END AS currency,
+                balance,
+                balance * COALESCE(fx_rate, 1.0) AS market_value,
+                balance * COALESCE(fx_rate, 1.0) AS usd_value,
+                COALESCE(fx_rate, 1.0) AS last_price,
+                COALESCE(fx_rate, 1.0) AS fx_rate,
+                deposits,
+                transfers_in,
+                withdrawals,
+                spent,
+                received,
+                dividends,
+                interest,
+                fees,
+                taxes,
+                CASE
+                    WHEN symbol <> 'USD' AND latest_px IS NOT NULL AND prev_px IS NOT NULL AND prev_px > 0
+                    THEN ((latest_px - prev_px) / prev_px) * 100.0
+                    ELSE 0.0
+                END AS day_gain_pct,
+                CASE
+                    WHEN symbol <> 'USD' AND latest_px IS NOT NULL AND prev_px IS NOT NULL
+                    THEN balance * (latest_px - prev_px)
+                    ELSE 0.0
+                END AS day_gain_value
+            FROM priced
+            ORDER BY market_value DESC, symbol
+            """,
+            [as_of_date, as_of_date, as_of_date, as_of_date],
+        ).fetchall()
+        return rows
+
+    def get_allocation_rows(self, as_of_date, allocation_type: str = 'all'):
+        """Return allocation rows computed from PostgreSQL-sourced snapshot rows."""
+        allocation_mode = allocation_type if allocation_type in ('all', 'assets', 'cash') else 'all'
+        summary_symbol = 'portfolio' if allocation_mode == 'all' else allocation_mode
+        position_rows = self.get_position_snapshot_rows(as_of_date, include_closed=False)
+        cash_rows = self.get_cash_snapshot_rows(as_of_date)
+
+        source_rows = []
+        for row in position_rows:
+            source_rows.append({
+                'symbol': row[0],
+                'type': 'asset',
+                'value': float(row[6] or 0.0),
+                'original_currency_value': None,
+                'fx_rate': None,
+            })
+        for row in cash_rows:
+            source_rows.append({
+                'symbol': row[0],
+                'type': 'cash',
+                'value': float(row[3] or 0.0),
+                'original_currency_value': float(row[2] or 0.0),
+                'fx_rate': float(row[6] or 1.0),
+            })
+
+        if not source_rows:
+            return {
+                'positions': [],
+                'summary': [],
+                'total_value': 0.0,
+            }
+
+        values_sql = ", ".join(["(?, ?, ?, ?, ?)"] * len(source_rows))
+        params = []
+        for row in source_rows:
+            params.extend([
+                row['symbol'],
+                row['type'],
+                row['value'],
+                row['original_currency_value'],
+                row['fx_rate'],
+            ])
+
+        rows = self.con.execute(
+            f"""
+            WITH input(symbol, type, value, original_currency_value, fx_rate) AS (
+                VALUES {values_sql}
+            ),
+            totals AS (
+                SELECT
+                    COALESCE(SUM(value), 0.0) AS total_value,
+                    COALESCE(SUM(value) FILTER (WHERE type = 'asset'), 0.0) AS assets_value,
+                    COALESCE(SUM(value) FILTER (WHERE type = 'cash'), 0.0) AS cash_value
+                FROM input
+            ),
+            selected AS (
+                SELECT *
+                FROM input
+                WHERE (
+                    '{allocation_mode}' = 'all'
+                    OR ('{allocation_mode}' = 'assets' AND type = 'asset')
+                    OR ('{allocation_mode}' = 'cash' AND type = 'cash')
+                )
+            ),
+            detailed AS (
+                SELECT
+                    symbol,
+                    type,
+                    value,
+                    CASE
+                        WHEN '{allocation_mode}' = 'all' THEN value / NULLIF(t.total_value, 0) * 100.0
+                        WHEN type = 'asset' THEN value / NULLIF(t.assets_value, 0) * 100.0
+                        ELSE value / NULLIF(t.cash_value, 0) * 100.0
+                    END AS percentage,
+                    original_currency_value,
+                    fx_rate
+                FROM selected
+                CROSS JOIN totals t
+            ),
+            summary AS (
+                SELECT
+                    '{summary_symbol}' AS symbol,
+                    'summary'::text AS type,
+                    CASE WHEN '{allocation_mode}' = 'assets' THEN t.assets_value
+                         WHEN '{allocation_mode}' = 'cash' THEN t.cash_value
+                         ELSE t.total_value END AS value,
+                    CASE
+                        WHEN '{allocation_mode}' = 'all' THEN 100.0
+                        WHEN '{allocation_mode}' = 'assets' THEN CASE WHEN t.assets_value > 0 THEN 100.0 ELSE 0.0 END
+                        WHEN '{allocation_mode}' = 'cash' THEN CASE WHEN t.cash_value > 0 THEN 100.0 ELSE 0.0 END
+                        ELSE 0.0
+                    END AS percentage,
+                    NULL::double precision AS original_currency_value,
+                    NULL::double precision AS fx_rate
+                FROM totals t
+                WHERE '{allocation_mode}' = 'all' OR '{allocation_mode}' IN ('assets', 'cash')
+            )
+            SELECT symbol, type, value, percentage, original_currency_value, fx_rate
+            FROM detailed
+            UNION ALL
+            SELECT symbol, type, value, percentage, original_currency_value, fx_rate
+            FROM summary
+            ORDER BY type DESC, value DESC, symbol
+            """,
+            params,
+        ).fetchall()
+
+        detailed = [row for row in rows if row[1] != 'summary']
+        summary = [row for row in rows if row[1] == 'summary']
+        total_value = 0.0
+        if summary:
+            total_value = float(summary[-1][2] or 0.0)
+        else:
+            total_value = float(sum(row[2] or 0.0 for row in detailed))
+        return {
+            'positions': detailed,
+            'summary': summary,
+            'total_value': total_value,
+        }
+
+    def get_contribution_by_position_rows(self, as_of_date):
+        """Return per-position contribution rows computed in PostgreSQL."""
+        position_rows = self.get_position_snapshot_rows(as_of_date, include_closed=True)
+        cash_rows = self.get_cash_snapshot_rows(as_of_date)
+        if not position_rows and not cash_rows:
+            return []
+
+        position_source = []
+        for row in position_rows:
+            position_source.append({
+                'symbol': row[0],
+                'status': row[1],
+                'market_value': float(row[6] or 0.0),
+                'unrealized_gain': float(row[11] or 0.0),
+                'realized_gain': float(row[12] or 0.0),
+            })
+        for row in cash_rows:
+            position_source.append({
+                'symbol': row[0],
+                'status': 'OPEN' if float(row[2] or 0.0) != 0 else 'CLOSED',
+                'market_value': float(row[3] or 0.0),
+                'unrealized_gain': 0.0,
+                'realized_gain': 0.0,
+            })
+
+        cash_source = [
+            {
+                'deposits': float(row[7] or 0.0),
+                'withdrawals': float(row[9] or 0.0),
+            }
+            for row in cash_rows
+        ]
+
+        if not position_source:
+            return []
+
+        position_values_sql = ", ".join(["(?, ?, ?, ?, ?)"] * len(position_source))
+        position_params = []
+        for row in position_source:
+            position_params.extend([
+                row['symbol'],
+                row['status'],
+                row['market_value'],
+                row['unrealized_gain'],
+                row['realized_gain'],
+            ])
+
+        cash_values_sql = ", ".join(["(?, ?)"] * len(cash_source)) if cash_source else None
+        cash_params = []
+        for row in cash_source:
+            cash_params.extend([
+                row['deposits'],
+                row['withdrawals'],
+            ])
+
+        cash_values_clause = (
+            f"VALUES {cash_values_sql}"
+            if cash_values_sql is not None
+            else "SELECT 0.0::double precision AS deposits, 0.0::double precision AS withdrawals WHERE FALSE"
+        )
+
+        sql = """
+            WITH positions_input(symbol, status, market_value, unrealized_gain, realized_gain) AS (
+                VALUES {position_values_sql}
+            ),
+            cash_input(deposits, withdrawals) AS (
+                {cash_values_clause}
+            ),
+            totals AS (
+                SELECT COALESCE(SUM(market_value), 0.0) AS portfolio_value
+                FROM positions_input
+            ),
+            cash_totals AS (
+                SELECT COALESCE(SUM(deposits), 0.0) - COALESCE(SUM(withdrawals), 0.0) AS net_contributions
+                FROM cash_input
+            )
+            SELECT
+                p.symbol,
+                p.status,
+                p.market_value,
+                CASE
+                    WHEN t.portfolio_value > 0 THEN ROUND((((p.market_value / t.portfolio_value) * 100.0))::numeric, 4)
+                    ELSE 0.0
+                END AS weight_pct,
+                p.unrealized_gain,
+                p.realized_gain,
+                (p.unrealized_gain + p.realized_gain) AS total_gain,
+                CASE
+                    WHEN c.net_contributions > 0 THEN ROUND(((((p.unrealized_gain + p.realized_gain) / c.net_contributions) * 100.0))::numeric, 4)
+                    ELSE 0.0
+                END AS contribution_to_gain_pct
+            FROM positions_input p
+            CROSS JOIN totals t
+            CROSS JOIN cash_totals c
+            ORDER BY ABS(p.unrealized_gain + p.realized_gain) DESC, p.symbol
+        """.format(position_values_sql=position_values_sql, cash_values_clause=cash_values_clause)
+
+        params = position_params + cash_params
+
+        rows = self.con.execute(sql, params).fetchall()
+        return [
+            {
+                'symbol': row[0],
+                'status': row[1],
+                'market_value': float(row[2] or 0.0),
+                'weight_pct': float(row[3] or 0.0),
+                'unrealized_gain': float(row[4] or 0.0),
+                'realized_gain': float(row[5] or 0.0),
+                'total_gain': float(row[6] or 0.0),
+                'contribution_to_gain_pct': float(row[7] or 0.0),
+            }
+            for row in rows
+        ]
+
+    def get_reporting_totals_sql(self, as_of_date) -> dict:
+        """Return reporting totals computed from PostgreSQL-backed snapshot rows."""
+        position_rows = self.get_position_snapshot_rows(as_of_date, include_closed=True)
+        cash_rows = self.get_cash_snapshot_rows(as_of_date)
+        if not position_rows and not cash_rows:
+            return {
+                'portfolio_value': 0.0,
+                'deposits': 0.0,
+                'transfers_in': 0.0,
+                'withdrawals': 0.0,
+                'net_contributions': 0.0,
+                'dividends': 0.0,
+                'interest': 0.0,
+                'fees': 0.0,
+                'taxes': 0.0,
+                'income': 0.0,
+                'realized_gain': 0.0,
+                'unrealized_gain': 0.0,
+                'total_profit': 0.0,
+            }
+
+        position_source = []
+        for row in position_rows:
+            position_source.append({
+                'market_value': float(row[6] or 0.0),
+                'realized_gain': float(row[12] or 0.0),
+                'unrealized_gain': float(row[11] or 0.0),
+            })
+        for row in cash_rows:
+            position_source.append({
+                'market_value': float(row[3] or 0.0),
+                'realized_gain': 0.0,
+                'unrealized_gain': 0.0,
+            })
+
+        cash_source = [
+            {
+                'deposits': float(row[7] or 0.0),
+                'transfers_in': float(row[8] or 0.0),
+                'withdrawals': float(row[9] or 0.0),
+                'dividends': float(row[12] or 0.0),
+                'interest': float(row[13] or 0.0),
+                'fees': float(row[14] or 0.0),
+                'taxes': float(row[15] or 0.0),
+            }
+            for row in cash_rows
+        ]
+
+        position_values_sql = ", ".join(["(?, ?, ?)"] * len(position_source))
+        position_params = []
+        for row in position_source:
+            position_params.extend([
+                row['market_value'],
+                row['realized_gain'],
+                row['unrealized_gain'],
+            ])
+
+        cash_values_sql = ", ".join(["(?, ?, ?, ?, ?, ?, ?)"] * len(cash_source))
+        cash_params = []
+        for row in cash_source:
+            cash_params.extend([
+                row['deposits'],
+                row['transfers_in'],
+                row['withdrawals'],
+                row['dividends'],
+                row['interest'],
+                row['fees'],
+                row['taxes'],
+            ])
+
+        cash_values_clause = (
+            f"VALUES {cash_values_sql}"
+            if cash_source
+            else "SELECT 0.0::double precision AS deposits, 0.0::double precision AS transfers_in, 0.0::double precision AS withdrawals, 0.0::double precision AS dividends, 0.0::double precision AS interest, 0.0::double precision AS fees, 0.0::double precision AS taxes WHERE FALSE"
+        )
+
+        rows = self.con.execute(
+            f"""
+            WITH positions_input(market_value, realized_gain, unrealized_gain) AS (
+                VALUES {position_values_sql}
+            ),
+            cash_input(deposits, transfers_in, withdrawals, dividends, interest, fees, taxes) AS (
+                {cash_values_clause}
+            ),
+            position_totals AS (
+                SELECT
+                    COALESCE(SUM(market_value), 0.0) AS portfolio_value,
+                    COALESCE(SUM(realized_gain), 0.0) AS realized_gain,
+                    COALESCE(SUM(unrealized_gain), 0.0) AS unrealized_gain
+                FROM positions_input
+            ),
+            cash_totals AS (
+                SELECT
+                    COALESCE(SUM(deposits), 0.0) AS deposits,
+                    COALESCE(SUM(transfers_in), 0.0) AS transfers_in,
+                    COALESCE(SUM(withdrawals), 0.0) AS withdrawals,
+                    COALESCE(SUM(dividends), 0.0) AS dividends,
+                    COALESCE(SUM(interest), 0.0) AS interest,
+                    COALESCE(SUM(fees), 0.0) AS fees,
+                    COALESCE(SUM(taxes), 0.0) AS taxes
+                FROM cash_input
+            )
+            SELECT
+                p.portfolio_value,
+                c.deposits,
+                c.transfers_in,
+                c.withdrawals,
+                c.deposits - c.withdrawals AS net_contributions,
+                c.dividends,
+                c.interest,
+                c.fees,
+                c.taxes,
+                c.dividends + c.interest AS income,
+                p.realized_gain,
+                p.unrealized_gain,
+                p.realized_gain + p.unrealized_gain + (c.dividends + c.interest) - c.fees - c.taxes AS total_profit
+            FROM position_totals p
+            CROSS JOIN cash_totals c
+            """,
+            position_params + cash_params,
+        ).fetchone()
+
+        return {
+            'portfolio_value': float(rows[0] or 0.0),
+            'deposits': float(rows[1] or 0.0),
+            'transfers_in': float(rows[2] or 0.0),
+            'withdrawals': float(rows[3] or 0.0),
+            'net_contributions': float(rows[4] or 0.0),
+            'dividends': float(rows[5] or 0.0),
+            'interest': float(rows[6] or 0.0),
+            'fees': float(rows[7] or 0.0),
+            'taxes': float(rows[8] or 0.0),
+            'income': float(rows[9] or 0.0),
+            'realized_gain': float(rows[10] or 0.0),
+            'unrealized_gain': float(rows[11] or 0.0),
+            'total_profit': float(rows[12] or 0.0),
+        }
+
+    def get_concentration_metrics_sql(self, as_of_date) -> dict:
+        """Return concentration metrics computed from PostgreSQL-backed allocation rows."""
+        allocation = self.get_allocation_rows(as_of_date, allocation_type='all')
+        positions = [row for row in allocation['positions'] if row[1] in ('asset', 'cash')]
+        total_value = float(allocation['total_value'] or 0.0)
+        if total_value <= 0 or not positions:
+            return {'hhi': 0.0, 'weighted_avg_exposure': 0.0, 'num_positions': 0}
+        hhi = sum((float(row[2]) / total_value) ** 2 for row in positions)
+        weighted_avg_exposure = sum(float(row[2]) / total_value for row in positions) / len(positions)
+        return {
+            'hhi': hhi,
+            'weighted_avg_exposure': weighted_avg_exposure,
+            'num_positions': len(positions),
+        }
+
+    def calculate_xirr_sql(self, as_of_date, terminal_value: float) -> float:
+        """Calculate XIRR directly in PostgreSQL."""
+        row = self.con.execute(
+            """
+            WITH flows AS (
+                SELECT
+                    date AS flow_date,
+                    CASE
+                        WHEN upper(action) = 'DEPOSIT' THEN -quantity
+                        ELSE quantity
+                    END AS amount
+                FROM transactions
+                WHERE date <= ? AND upper(action) IN ('DEPOSIT', 'WITHDRAW')
+                UNION ALL
+                SELECT ?::date AS flow_date, ?::double precision AS amount
+            ),
+            ordered AS (
+                SELECT flow_date, amount
+                FROM flows
+                ORDER BY flow_date
+            )
+            SELECT
+                ARRAY_AGG(flow_date ORDER BY flow_date),
+                ARRAY_AGG(amount ORDER BY flow_date)
+            FROM ordered
+            """,
+            [as_of_date, as_of_date, terminal_value],
+        ).fetchone()
+
+        if not row or not row[0] or len(row[0]) < 2:
+            return 0.0
+
+        dates = list(row[0])
+        amounts = [float(v) for v in row[1]]
+        if all(a <= 0 for a in amounts) or all(a >= 0 for a in amounts):
+            return 0.0
+
+        ref_date = dates[0]
+        rate = 0.1
+
+        def npv_for(candidate_rate: float) -> float:
+            total = 0.0
+            for amt, flow_date in zip(amounts, dates):
+                day_diff = (flow_date - ref_date).days
+                exponent = day_diff / 365.25
+                denom = (1 + candidate_rate) ** exponent
+                if denom == 0:
+                    continue
+                total += amt / denom
+            return total
+
+        for _ in range(200):
+            npv = 0.0
+            dnpv = 0.0
+            for amt, flow_date in zip(amounts, dates):
+                day_diff = (flow_date - ref_date).days
+                exponent = day_diff / 365.25
+                denom = (1 + rate) ** exponent
+                if denom == 0:
+                    continue
+                npv += amt / denom
+                dnpv += (-day_diff / 365.25) * amt / ((1 + rate) ** (exponent + 1))
+            if abs(dnpv) < 1e-12:
+                break
+            new_rate = rate - npv / dnpv
+            if new_rate <= -1:
+                new_rate = -0.9999
+            if abs(new_rate - rate) < 1e-7:
+                rate = new_rate
+                break
+            rate = new_rate
+
+        final_npv = npv_for(rate)
+        if abs(final_npv) < 1.0:
+            return round(float(rate), 8)
+
+        # Newton can diverge for real-world portfolios with negative IRR or
+        # very flat gradients. Fall back to a bracketed bisection search so we
+        # still return a stable answer when a root exists in the admissible
+        # range.
+        low = -0.9999
+        high = 0.1
+        low_npv = npv_for(low)
+        high_npv = npv_for(high)
+
+        # Expand the upper bound until the sign changes or the search space is
+        # clearly exhausted.
+        expansion = 0
+        while low_npv * high_npv > 0 and high < 1e6 and expansion < 60:
+            high *= 2
+            high_npv = npv_for(high)
+            expansion += 1
+
+        if low_npv * high_npv > 0:
+            return 0.0
+
+        for _ in range(200):
+            mid = (low + high) / 2
+            mid_npv = npv_for(mid)
+            if abs(mid_npv) < 1.0 or abs(high - low) < 1e-7:
+                return round(float(mid), 8)
+            if low_npv * mid_npv <= 0:
+                high = mid
+                high_npv = mid_npv
+            else:
+                low = mid
+                low_npv = mid_npv
+
+        return round(float((low + high) / 2), 8)
+
     def delete_daily_returns_from_date(self, start_date):
         """Delete daily returns from specific date onwards."""
         self.con.execute(
@@ -595,8 +2229,13 @@ class PortfolioDatabase:
         """Store cache entry."""
         self.con.execute(
             """
-            INSERT OR REPLACE INTO recalc_cache (cache_key, last_calc_date, transaction_count, prices_hash)
+            INSERT INTO recalc_cache (cache_key, last_calc_date, transaction_count, prices_hash)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT (cache_key) DO UPDATE SET
+                last_calc_date = EXCLUDED.last_calc_date,
+                transaction_count = EXCLUDED.transaction_count,
+                prices_hash = EXCLUDED.prices_hash,
+                timestamp = CURRENT_TIMESTAMP
             """,
             [cache_key, last_calc_date, transaction_count, prices_hash],
         )
@@ -610,9 +2249,7 @@ class PortfolioDatabase:
     def get_prices_table_info(self):
         """Get information about prices table structure and statistics."""
         # Get table schema
-        schema_result = self.con.execute(
-            "PRAGMA table_info(prices)"
-        ).fetchall()
+        schema_result = self._table_info("prices")
 
         # Get record count
         count_result = self.con.execute(

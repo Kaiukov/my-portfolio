@@ -6,14 +6,22 @@ from datetime import datetime, date, timezone
 from pathlib import Path
 
 from portfolio_db.database import PortfolioDatabase
+from portfolio_db.database import resolve_db_target
 from portfolio_db.price_service import PriceService
-from portfolio_db.calculator import DailyReturnCalculator
 from portfolio_db.domain import (
     BASE_CURRENCY,
-    CASH_FX_SYMBOLS,
-    CASH_BUCKET_DEFAULTS,
-    CASH_DISPLAY_CURRENCY,
-    ALLOCATION_SUMMARY_LABELS,
+    CASH_FX_SYMBOLS as _CASH_FX_SYMBOLS,
+    CASH_BUCKET_DEFAULTS as _CASH_BUCKET_DEFAULTS,
+    CASH_DISPLAY_CURRENCY as _CASH_DISPLAY_CURRENCY,
+    ALLOCATION_SUMMARY_LABELS as _ALLOCATION_SUMMARY_LABELS,
+    EXTERNAL_INFLOW_ACTIONS as _EXTERNAL_INFLOW_ACTIONS,
+    EXTERNAL_OUTFLOW_ACTIONS as _EXTERNAL_OUTFLOW_ACTIONS,
+    TRANSFER_ACTIONS as _TRANSFER_ACTIONS,
+    INCOME_ACTIONS as _INCOME_ACTIONS,
+    EXPENSE_ACTIONS as _EXPENSE_ACTIONS,
+    TRADE_ACTIONS as _TRADE_ACTIONS,
+    SYSTEM_ACTIONS as _SYSTEM_ACTIONS,
+    SUPPORTED_ACTIONS as _SUPPORTED_ACTIONS,
     get_asset_type,
     is_cash_like,
     normalize_cash_asset,
@@ -41,46 +49,26 @@ class PortfolioService:
         for t in os.getenv('PORTFOLIO_BENCHMARK_TICKERS', 'SPY').split(',')
         if t.strip()
     ]
-    EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT'}
-    EXTERNAL_OUTFLOW_ACTIONS = {'WITHDRAW'}
-    TRANSFER_ACTIONS = {'TRANSFER'}
-    INCOME_ACTIONS = {'DIVIDEND', 'INTEREST'}
-    EXPENSE_ACTIONS = {'FEE', 'TAX'}
-    TRADE_ACTIONS = {'BUY', 'SELL'}
-    SYSTEM_ACTIONS = {'EXCHANGE_FROM', 'EXCHANGE_TO'}
-    SUPPORTED_ACTIONS = tuple(sorted(
-        {'DEPOSIT'}
-        | {'WITHDRAW'}
-        | {'TRANSFER'}
-        | {'DIVIDEND', 'INTEREST'}
-        | {'FEE', 'TAX'}
-        | {'BUY', 'SELL'}
-        | {'EXCHANGE_FROM', 'EXCHANGE_TO'}
-    ))
-    CASH_FX_SYMBOLS = ('EURUSD=X', 'GBPUSD=X', 'UAHUSD=X')
-    CASH_BUCKET_DEFAULTS = {
-        'USD': {'balance': 0.0, 'deposits': 0.0, 'transfers_in': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0, 'dividends': 0.0, 'interest': 0.0, 'fees': 0.0, 'taxes': 0.0},
-        'EURUSD=X': {'balance': 0.0, 'deposits': 0.0, 'transfers_in': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0, 'dividends': 0.0, 'interest': 0.0, 'fees': 0.0, 'taxes': 0.0},
-        'GBPUSD=X': {'balance': 0.0, 'deposits': 0.0, 'transfers_in': 0.0, 'withdrawals': 0.0, 'spent': 0.0, 'received': 0.0, 'dividends': 0.0, 'interest': 0.0, 'fees': 0.0, 'taxes': 0.0},
-    }
-    CASH_DISPLAY_CURRENCY = {
-        'USD': 'USD',
-        'EURUSD=X': 'EUR',
-        'GBPUSD=X': 'GBP',
-        'UAHUSD=X': 'UAH',
-    }
-    ALLOCATION_SUMMARY_LABELS = {
-        'assets': 'TOTAL ASSETS',
-        'cash': 'TOTAL CASH',
-        'portfolio': 'TOTAL PORTFOLIO',
-    }
+    EXTERNAL_INFLOW_ACTIONS = _EXTERNAL_INFLOW_ACTIONS
+    EXTERNAL_OUTFLOW_ACTIONS = _EXTERNAL_OUTFLOW_ACTIONS
+    TRANSFER_ACTIONS = _TRANSFER_ACTIONS
+    INCOME_ACTIONS = _INCOME_ACTIONS
+    EXPENSE_ACTIONS = _EXPENSE_ACTIONS
+    TRADE_ACTIONS = _TRADE_ACTIONS
+    SYSTEM_ACTIONS = _SYSTEM_ACTIONS
+    SUPPORTED_ACTIONS = _SUPPORTED_ACTIONS
+    CASH_FX_SYMBOLS = _CASH_FX_SYMBOLS
+    CASH_BUCKET_DEFAULTS = _CASH_BUCKET_DEFAULTS
+    CASH_DISPLAY_CURRENCY = _CASH_DISPLAY_CURRENCY
+    ALLOCATION_SUMMARY_LABELS = _ALLOCATION_SUMMARY_LABELS
     PRICE_REFRESH_STATE_KEY = 'last_successful_price_refresh'
     RECALC_STATE_KEY = 'last_successful_recalc'
     STALE_DATA_STATE_KEY = 'stale_data'
 
     def __init__(self, db_path: str = "portfolio.db", read_only: bool = False):
         """Initialize service."""
-        self.db = PortfolioDatabase(db_path, read_only=read_only)
+        self.db_target = resolve_db_target(db_path)
+        self.db = PortfolioDatabase(self.db_target, read_only=read_only)
         self.price_service = PriceService()
         self._price_cache = PriceCacheService(self.db, self.price_service)
         self._reporting = ReportingService(self.db, self._price_cache)
@@ -335,23 +323,8 @@ class PortfolioService:
         return self._recalc._detect_recalc_scope(new_trans_date)
 
     def _calculate_and_store_returns(self):
-        """Calculate and store daily returns."""
-        transactions = self.db.get_transactions()
-        if not transactions:
-            self._set_stale_data(False)
-            return
-
-        min_date = transactions[0][1]
-        max_date = max(transactions[-1][1], date.today())
-        discovered_assets = self.discover_assets_and_currencies()
-        all_symbols = sorted(set(discovered_assets['assets']) | set(discovered_assets['fx_currencies']))
-        self._recalc._calculate_and_store_returns(
-            transactions, all_symbols, min_date, max_date,
-            require_cached_fn=self._require_cached_price_requirements,
-            set_stale_fn=self._set_stale_data,
-            price_data_unavailable_error_cls=PriceDataUnavailableError,
-        )
-        self._mark_recalc_success()
+        """Rebuild daily returns using the PostgreSQL recalculation path."""
+        self.recalculate(force=True)
 
     @staticmethod
     def _serialize_transaction_row(trans) -> dict:
@@ -397,7 +370,7 @@ class PortfolioService:
         self._fetch_and_cache_prices()
 
         # Calculate returns
-        self._calculate_and_store_returns()
+        self.recalculate(force=True)
 
     def _fetch_and_cache_prices(self):
         """Fetch prices for all assets."""
@@ -506,6 +479,7 @@ class PortfolioService:
 
     def get_concentration_metrics(self, as_of_date=None) -> dict:
         """Calculate portfolio concentration metrics."""
+        as_of_date = self._resolve_as_of_date(as_of_date)
         return self._performance.get_concentration_metrics(
             as_of_date=as_of_date,
             get_allocation_fn=self.get_allocation,
@@ -522,42 +496,13 @@ class PortfolioService:
         as_of = snapshot['as_of_date']
         if not as_of:
             return 0.0
-
-        transactions = self.db.get_transactions()
-        if as_of:
-            from datetime import datetime as _dt
-            as_of_d = _dt.strptime(as_of, '%Y-%m-%d').date() if isinstance(as_of, str) else as_of
-            transactions = [t for t in transactions if t[1] <= as_of_d]
-
-        cash_flow_metrics = self._reporting._get_external_cash_flow_metrics(
-            transactions=transactions,
-            as_of_date=as_of_d if as_of else None,
-            fx_prices=None,
-            external_inflow_actions=self.EXTERNAL_INFLOW_ACTIONS,
-            transfer_actions=self.TRANSFER_ACTIONS,
-            external_outflow_actions=self.EXTERNAL_OUTFLOW_ACTIONS,
-            validate_action_fn=lambda a: a.upper(),
-            price_data_unavailable_error_cls=PriceDataUnavailableError,
-        )
-        events = cash_flow_metrics.get('cash_flow_events', [])
-        if not events:
-            return 0.0
-
-        from datetime import datetime as _dt2
-        # XIRR convention: outflows (deposits) are negative, inflows positive
-        # events: deposits = +amount, withdrawals = -amount
-        # flip sign for XIRR
-        xirr_flows = [{'date': e['date'], 'amount': -e['amount']} for e in events]
-
-        # Add terminal cash flow: current portfolio value is a final inflow
-        end_date = as_of_d
-        xirr_flows.append({'date': end_date, 'amount': snapshot['portfolio_value']})
-        xirr_flows.sort(key=lambda x: x['date'])
-
-        return self._performance.calculate_xirr(xirr_flows)
+        from datetime import datetime as _dt
+        as_of_d = _dt.strptime(as_of, '%Y-%m-%d').date() if isinstance(as_of, str) else as_of
+        return self.db.calculate_xirr_sql(as_of_d, snapshot['portfolio_value'])
 
     def get_contribution_by_position(self, as_of_date=None) -> list:
         """Return per-position contribution to total portfolio gain."""
+        as_of_date = self._resolve_as_of_date(as_of_date)
         return self._performance.get_contribution_by_position(
             as_of_date=as_of_date,
             build_snapshot_fn=self.build_reporting_snapshot,

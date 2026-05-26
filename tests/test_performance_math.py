@@ -362,3 +362,70 @@ class TestFXDayGain:
         fx_pos = next((p for p in positions if p["symbol"] == "EURUSD=X"), None)
         assert fx_pos is not None
         assert fx_pos["day_gain_pct"] == pytest.approx(0.0)
+
+
+# ── Phase 1: risk metrics use investment_return, median, date-join ────────────
+
+
+@pytest.fixture
+def deposit_only_db(tmp_path: Path) -> str:
+    """Portfolio with only a deposit — no trades. investment_return ≈ 0."""
+    db_path = str(tmp_path / "dep_only.db")
+    svc = PortfolioService(db_path)
+    svc.db.add_transaction(date(2026, 1, 2), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
+    svc.repair_prices()
+    svc.recalculate(force=True)
+    svc.close()
+    return db_path
+
+
+class TestInvestmentReturnForRisk:
+    """Deposit-only portfolio should show near-zero risk from clean returns."""
+
+    def test_volatility_near_zero_when_no_investments(self, deposit_only_db):
+        """Deposit-only day → portfolio_daily_return spikes, investment_return ≈ 0.
+        risk metrics must use the latter, producing near-zero volatility."""
+        svc = PortfolioService(deposit_only_db, read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+
+        assert stats["hist_volatility"] < 1.0, (
+            f"hist_volatility={stats['hist_volatility']:.4f} — should be near-zero for deposit-only, "
+            f"but >1 suggests portfolio_daily_return was used instead of investment_return"
+        )
+        assert stats["std_dev"] < 0.1
+        assert stats["beta"] == 0.0  # no benchmark overlap possible
+
+
+    def test_deposit_does_not_contaminate_sharpe(self, deposit_only_db):
+        svc = PortfolioService(deposit_only_db, read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+        assert stats["sharpe_ratio"] == 0.0
+
+
+class TestMedianMonthlyReturn:
+    """median_monthly_return must be the median, not the mean, and named correctly."""
+
+    def test_median_monthly_return_field_exists(self, half_invested_db):
+        svc = PortfolioService(half_invested_db, read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+        assert "median_monthly_return" in stats, \
+            "Field 'median_monthly_return' missing — was avg_monthly_return renamed?"
+        assert "avg_monthly_return" not in stats, \
+            "Field 'avg_monthly_return' must not exist after rename to median_monthly_return"
+
+
+class TestBenchmarkAlignment:
+    """Benchmark alignment must use date join, not array slicing."""
+
+    def test_beta_and_capture_in_bounds_after_clean_return_metrics(self, half_invested_db):
+        """With investment_return and date-join, beta and capture ratios stay bounded."""
+        svc = PortfolioService(half_invested_db, read_only=True)
+        stats = svc.get_performance_stats()
+        svc.close()
+        assert isinstance(stats["up_capture_ratio"], (int, float))
+        assert isinstance(stats["down_capture_ratio"], (int, float))
+        # Beta from aligned returns must be in a sane range
+        assert -5 <= stats["beta"] <= 5

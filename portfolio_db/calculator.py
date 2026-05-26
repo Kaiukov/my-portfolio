@@ -10,16 +10,15 @@ from portfolio_db.domain import (
     LEGACY_CASH_TO_FX,
     ASSET_TYPE_TO_CASH,
     SUPPORTED_FX_TICKERS,
+    EXTERNAL_INFLOW_ACTIONS,
+    TRANSFER_ACTIONS,
+    EXTERNAL_OUTFLOW_ACTIONS,
+    INCOME_ACTIONS,
+    EXPENSE_ACTIONS,
     get_asset_type as _get_asset_type,
     fx_ticker_for_asset as _fx_ticker_for_asset,
     cash_currency_for_asset_type as _cash_currency_for_asset_type,
 )
-
-EXTERNAL_INFLOW_ACTIONS = {'DEPOSIT'}
-TRANSFER_ACTIONS = {'TRANSFER'}
-EXTERNAL_OUTFLOW_ACTIONS = {'WITHDRAW'}
-INCOME_ACTIONS = {'DIVIDEND', 'INTEREST'}
-EXPENSE_ACTIONS = {'FEE', 'TAX'}
 
 
 def get_asset_type(ticker: str) -> str:
@@ -241,7 +240,8 @@ class DailyReturnCalculator:
                 'date': date_obj,
                 'action': action.upper(),
                 'quantity': quantity,
-                'price': price
+                'price': price,
+                'fees': trans[8] if len(trans) > 8 else None,
             })
 
         if not min_date or not max_date:
@@ -278,13 +278,15 @@ class DailyReturnCalculator:
                         if asset not in holdings[date]:
                             holdings[date][asset] = 0
 
+                        fees = trans.get('fees') or 0.0
+
                         if action in ['BUY'] or action in EXTERNAL_INFLOW_ACTIONS or action in TRANSFER_ACTIONS or action in INCOME_ACTIONS:
                             holdings[date][asset] += quantity
 
-                            # Auto-deduct cash for BUY only
+                            # Auto-deduct cash for BUY only (quantity * price + fees)
                             if action == 'BUY' and not is_cash_asset and price:
                                 cash_currency = get_cash_currency(asset_type)
-                                cash_cost = quantity * price
+                                cash_cost = quantity * price + fees
                                 if cash_currency not in holdings[date]:
                                     holdings[date][cash_currency] = 0
                                 holdings[date][cash_currency] -= cash_cost
@@ -292,10 +294,10 @@ class DailyReturnCalculator:
                         elif action == 'SELL':
                             holdings[date][asset] -= quantity
 
-                            # Auto-add cash for SELL (not cash assets)
+                            # Auto-add cash for SELL (quantity * price - fees)
                             if not is_cash_asset and price:
                                 cash_currency = get_cash_currency(asset_type)
-                                cash_proceeds = quantity * price
+                                cash_proceeds = quantity * price - fees
                                 if cash_currency not in holdings[date]:
                                     holdings[date][cash_currency] = 0
                                 holdings[date][cash_currency] += cash_proceeds

@@ -4,7 +4,6 @@ import json
 import hashlib
 from datetime import date
 
-from portfolio_db.calculator import DailyReturnCalculator
 import portfolio_db.logger as log
 
 
@@ -77,19 +76,6 @@ class RecalculationService:
             # Recent transaction - partial recalc from this date
             return (new_trans_date, False)
 
-    def _calculate_and_store_returns(self, transactions, all_symbols, min_date, max_date, require_cached_fn, set_stale_fn, price_data_unavailable_error_cls):
-        """Calculate and store daily returns."""
-        require_cached_fn(transactions, max_date)
-        prices_dict = self.price_cache.load_calculation_prices(all_symbols, min_date, max_date)
-
-        try:
-            calculator = DailyReturnCalculator(transactions, prices_dict, min_date, max_date)
-            results = calculator.calculate_all_returns()
-        except ValueError as exc:
-            set_stale_fn(True)
-            raise price_data_unavailable_error_cls(str(exc)) from exc
-        self.db.replace_daily_returns(results, start_date=min_date)
-
     def recalculate(self, from_date, force, discover_assets_fn, require_cached_fn, set_stale_fn, mark_recalc_success_fn, price_data_unavailable_error_cls):
         """
         Smart recalculation with optional date range and caching.
@@ -118,7 +104,6 @@ class RecalculationService:
         log.recalc_start(from_date, recalc_type_planned, force)
 
         # Determine recalc scope
-        calc_start_date = transactions[0][1]
         if force or from_date is None:
             # Full recalculation
             is_full_recalc = True
@@ -129,38 +114,18 @@ class RecalculationService:
             # prev_value / adjusted_base chain.
             is_full_recalc = False
 
-        # Discover assets and currencies for price lookup
-        discovered_assets = discover_assets_fn()
-        assets = set(discovered_assets['assets'])
-        fx_currencies = discovered_assets['fx_currencies']
-
         # Get date range - always extend to today
-        min_trans_date = transactions[0][1]
         max_trans_date = transactions[-1][1]
         max_date = date.today()
 
         # Combine assets and FX currencies for cached price loading
-        all_symbols = list(assets)
-        all_symbols.extend(fx_currencies)
-
         require_cached_fn(transactions, max_date)
-        prices_dict = self.price_cache.load_calculation_prices(all_symbols, calc_start_date, max_date)
-
         try:
-            calculator = DailyReturnCalculator(transactions, prices_dict, min_trans_date, max_date)
-            results = calculator.calculate_all_returns()
+            rows_affected = self.db.refresh_daily_returns_sql(None if is_full_recalc else from_date)
         except ValueError as exc:
             set_stale_fn(True)
             log.recalc_failure(str(exc), from_date)
             raise price_data_unavailable_error_cls(str(exc)) from exc
-
-        # Filter results if partial recalc
-        if not is_full_recalc and from_date:
-            results = [r for r in results if r['date'] >= from_date]
-
-        replace_start_date = None if is_full_recalc else from_date
-        self.db.replace_daily_returns(results, start_date=replace_start_date)
-        rows_affected = len(results)
 
         recalc_type = 'full' if is_full_recalc else 'partial'
         self.db.log_refresh(recalc_type, rows_affected)

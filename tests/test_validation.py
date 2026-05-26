@@ -555,16 +555,18 @@ class TestExchange:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# backup — source file must exist
+# backup — PostgreSQL backup ignores the legacy file path
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 class TestBackup:
-    def test_missing_db_rejected(self, runner, tmp_path):
+    def test_legacy_db_path_is_ignored_for_postgres_backup(self, runner, tmp_path):
         result = runner.invoke(cli, ["backup", "--db", str(tmp_path / "nonexistent.db")])
-        body = _parse_error(result)
-        assert body["error"]["code"] == "VALIDATION_ERROR"
-        assert "not found" in body["error"]["message"].lower() or "file" in body["error"]["message"].lower()
+        assert result.exit_code == 0
+        body = json.loads(result.output)
+        assert body["ok"] is True
+        assert body["command"] == "backup"
+        assert body["data"]["mode"] == "sql_dump"
 
     def test_valid_backup_works(self, runner, db_path):
         _seeded_db(db_path)
