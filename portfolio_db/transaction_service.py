@@ -219,6 +219,23 @@ class TransactionService:
             system_actions=system_actions,
         )
 
+        # SELL must not exceed holdings as-of transaction date (exclude self)
+        if updated['action'] == 'SELL':
+            net_on_date = self.db.con.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN quantity
+                                         WHEN action='SELL' THEN -quantity
+                                         ELSE 0 END), 0)
+                FROM transactions WHERE asset = %s AND date <= %s AND id != %s
+                """,
+                [updated['asset'], updated['date'], transaction_id],
+            ).fetchone()[0]
+            if float(updated['quantity']) > net_on_date:
+                raise ValueError(
+                    f"Cannot SELL {updated['quantity']} of {updated['asset']}: "
+                    f"only {net_on_date} shares held as of {updated['date']}"
+                )
+
         recalc_from = min(existing[1], updated['date'])
         updated_row = self.db.update_transaction(
             transaction_id,

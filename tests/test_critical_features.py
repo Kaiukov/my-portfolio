@@ -38,19 +38,13 @@ def fake_price_fetch(symbols, start_date, end_date):
 def runner():
     return CliRunner()
 
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "portfolio.db"
-
-
 @pytest.fixture(autouse=True)
 def stub_price_fetch(monkeypatch):
     monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fake_price_fetch))
 
 
-def test_income_actions_affect_snapshot_not_contributions(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_income_actions_affect_snapshot_not_contributions():
+    service = PortfolioService()
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     service.add_transaction("02-01-2026", "USD", "DIVIDEND", 50)
     service.add_transaction("03-01-2026", "USD", "INTEREST", 5)
@@ -72,15 +66,15 @@ def test_income_actions_affect_snapshot_not_contributions(db_path: Path):
     assert snapshot["total_profit"] == pytest.approx(43.0)
 
 
-def test_edit_transaction_updates_row_and_recalculates(db_path: Path, runner: CliRunner):
-    service = PortfolioService(str(db_path))
+def test_edit_transaction_updates_row_and_recalculates(runner):
+    service = PortfolioService()
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     service.close()
 
     result = runner.invoke(cli, ["edit", "--id", "1", "--quantity", "1300"])
     assert result.exit_code == 0, result.output
 
-    service = PortfolioService(str(db_path), read_only=True)
+    service = PortfolioService(read_only=True)
     transaction = service.db.get_transaction_by_id(1)
     snapshot = service.build_reporting_snapshot()
     service.close()
@@ -91,8 +85,8 @@ def test_edit_transaction_updates_row_and_recalculates(db_path: Path, runner: Cl
     assert snapshot["deposits"] == pytest.approx(1300.0)
 
 
-def test_verify_and_repair_prices_detect_and_fill_missing_fx(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_verify_and_repair_prices_detect_and_fill_missing_fx():
+    service = PortfolioService()
     service.db.add_transaction(
         pd.Timestamp("2026-01-01").date(),
         "EURUSD=X",
@@ -121,8 +115,8 @@ def test_verify_and_repair_prices_detect_and_fill_missing_fx(db_path: Path):
     assert verify_after["refresh_state"]["stale_data"] is False
 
 
-def test_recalculate_fails_explicitly_when_cached_fx_is_missing(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_recalculate_fails_explicitly_when_cached_fx_is_missing():
+    service = PortfolioService()
     service.db.add_transaction(
         pd.Timestamp("2026-01-01").date(),
         "EURUSD=X",
@@ -143,8 +137,8 @@ def test_recalculate_fails_explicitly_when_cached_fx_is_missing(db_path: Path):
     service.close()
 
 
-def test_recalculate_failure_preserves_existing_daily_returns(db_path: Path, monkeypatch):
-    service = PortfolioService(str(db_path))
+def test_recalculate_failure_preserves_existing_daily_returns(monkeypatch):
+    service = PortfolioService()
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     daily_returns_before = service.get_daily_returns()
 
@@ -163,8 +157,8 @@ def test_recalculate_failure_preserves_existing_daily_returns(db_path: Path, mon
     service.close()
 
 
-def test_recalculate_uses_database_refresh_function(db_path: Path, monkeypatch):
-    service = PortfolioService(str(db_path))
+def test_recalculate_uses_database_refresh_function(monkeypatch):
+    service = PortfolioService()
     service.db.add_transaction(
         pd.Timestamp("2026-01-01").date(),
         "USD",
@@ -200,8 +194,8 @@ def test_recalculate_uses_database_refresh_function(db_path: Path, monkeypatch):
     service.close()
 
 
-def test_invalid_buy_without_price_is_rejected(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_invalid_buy_without_price_is_rejected():
+    service = PortfolioService()
 
     with pytest.raises(ValueError, match="requires a positive price"):
         service.add_transaction("01-01-2026", "AAPL", "BUY", 1)
@@ -211,8 +205,8 @@ def test_invalid_buy_without_price_is_rejected(db_path: Path):
 
 # ── Bug #13: add_transaction must not leave orphan rows when recalc fails ──
 
-def test_add_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
-    service = PortfolioService(str(db_path))
+def test_add_transaction_rollback_on_recalc_failure(monkeypatch):
+    service = PortfolioService()
 
     service.add_transaction("02-01-2026", "USD", "DEPOSIT", 1000)
     daily_returns_before = service.get_daily_returns()
@@ -240,8 +234,8 @@ def test_add_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
 
 # ── Bug #10: edit_transaction must restore original row when recalc fails ──
 
-def test_edit_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
-    service = PortfolioService(str(db_path))
+def test_edit_transaction_rollback_on_recalc_failure(monkeypatch):
+    service = PortfolioService()
 
     # Add a valid transaction with real recalc
     result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
@@ -273,8 +267,8 @@ def test_edit_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch)
 
 # ── Bug #11: deleting the last transaction must not crash ──
 
-def test_delete_last_transaction_does_not_crash(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_delete_last_transaction_does_not_crash():
+    service = PortfolioService()
 
     result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
     trans_id = result["transaction_id"]
@@ -308,10 +302,10 @@ def _make_fx_price_fetch(day1, stock_price_day1, stock_price_day2, fx_day1, fx_d
     return fetch
 
 
-def _setup_non_usd_stock_service(db_path, monkeypatch, fetch_fn, symbol, currency, asset_type):
+def _setup_non_usd_stock_service(monkeypatch, fetch_fn, symbol, currency, asset_type):
     """Add USD deposit + one non-USD stock BUY directly, then repair+recalc."""
     monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fetch_fn))
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     # Add transactions directly to DB to avoid recalc-before-price-load order issue
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 10000)
     service.db.add_transaction(
@@ -324,13 +318,13 @@ def _setup_non_usd_stock_service(db_path, monkeypatch, fetch_fn, symbol, currenc
     return service
 
 
-def test_stock_eur_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch):
+def test_stock_eur_day_gain_reflects_fx_only_movement(monkeypatch):
     """Flat local price, FX 1.08→1.10: day_gain must capture pure FX PnL."""
     day1, day2 = date(2026, 1, 1), date(2026, 1, 2)
     shares, local_price = 100, 50.0
 
     service = _setup_non_usd_stock_service(
-        db_path, monkeypatch,
+        monkeypatch,
         _make_fx_price_fetch(day1, local_price, local_price, fx_day1=1.08, fx_day2=1.10),
         symbol="VGEU.DE", currency="EUR", asset_type="stock_eur",
     )
@@ -343,13 +337,13 @@ def test_stock_eur_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch
     assert pos["day_gain_pct"] == pytest.approx((local_price * 1.10 - local_price * 1.08) / (local_price * 1.08) * 100)
 
 
-def test_stock_eur_day_gain_reflects_combined_stock_and_fx_movement(db_path: Path, monkeypatch):
+def test_stock_eur_day_gain_reflects_combined_stock_and_fx_movement(monkeypatch):
     """Local price 50→52, FX 1.08→1.10: day_gain reflects both components."""
     day1, day2 = date(2026, 1, 1), date(2026, 1, 2)
     shares = 100
 
     service = _setup_non_usd_stock_service(
-        db_path, monkeypatch,
+        monkeypatch,
         _make_fx_price_fetch(day1, stock_price_day1=50.0, stock_price_day2=52.0, fx_day1=1.08, fx_day2=1.10),
         symbol="VGEU.DE", currency="EUR", asset_type="stock_eur",
     )
@@ -362,13 +356,13 @@ def test_stock_eur_day_gain_reflects_combined_stock_and_fx_movement(db_path: Pat
     assert pos["day_gain_pct"] == pytest.approx((52.0 * 1.10 - 50.0 * 1.08) / (50.0 * 1.08) * 100)
 
 
-def test_stock_gbp_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch):
+def test_stock_gbp_day_gain_reflects_fx_only_movement(monkeypatch):
     """Flat local price, FX 1.28→1.30: day_gain must capture pure FX PnL."""
     day1, day2 = date(2026, 1, 1), date(2026, 1, 2)
     shares, local_price = 100, 50.0
 
     service = _setup_non_usd_stock_service(
-        db_path, monkeypatch,
+        monkeypatch,
         _make_fx_price_fetch(day1, local_price, local_price, fx_day1=1.28, fx_day2=1.30),
         symbol="VUKG.L", currency="GBP", asset_type="stock_gbp",
     )
@@ -383,8 +377,8 @@ def test_stock_gbp_day_gain_reflects_fx_only_movement(db_path: Path, monkeypatch
 
 # ── Bug #8: negative cash balance must be OPEN, not CLOSED ──
 
-def test_negative_cash_balance_is_open(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_negative_cash_balance_is_open():
+    service = PortfolioService()
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 100)
     service.add_transaction("02-01-2026", "USD", "WITHDRAW", 150)
 
@@ -398,8 +392,8 @@ def test_negative_cash_balance_is_open(db_path: Path):
 
 # ── Bug #12: editing TRANSFER account to empty must be rejected ──
 
-def test_transfer_edit_cannot_clear_account(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_transfer_edit_cannot_clear_account():
+    service = PortfolioService()
     result = service.add_transaction("01-01-2026", "USD", "TRANSFER", 500, account="broker-A")
     trans_id = result["transaction_id"]
 
@@ -408,8 +402,8 @@ def test_transfer_edit_cannot_clear_account(db_path: Path):
     service.close()
 
 
-def test_changing_action_to_transfer_without_account_rejected(db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_changing_action_to_transfer_without_account_rejected():
+    service = PortfolioService()
     result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 500)
     trans_id = result["transaction_id"]
 
@@ -418,8 +412,8 @@ def test_changing_action_to_transfer_without_account_rejected(db_path: Path):
     service.close()
 
 
-def test_transfer_edit_dry_run_cannot_clear_account(runner, db_path: Path):
-    service = PortfolioService(str(db_path))
+def test_transfer_edit_dry_run_cannot_clear_account(runner):
+    service = PortfolioService()
     result = service.add_transaction("01-01-2026", "USD", "TRANSFER", 500, account="broker-A")
     trans_id = result["transaction_id"]
     service.close()
@@ -464,9 +458,9 @@ def test_price_service_inverts_reverse_quoted_yahoo_fx_pairs(monkeypatch):
     assert prices["EURUSD=X"].tolist() == pytest.approx([1.10, 1.11])
 
 
-def test_regional_stock_buy_reduces_local_currency_cash_bucket(db_path: Path):
+def test_regional_stock_buy_reduces_local_currency_cash_bucket():
     """Regional stock trades must hit the matching FX cash bucket, not USD."""
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.db.add_transaction(
         date(2026, 1, 1),
         "JPYUSD=X",
@@ -513,19 +507,17 @@ def test_regional_stock_buy_reduces_local_currency_cash_bucket(db_path: Path):
     ],
 )
 def test_regional_stock_last_price_uses_matching_fx_rate(
-    db_path: Path,
     monkeypatch,
-    symbol: str,
-    currency: str,
-    asset_type: str,
-    fx_rate: float,
+    symbol,
+    currency,
+    asset_type,
+    fx_rate,
 ):
     """All supported regional stock types must convert their local close into USD."""
     day1 = date(2026, 1, 1)
     local_price = 50.0
 
     service = _setup_non_usd_stock_service(
-        db_path,
         monkeypatch,
         _make_fx_price_fetch(day1, local_price, local_price, fx_day1=fx_rate, fx_day2=fx_rate),
         symbol=symbol,
@@ -573,11 +565,11 @@ def test_calculator_uses_domain_action_constants():
 # ─── Phase 2: service-layer validation + rollback ─────────────────────────────
 
 
-def test_backdated_sell_rejected_by_service(db_path: Path):
+def test_backdated_sell_rejected_by_service():
     """BUY after SELL date → SELL on earlier date must be rejected."""
     from datetime import date as _date
 
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.db.add_transaction(_date(2026, 2, 1), "AAPL", "BUY", 10, price=150.0,
                                exchange="Test", asset_type="stock_usd")
     service.repair_prices()
@@ -589,11 +581,11 @@ def test_backdated_sell_rejected_by_service(db_path: Path):
     service.close()
 
 
-def test_sell_within_holdings_passes_service_validation(db_path: Path):
+def test_sell_within_holdings_passes_service_validation():
     """SELL within as-of-date holdings must succeed."""
     from datetime import date as _date
 
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.db.add_transaction(_date(2026, 1, 1), "AAPL", "BUY", 10, price=150.0,
                                exchange="Test", asset_type="stock_usd")
     service.repair_prices()
@@ -604,29 +596,50 @@ def test_sell_within_holdings_passes_service_validation(db_path: Path):
     service.close()
 
 
-def test_exchange_from_non_cash_rejected(db_path: Path):
+def test_exchange_from_non_cash_rejected():
     """Exchange FROM a non-cash-like asset must raise ValueError."""
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     with pytest.raises(ValueError, match="Exchange FROM asset must be cash-like"):
         service.exchange_currency("02-01-2026", "AAPL", "EURUSD=X", 100, 0.92)
     service.close()
 
 
-def test_exchange_to_non_cash_rejected(db_path: Path):
+def test_exchange_to_non_cash_rejected():
     """Exchange TO a non-cash-like asset must raise ValueError."""
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
     with pytest.raises(ValueError, match="Exchange TO asset must be cash-like"):
         service.exchange_currency("02-01-2026", "USD", "AAPL", 100, 0.92)
     service.close()
 
 
-def test_delete_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatch):
+def test_edit_sell_asof_date_check():
+    """Editing a transaction to SELL must validate as-of-date holdings."""
+    from datetime import date as _date
+
+    service = PortfolioService()
+    # BUY AAPL on Feb 1
+    service.db.add_transaction(_date(2026, 2, 1), "AAPL", "BUY", 10, price=150.0,
+                               exchange="Test", asset_type="stock_usd")
+    service.repair_prices()
+    service.recalculate(force=True)
+
+    # Add a dummy DEPOSIT on Jan 1 (this is what we'll edit into a backdated SELL)
+    result = service.add_transaction("01-01-2026", "USD", "DEPOSIT", 100)
+    trans_id = result["transaction_id"]
+
+    with pytest.raises(ValueError, match=r"Cannot SELL.*only 0.*shares held as of 2026-01-01"):
+        service.edit_transaction(trans_id, asset="AAPL", action="SELL", quantity=15,
+                                 price=160.0, exchange="Test", date="01-01-2026")
+    service.close()
+
+
+def test_delete_transaction_rollback_on_recalc_failure(monkeypatch):
     """Delete must restore transaction row, daily_returns, and refresh_state."""
     from datetime import date as _date
 
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     # Seed with 2 transactions so after deleting one, recalc still has work to do
     service.db.add_transaction(_date(2026, 1, 1), "USD", "DEPOSIT", 1000, asset_type="cash_base")
     service.db.add_transaction(_date(2026, 1, 2), "USD", "DEPOSIT", 500, asset_type="cash_base")
@@ -659,11 +672,11 @@ def test_delete_transaction_rollback_on_recalc_failure(db_path: Path, monkeypatc
 # ─── Phase 3: fees in BUY/SELL ───────────────────────────────────────────────
 
 
-def test_buy_with_fees_deducts_fee_from_cash(db_path: Path):
+def test_buy_with_fees_deducts_fee_from_cash():
     """BUY with fees → cash must decrease by quantity * price + fees."""
     from datetime import date as _date
 
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.db.add_transaction(_date(2026, 1, 1), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     service.db.add_transaction(_date(2026, 1, 2), "AAPL", "BUY", 10, price=150.0,
                                fees=5.0, exchange="Test", asset_type="stock_usd")
@@ -680,11 +693,11 @@ def test_buy_with_fees_deducts_fee_from_cash(db_path: Path):
     assert usd_cash["balance"] == pytest.approx(10_000 - 1505.0, rel=1e-6)
 
 
-def test_sell_with_fees_reduces_cash_proceeds(db_path: Path):
+def test_sell_with_fees_reduces_cash_proceeds():
     """SELL with fees → cash received must be quantity * price - fees."""
     from datetime import date as _date
 
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.db.add_transaction(_date(2026, 1, 1), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     service.db.add_transaction(_date(2026, 1, 2), "AAPL", "BUY", 10, price=150.0,
                                fees=2.0, exchange="Test", asset_type="stock_usd")
@@ -703,11 +716,11 @@ def test_sell_with_fees_reduces_cash_proceeds(db_path: Path):
     assert usd_cash["spent"] == pytest.approx(1502.0, rel=1e-6)
 
 
-def test_fee_affects_cost_basis_and_realized_gain(db_path: Path):
+def test_fee_affects_cost_basis_and_realized_gain():
     """Trade fees must reduce realized gain via higher cost basis / lower proceeds."""
     from datetime import date as _date
 
-    service = PortfolioService(str(db_path))
+    service = PortfolioService()
     service.db.add_transaction(_date(2026, 1, 1), "USD", "DEPOSIT", 10_000, asset_type="cash_base")
     service.db.add_transaction(_date(2026, 1, 2), "AAPL", "BUY", 10, price=150.0,
                                fees=5.0, exchange="Test", asset_type="stock_usd")
@@ -728,6 +741,47 @@ def test_fee_affects_cost_basis_and_realized_gain(db_path: Path):
         f"Trade fees must reduce realized gain below $100, got {aapl['realized_gain_value']}"
     )
     assert aapl["realized_gain_value"] == pytest.approx(92.0, rel=1e-4)
+
+
+def test_stale_price_max_age_enforcement():
+    """Price refresh older than MAX_PRICE_AGE_DAYS must mark state as stale."""
+    from datetime import datetime, timezone, timedelta
+
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+
+    # Ensure price refresh timestamp is beyond the default 7-day window
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec='seconds')
+    service.db.set_service_state('last_successful_price_refresh', old_timestamp)
+    service.db.set_service_state('stale_data', 'false')
+
+    state = service.get_refresh_state()
+    assert state['stale_data'] is True, (
+        f"Price refresh 30 days old must be stale, got {state}"
+    )
+    service.close()
+
+
+def test_stale_price_max_age_respected_from_env(monkeypatch):
+    """PORTFOLIO_PRICE_MAX_AGE_DAYS env var must be respected in staleness check."""
+    import portfolio_db.price_cache_service as pcs
+
+    service = PortfolioService()
+    service.add_transaction("01-01-2026", "USD", "DEPOSIT", 1000)
+
+    # Set a 5-day-old refresh; default 7-day threshold says not stale
+    from datetime import datetime, timezone, timedelta
+    five_days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(timespec='seconds')
+    service.db.set_service_state('last_successful_price_refresh', five_days_ago)
+    service.db.set_service_state('stale_data', 'false')
+
+    # Lower max-age to 3 days — 5 days ago should now be stale
+    monkeypatch.setattr(pcs, 'MAX_PRICE_AGE_DAYS', 3)
+    state = service.get_refresh_state()
+    assert state['stale_data'] is True, (
+        f"5-day-old refresh must be stale when MAX_PRICE_AGE_DAYS=3, got {state}"
+    )
+    service.close()
 
 
 def test_price_service_does_not_print_to_stdout(monkeypatch):

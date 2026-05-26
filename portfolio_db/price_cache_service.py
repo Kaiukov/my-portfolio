@@ -1,6 +1,7 @@
 """Price refresh, caching, coverage analysis, and repair."""
 
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 
 from portfolio_db.domain import get_asset_type
 import portfolio_db.logger as log
@@ -8,6 +9,8 @@ import portfolio_db.logger as log
 PRICE_REFRESH_STATE_KEY = 'last_successful_price_refresh'
 RECALC_STATE_KEY = 'last_successful_recalc'
 STALE_DATA_STATE_KEY = 'stale_data'
+
+MAX_PRICE_AGE_DAYS = int(os.environ.get('PORTFOLIO_PRICE_MAX_AGE_DAYS', '7'))
 
 
 class PriceCacheService:
@@ -33,12 +36,27 @@ class PriceCacheService:
         self.db.set_service_state(PRICE_REFRESH_STATE_KEY, datetime.now(timezone.utc).isoformat(timespec='seconds'))
 
     def get_refresh_state(self) -> dict:
-        """Return explicit refresh/recalc state."""
+        """Return explicit refresh/recalc state with max-age enforcement."""
         state = self.db.get_all_service_state()
+        persisted_stale = state.get(STALE_DATA_STATE_KEY, {}).get('value') == 'true'
+        last_refresh_str = state.get(PRICE_REFRESH_STATE_KEY, {}).get('value')
+
+        age_stale = False
+        if last_refresh_str:
+            try:
+                last_refresh = datetime.fromisoformat(last_refresh_str)
+                age = datetime.now(timezone.utc) - last_refresh
+                if age > timedelta(days=MAX_PRICE_AGE_DAYS):
+                    age_stale = True
+            except (ValueError, TypeError):
+                age_stale = True
+        else:
+            age_stale = True
+
         return {
-            'last_successful_price_refresh': state.get(PRICE_REFRESH_STATE_KEY, {}).get('value'),
+            'last_successful_price_refresh': last_refresh_str,
             'last_successful_recalc': state.get(RECALC_STATE_KEY, {}).get('value'),
-            'stale_data': state.get(STALE_DATA_STATE_KEY, {}).get('value') == 'true',
+            'stale_data': persisted_stale or age_stale,
         }
 
     def _refresh_cached_prices(self, tickers: list, start_date, end_date) -> dict:

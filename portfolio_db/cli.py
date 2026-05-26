@@ -109,9 +109,23 @@ def _dump_postgres_backup(target: str, dst: Path):
             service.close()
 
 
-@click.group()
+@click.group(epilog="""
+Date format conventions:
+
+  Write commands (add, edit, exchange, recalculate):
+      Use DD-MM-YYYY (e.g. 01-01-2026) for --date / --from-date.
+
+  Read-only commands (report, transactions, status, allocation, cash,
+    performance, mwr, summary, repair_prices):
+      Use YYYY-MM-DD (e.g. 2026-01-01) for --start-date / --end-date / --as-of-date.
+"""
+)
 def cli():
-    """Portfolio tracking CLI."""
+    """Portfolio tracking CLI.
+
+Write commands use DD-MM-YYYY (add, edit, exchange, recalculate).
+Read commands use YYYY-MM-DD (report, status, summary, performance, mwr, allocation, cash).
+"""
     pass
 
 
@@ -241,6 +255,9 @@ def status(as_of_date):
 # ─── add ──────────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
 Examples:
 
   portfolio add --date 01-01-2026 --asset AAPL --action buy --quantity 10 --price 150
@@ -260,7 +277,10 @@ Examples:
 @click.option("--exchange", default="")
 @click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
 def add(date_str, asset, action, quantity, price, currency, fees, exchange, account):
-    """Add a transaction and auto-recalculate returns."""
+    """Add a transaction and auto-recalculate returns.
+
+Dates use DD-MM-YYYY format (e.g. 01-01-2026).
+"""
     date_obj = _parse_legacy_date(date_str, "--date")
 
     # --exchange is required for all transactions
@@ -328,6 +348,9 @@ def add(date_str, asset, action, quantity, price, currency, fees, exchange, acco
 # ─── edit ─────────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
 Examples:
 
   portfolio edit --id 42 --price 155.50
@@ -349,7 +372,10 @@ Examples:
 @click.option("--account", default=None, help="Account label — required for TRANSFER (e.g. 'broker_a', 'broker_b')")
 @click.option("--dry-run", is_flag=True, help="Show what would change without applying")
 def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run):
-    """Edit an existing transaction and recalculate returns."""
+    """Edit an existing transaction and recalculate returns.
+
+Dates use DD-MM-YYYY format (e.g. 15-01-2026).
+"""
     validate_positive_int(trans_id, "--id", "edit")
 
     # Validate numeric fields when provided
@@ -524,6 +550,9 @@ def repair_prices(tickers, start_date, end_date, dry_run):
 # ─── recalculate ──────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
 Examples:
 
   portfolio recalculate
@@ -536,7 +565,10 @@ Examples:
 @click.option("--from-date", default=None, help="Recalculate from date (DD-MM-YYYY)")
 @click.option("--dry-run", is_flag=True, help="Show what would be recalculated without executing")
 def recalculate(force, from_date, dry_run):
-    """Recalculate portfolio returns."""
+    """Recalculate portfolio returns.
+
+Dates use DD-MM-YYYY format (e.g. 01-01-2026).
+"""
     from_date_obj = _parse_legacy_date(from_date, "--from-date") if from_date else None
     if dry_run:
         service = None
@@ -928,6 +960,9 @@ def summary(position_filter, as_of_date):
 # ─── exchange ─────────────────────────────────────────────────────────────────
 
 @cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
 Examples:
 
   portfolio exchange --date 01-01-2026 --from USD --to EUR --quantity 1000 --rate 0.92
@@ -940,7 +975,10 @@ Examples:
 @click.option("--quantity", required=True, type=float)
 @click.option("--rate", required=True, type=float)
 def exchange(date_str, from_asset, to_asset, quantity, rate):
-    """Exchange one currency for another."""
+    """Exchange one currency for another.
+
+Dates use DD-MM-YYYY format (e.g. 01-01-2026).
+"""
     date_obj = _parse_legacy_date(date_str, "--date")
     validate_positive_float(quantity, "--quantity", "exchange")
     validate_positive_float(rate, "--rate", "exchange")
