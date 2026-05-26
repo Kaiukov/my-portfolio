@@ -13,7 +13,7 @@ Python CLI (`portfolio`) for portfolio tracking with PostgreSQL. Source lives in
 - build backend: hatchling
 - Python >= 3.13
 - database: PostgreSQL (required; DuckDB support removed)
-- library dependencies: click, psycopg2-binary, numpy, pandas, yfinance
+- library dependencies: click, psycopg[binary], numpy, pandas, yfinance
 
 ## Database Setup
 
