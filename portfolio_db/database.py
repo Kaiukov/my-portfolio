@@ -1,10 +1,13 @@
 """Database setup and transaction management."""
 
+import logging
 import os
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 def is_postgres_url(target: str) -> bool:
@@ -777,14 +780,11 @@ class PortfolioDatabase:
                 ('fee_currency', 'VARCHAR(10)'),
             ]:
                 if col_name not in existing:
-                    try:
-                        self.con.execute(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_def}")
-                    except Exception:
-                        pass
+                    self.con.execute(f"ALTER TABLE transactions ADD COLUMN IF NOT EXISTS {col_name} {col_def}")
 
             self.con.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('_migrate_transaction_audit_columns failed: %s', e)
 
     def clear_transactions(self):
         """Clear all transactions."""
