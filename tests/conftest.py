@@ -65,7 +65,7 @@ def postgres_test_schema():
 
 @pytest.fixture(autouse=True)
 def postgres_schema_isolation():
-    """Clear the test schema before each test."""
+    """Clear the test schema before and after each test."""
     test_url = os.getenv("PORTFOLIO_DB_URL")
     if not test_url:
         raise RuntimeError("PORTFOLIO_DB_URL is required for PostgreSQL-only tests")
@@ -83,30 +83,35 @@ def postgres_schema_isolation():
     base_url = _remove_query_param(test_url, "schema")
     base_url = _remove_query_param(base_url, "search_path")
 
-    with psycopg.connect(base_url) as conn:
-        # Set the schema if one was specified
-        if schema_name:
-            conn.execute(f'SET search_path TO "{schema_name}"')
+    def _truncate_schema():
+        with psycopg.connect(base_url) as conn:
+            if schema_name:
+                conn.execute(f'SET search_path TO "{schema_name}"')
 
-        conn.execute(
-            """
-            DO $$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1
-                    FROM information_schema.tables
-                    WHERE table_schema = current_schema()
-                ) THEN
-                    EXECUTE (
-                        SELECT 'TRUNCATE TABLE ' || string_agg(quote_ident(table_name), ', ')
-                             || ' RESTART IDENTITY CASCADE'
+            conn.execute(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
                         FROM information_schema.tables
                         WHERE table_schema = current_schema()
-                    );
-                END IF;
-            END $$;
-            """
-        )
-        conn.commit()
+                    ) THEN
+                        EXECUTE (
+                            SELECT 'TRUNCATE TABLE ' || string_agg(quote_ident(table_name), ', ')
+                                 || ' RESTART IDENTITY CASCADE'
+                            FROM information_schema.tables
+                            WHERE table_schema = current_schema()
+                        );
+                    END IF;
+                END $$;
+                """
+            )
+            conn.commit()
 
-    yield
+    _truncate_schema()
+
+    try:
+        yield
+    finally:
+        _truncate_schema()
