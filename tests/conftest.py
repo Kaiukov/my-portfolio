@@ -65,14 +65,29 @@ def postgres_test_schema():
 
 @pytest.fixture(autouse=True)
 def postgres_schema_isolation():
-    """Clear the shared test schema before each test."""
+    """Clear the test schema before each test."""
     test_url = os.getenv("PORTFOLIO_DB_URL")
     if not test_url:
         raise RuntimeError("PORTFOLIO_DB_URL is required for PostgreSQL-only tests")
 
+    # Extract schema name from query parameters
+    parsed = urlsplit(test_url)
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    schema_name = None
+    for key, value in query_items:
+        if key in {"schema", "search_path"}:
+            schema_name = value
+            break
+
+    # Connect without the schema parameter (psycopg doesn't understand it)
     base_url = _remove_query_param(test_url, "schema")
+    base_url = _remove_query_param(base_url, "search_path")
 
     with psycopg.connect(base_url) as conn:
+        # Set the schema if one was specified
+        if schema_name:
+            conn.execute(f'SET search_path TO "{schema_name}"')
+
         conn.execute(
             """
             DO $$

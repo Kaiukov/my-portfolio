@@ -174,7 +174,7 @@ Deliverable:
   - [x] `pyproject.toml`
   - [x] console script entrypoint (`portfolio = "portfolio_db.cli:cli"`)
 - [x] Lock env handling:
-  - [x] DB path (via `--db` flag)
+  - [x] DB path (via `PORTFOLIO_DB_URL` env var, PostgreSQL-only)
   - [x] logs path (via `PORTFOLIO_LOG_PATH` env var, `.env.example`)
   - [x] provider settings (`PORTFOLIO_PRICE_PROVIDER=yfinance` in `.env.example`)
 - [x] Add reproducible bootstrap:

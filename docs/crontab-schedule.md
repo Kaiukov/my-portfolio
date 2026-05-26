@@ -7,12 +7,17 @@ Automated jobs for keeping prices and portfolio calculations up to date.
 ## Prerequisites
 
 - Project installed via `uv` (see `pyproject.toml`)
-- Database at `$PROJECT/portfolio.db` (default path)
+- PostgreSQL connection URL set in `PORTFOLIO_DB_URL` env var (required)
 - Logs written to `$PROJECT/logs/`
 
 ```bash
 # One-time setup
 mkdir -p /path/to/my-portfolio/logs
+
+# Set PostgreSQL connection
+export PORTFOLIO_DB_URL='postgresql://postgres:password@localhost:5432/postgres'
+# OR use Supabase
+export PORTFOLIO_DB_URL='postgresql://postgres:password@db.project.supabase.co:5432/postgres?sslmode=require'
 ```
 
 ---
@@ -40,35 +45,36 @@ mkdir -p /path/to/my-portfolio/logs
 SHELL=/bin/bash
 PROJECT=/path/to/my-portfolio
 LOG=$PROJECT/logs
-DB=$PROJECT/portfolio.db
 UV=uv
+# PostgreSQL connection (required)
+PORTFOLIO_DB_URL=postgresql://postgres:password@localhost:5432/postgres
 
 # ─── NIGHTLY: backup DB before daily operations (02:00) ──────────────────────
-0 2  * * *    cd $PROJECT && $UV run portfolio backup --db $DB >> $LOG/backup.log 2>&1
+0 2  * * *    cd $PROJECT && $UV run portfolio backup >> $LOG/backup.log 2>&1
 
 # ─── SUNDAY: repair missing prices before weekly recalc (02:30) ──────────────
-30 2 * * 0    cd $PROJECT && $UV run portfolio repair_prices --db $DB >> $LOG/repair-prices.log 2>&1
+30 2 * * 0    cd $PROJECT && $UV run portfolio repair_prices >> $LOG/repair-prices.log 2>&1
 
 # ─── SUNDAY: full forced recalculation (weekly deep refresh) (03:00) ─────────
-0 3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force --db $DB >> $LOG/recalc-full.log 2>&1
+0 3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force >> $LOG/recalc-full.log 2>&1
 
 # ─── WEEKDAY: recalculate after US market close (Mon–Fri 18:30) ─────────────
-30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
+30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
 
 # ─── SATURDAY: catch late Friday settlement data ─────────────────────────────
-0 10 * * 6    cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
+0 10 * * 6    cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
 
 # ─── DAILY: verify price data integrity at 07:00 ─────────────────────────────
-0 7  * * *    cd $PROJECT && $UV run portfolio verify_prices --db $DB >> $LOG/verify-prices.log 2>&1
+0 7  * * *    cd $PROJECT && $UV run portfolio verify_prices >> $LOG/verify-prices.log 2>&1
 
 # ─── DAILY: health check after verify (07:05) ────────────────────────────────
-5 7  * * *    cd $PROJECT && $UV run portfolio health --db $DB >> $LOG/health.log 2>&1
+5 7  * * *    cd $PROJECT && $UV run portfolio health >> $LOG/health.log 2>&1
 
 # ─── WEEKDAY MORNING: portfolio status snapshot at 09:00 ─────────────────────
-0 9  * * 1-5  cd $PROJECT && $UV run portfolio status --db $DB >> $LOG/status.log 2>&1
+0 9  * * 1-5  cd $PROJECT && $UV run portfolio status >> $LOG/status.log 2>&1
 
 # ─── MONTHLY: performance report on 1st of each month at 06:00 ───────────────
-0 6  1 * *    cd $PROJECT && $UV run portfolio performance --db $DB > $LOG/performance-$(date +\%Y-\%m).log 2>&1
+0 6  1 * *    cd $PROJECT && $UV run portfolio performance > $LOG/performance-$(date +\%Y-\%m).log 2>&1
 ```
 
 ---
@@ -85,15 +91,15 @@ cat >> /tmp/current_crontab << 'EOF'
 SHELL=/bin/bash
 PROJECT=/path/to/my-portfolio
 LOG=$PROJECT/logs
-DB=$PROJECT/portfolio.db
 UV=uv
+PORTFOLIO_DB_URL=postgresql://postgres:password@localhost:5432/postgres
 
-30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
-0  10 * * 6    cd $PROJECT && $UV run portfolio recalculate --db $DB >> $LOG/recalc.log 2>&1
-0  3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force --db $DB >> $LOG/recalc-full.log 2>&1
-0  7  * * *    cd $PROJECT && $UV run portfolio verify_prices --db $DB >> $LOG/verify-prices.log 2>&1
-0  9  * * 1-5  cd $PROJECT && $UV run portfolio status --db $DB >> $LOG/status.log 2>&1
-0  6  1 * *    cd $PROJECT && $UV run portfolio performance --db $DB > $LOG/performance-$(date +%Y-%m).log 2>&1
+30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
+0  10 * * 6    cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
+0  3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force >> $LOG/recalc-full.log 2>&1
+0  7  * * *    cd $PROJECT && $UV run portfolio verify_prices >> $LOG/verify-prices.log 2>&1
+0  9  * * 1-5  cd $PROJECT && $UV run portfolio status >> $LOG/status.log 2>&1
+0  6  1 * *    cd $PROJECT && $UV run portfolio performance > $LOG/performance-$(date +%Y-%m).log 2>&1
 EOF
 crontab /tmp/current_crontab && echo "Crontab installed." && rm /tmp/current_crontab
 ```
