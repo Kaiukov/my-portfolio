@@ -42,6 +42,14 @@ IMMUTABLE
 AS $$
     SELECT CASE
         WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
+        WHEN asset = 'EUR' THEN 'EURUSD=X'
+        WHEN asset = 'GBP' THEN 'GBPUSD=X'
+        WHEN asset = 'CHF' THEN 'CHFUSD=X'
+        WHEN asset = 'CAD' THEN 'CADUSD=X'
+        WHEN asset = 'AUD' THEN 'AUDUSD=X'
+        WHEN asset = 'HKD' THEN 'HKDUSD=X'
+        WHEN asset = 'SGD' THEN 'SGDUSD=X'
+        WHEN asset = 'JPY' THEN 'JPYUSD=X'
         WHEN asset_type = 'cash_fx' THEN asset
         WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
         WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'

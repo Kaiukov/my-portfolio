@@ -288,6 +288,7 @@ class PortfolioDatabase:
             AS $$
                 SELECT CASE
                     WHEN ticker = 'USD' THEN 'cash_base'
+                    WHEN ticker IN ('EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'JPY') THEN 'cash_fx'
                     WHEN RIGHT(ticker, 5) = 'USD=X' THEN 'cash_fx'
                     WHEN RIGHT(ticker, 4) = '-USD' THEN 'crypto'
                     WHEN RIGHT(ticker, 2) = '.L' THEN 'stock_gbp'
@@ -322,6 +323,14 @@ class PortfolioDatabase:
             AS $$
                 SELECT CASE
                     WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
+                    WHEN asset = 'EUR' THEN 'EURUSD=X'
+                    WHEN asset = 'GBP' THEN 'GBPUSD=X'
+                    WHEN asset = 'CHF' THEN 'CHFUSD=X'
+                    WHEN asset = 'CAD' THEN 'CADUSD=X'
+                    WHEN asset = 'AUD' THEN 'AUDUSD=X'
+                    WHEN asset = 'HKD' THEN 'HKDUSD=X'
+                    WHEN asset = 'SGD' THEN 'SGDUSD=X'
+                    WHEN asset = 'JPY' THEN 'JPYUSD=X'
                     WHEN asset_type = 'cash_fx' THEN asset
                     WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
                     WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
