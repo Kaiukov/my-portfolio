@@ -169,3 +169,47 @@ AS $$
         ELSE p_quantity * price_asof_sql(p_asset, p_as_of_date)
     END
 $$;
+
+-- Lazy-recalc staleness check: TRUE when price refresh is newer than last recalculation
+CREATE OR REPLACE FUNCTION needs_recalc()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT CASE
+        WHEN (SELECT state_value FROM service_state
+              WHERE state_key = 'last_successful_recalc') IS NULL
+            THEN TRUE
+        WHEN (SELECT state_value FROM service_state
+              WHERE state_key = 'last_successful_price_refresh') IS NULL
+            THEN FALSE
+        ELSE
+            (SELECT state_value::timestamptz FROM service_state
+             WHERE state_key = 'last_successful_price_refresh')
+            >
+            (SELECT state_value::timestamptz FROM service_state
+             WHERE state_key = 'last_successful_recalc')
+    END
+$$;
+
+-- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on
+CREATE OR REPLACE FUNCTION daily_maintenance_check()
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF (SELECT MAX(date) FROM prices) < CURRENT_DATE - 1 THEN
+        INSERT INTO service_state (state_key, state_value, updated_at)
+        VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
+        ON CONFLICT (state_key)
+        DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+    END IF;
+
+    IF needs_recalc() THEN
+        INSERT INTO service_state (state_key, state_value, updated_at)
+        VALUES ('needs_recalc', 'true', CURRENT_TIMESTAMP)
+        ON CONFLICT (state_key)
+        DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+    END IF;
+END;
+$$;

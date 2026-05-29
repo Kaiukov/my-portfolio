@@ -16,7 +16,13 @@ BEGIN
     INSERT INTO scheduled_job_log (job_name, status, started_at)
     VALUES (v_job_name, 'running', v_start);
 
-    PERFORM refresh_daily_returns_sql(NULL);
+    IF p_force THEN
+        PERFORM refresh_daily_returns_sql(NULL);
+    ELSE
+        PERFORM refresh_daily_returns_sql(
+            (SELECT MAX(date) FROM daily_returns)
+        );
+    END IF;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
 
     UPDATE scheduled_job_log
@@ -427,8 +433,8 @@ BEGIN
     INSERT INTO scheduled_job_log (job_name, status, started_at)
     VALUES (v_job_name, 'running', v_start);
 
-    DELETE FROM scheduled_job_backup;
-
+    -- Write new backup rows first, then delete old ones (atomic swap avoids data loss
+    -- window if the job fails mid-run — previous backup remains intact until new one completes)
     INSERT INTO scheduled_job_backup (backup_date, table_name, row_count, data)
     SELECT CURRENT_DATE, 'transactions', COUNT(*),
            jsonb_agg(to_jsonb(t) ORDER BY t.id)
@@ -443,12 +449,11 @@ BEGIN
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_total_rows := v_total_rows + v_count;
 
-    INSERT INTO scheduled_job_backup (backup_date, table_name, row_count, data)
-    SELECT CURRENT_DATE, 'prices', COUNT(*),
-           jsonb_agg(to_jsonb(p) ORDER BY p.date, p.ticker)
-    FROM prices p;
-    GET DIAGNOSTICS v_count = ROW_COUNT;
-    v_total_rows := v_total_rows + v_count;
+    -- Skip prices in JSONB backup — 18k+ rows produces multi-MB objects with no restore path.
+    -- Price data is reconstructed via `portfolio repair_prices` from yfinance.
+
+    -- Remove previous backup only after new rows are written successfully
+    DELETE FROM scheduled_job_backup WHERE backup_date < CURRENT_DATE;
 
     UPDATE scheduled_job_log
     SET status = 'completed',
@@ -457,7 +462,7 @@ BEGIN
         result_summary = jsonb_build_object(
             'mode', 'sql_copy',
             'backup_date', CURRENT_DATE,
-            'tables_copied', v_total_rows
+            'tables_backed_up', ARRAY['transactions', 'daily_returns']
         )
     WHERE job_name = v_job_name AND started_at = v_start;
 

@@ -96,26 +96,22 @@ def test_sync_command_noop_when_fresh():
 
 
 def test_sync_command_recalculates_when_stale():
-    """portfolio sync actions list includes recalculate when needs_recalc() is True."""
-    from unittest.mock import patch
+    """portfolio sync CLI includes 'recalculate' in actions when needs_recalc() is True."""
+    import json
     from datetime import datetime, timezone, timedelta
 
     s = make_service()
-    # add_transaction auto-recalcs; simulate price refresh newer than that recalc
+    # Simulate price refresh newer than last recalculation
     future = (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()
     s.db.set_service_state("last_successful_price_refresh", future)
+    s.db.set_service_state("needs_recalc", "true")
     assert s.needs_recalc() is True
-
-    with patch.object(s, "recalculate") as mock_recalc:
-        # Replicate sync logic directly — same as the CLI command
-        actions = []
-        state = s.db.get_all_service_state()
-        if state.get("prices_need_fetch", {}).get("value") == "true":
-            actions.append("repair_prices")
-        if s.needs_recalc():
-            s.recalculate()
-            actions.append("recalculate")
-
-        assert "recalculate" in actions
-        mock_recalc.assert_called_once()
     s.close()
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["sync"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["ok"] is True
+    assert "recalculate" in data["data"]["actions"]
+    assert data["data"]["synced"] is True

@@ -643,10 +643,16 @@ class PortfolioService:
         row = self.db.con.execute("SELECT needs_recalc()").fetchone()
         return bool(row[0]) if row else True
 
-    def ensure_fresh(self):
-        """Recalculate if stale. No network calls — SQL-only recalculation."""
+    def ensure_fresh(self) -> bool:
+        """Recalculate if stale. No network calls — SQL-only recalculation.
+
+        Returns:
+            True if recalculation was triggered, False if data was already fresh.
+        """
         if self.needs_recalc():
             self.recalculate()
+            return True
+        return False
 
     def recalculate(self, from_date=None, force=False):
         """

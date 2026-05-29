@@ -283,7 +283,7 @@ def status(as_of_date):
     service = None
     try:
         service = PortfolioService()
-        service.ensure_fresh()
+        recalculated = service.ensure_fresh()
         trans_count = service.get_transaction_count()
         stats = service.get_performance_stats(as_of_date=as_of)
         data = {
@@ -301,7 +301,7 @@ def status(as_of_date):
             "total_gain_pct": stats["total_return_pct"],
             "as_of_date": stats["end_date"],
         }
-        success("status", data)
+        success("status", data, extra_meta={"recalculated": recalculated} if recalculated else None)
     except PriceDataUnavailableError as e:
         error("status", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
@@ -719,9 +719,9 @@ def allocation(allocation_type, as_of_date):
     service = None
     try:
         service = PortfolioService()
-        service.ensure_fresh()
+        recalculated = service.ensure_fresh()
         data = service.get_allocation(allocation_type=allocation_type, as_of_date=as_of)
-        success("allocation", data)
+        success("allocation", data, extra_meta={"recalculated": recalculated} if recalculated else None)
     except PriceDataUnavailableError as e:
         error("allocation", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
@@ -750,7 +750,7 @@ def cash(as_of_date):
     service = None
     try:
         service = PortfolioService()
-        service.ensure_fresh()
+        recalculated = service.ensure_fresh()
         snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=True)
         cash_balances = snapshot["cash_balances"]
         result = []
@@ -784,6 +784,8 @@ def cash(as_of_date):
             })
 
         meta = {"as_of_date": snapshot["as_of_date"]}
+        if recalculated:
+            meta["recalculated"] = True
         success("cash", result, count=len(result), extra_meta=meta)
     except PriceDataUnavailableError as e:
         error("cash", "PRICE_DATA_ERROR", str(e))
@@ -944,7 +946,7 @@ def performance(as_of_date, benchmark, from_date, period):
     service = None
     try:
         service = PortfolioService()
-        service.ensure_fresh()
+        recalculated = service.ensure_fresh()
         stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark, from_date=resolved_from)
         concentration = service.get_concentration_metrics(as_of_date=as_of)
 
@@ -1027,7 +1029,7 @@ def performance(as_of_date, benchmark, from_date, period):
         }
         contributions = service.get_contribution_by_position(as_of_date=as_of)
         result["contribution_by_position"] = contributions
-        success("performance", result)
+        success("performance", result, extra_meta={"recalculated": recalculated} if recalculated else None)
     except PriceDataUnavailableError as e:
         error("performance", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
@@ -1103,11 +1105,14 @@ def summary(position_filter, as_of_date):
     service = None
     try:
         service = PortfolioService()
-        service.ensure_fresh()
+        recalculated = service.ensure_fresh()
         include_closed = position_filter == "all"
         snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=include_closed)
         positions = snapshot["positions"]
-        success("summary", positions, count=len(positions), extra_meta={"as_of_date": snapshot["as_of_date"]})
+        meta = {"as_of_date": snapshot["as_of_date"]}
+        if recalculated:
+            meta["recalculated"] = True
+        success("summary", positions, count=len(positions), extra_meta=meta)
     except PriceDataUnavailableError as e:
         error("summary", "PRICE_DATA_ERROR", str(e))
     except Exception as e:
@@ -1421,16 +1426,17 @@ def cron_uninstall(dry_run):
     lines = current.splitlines()
     removed = []
     new_lines = []
-    skip = False
+    in_block = False
     for line in lines:
         if _CRONTAB_MARKER in line:
             removed.append(line)
-            skip = True
+            in_block = True
             continue
-        if skip:
+        if in_block:
+            # Collect all lines until next empty line (block terminator)
             removed.append(line)
-            if not line.strip().startswith("#") and line.strip():
-                skip = False
+            if not line.strip():
+                in_block = False
             continue
         new_lines.append(line)
 
