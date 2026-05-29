@@ -247,6 +247,9 @@ class PortfolioDatabase:
         # Create the PostgreSQL recalculation procedure for daily returns.
         self._create_daily_returns_refresh_function()
 
+        # Create lazy-recalc maintenance functions.
+        self._create_maintenance_functions()
+
         self.con.commit()
 
     def _create_sql_helpers(self):
@@ -613,6 +616,54 @@ class PortfolioDatabase:
                 END LOOP;
 
                 RETURN v_rows;
+            END;
+            $$;
+        """)
+
+    def _create_maintenance_functions(self):
+        """Create lazy-recalc helper functions."""
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION needs_recalc()
+            RETURNS BOOLEAN
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT CASE
+                    WHEN (SELECT state_value FROM service_state
+                          WHERE state_key = 'last_successful_recalc') IS NULL
+                        THEN TRUE
+                    WHEN (SELECT state_value FROM service_state
+                          WHERE state_key = 'last_successful_price_refresh') IS NULL
+                        THEN FALSE
+                    ELSE
+                        (SELECT state_value::timestamptz FROM service_state
+                         WHERE state_key = 'last_successful_price_refresh')
+                        >
+                        (SELECT state_value::timestamptz FROM service_state
+                         WHERE state_key = 'last_successful_recalc')
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION daily_maintenance_check()
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF (SELECT MAX(date) FROM prices) < CURRENT_DATE - 1 THEN
+                    INSERT INTO service_state (state_key, state_value, updated_at)
+                    VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
+                    ON CONFLICT (state_key)
+                    DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+                END IF;
+
+                IF needs_recalc() THEN
+                    INSERT INTO service_state (state_key, state_value, updated_at)
+                    VALUES ('needs_recalc', 'true', CURRENT_TIMESTAMP)
+                    ON CONFLICT (state_key)
+                    DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+                END IF;
             END;
             $$;
         """)

@@ -74,6 +74,7 @@ Write / maintenance commands:
   recalculate     Rebuild daily returns from cached data.
   backup          Copy the PostgreSQL database to a backup.
   init            Initialize the PostgreSQL schema (idempotent).
+  sync            Check and auto-repair fresh state (fetch prices, recalculate).
 
 Use `portfolio COMMAND --help` for command-specific details."""
 
@@ -273,7 +274,8 @@ def status(as_of_date):
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
-        service = PortfolioService(read_only=True)
+        service = PortfolioService()
+        service.ensure_fresh()
         trans_count = service.get_transaction_count()
         stats = service.get_performance_stats(as_of_date=as_of)
         data = {
@@ -708,7 +710,8 @@ def allocation(allocation_type, as_of_date):
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
-        service = PortfolioService(read_only=True)
+        service = PortfolioService()
+        service.ensure_fresh()
         data = service.get_allocation(allocation_type=allocation_type, as_of_date=as_of)
         success("allocation", data)
     except PriceDataUnavailableError as e:
@@ -738,7 +741,8 @@ def cash(as_of_date):
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
-        service = PortfolioService(read_only=True)
+        service = PortfolioService()
+        service.ensure_fresh()
         snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=True)
         cash_balances = snapshot["cash_balances"]
         result = []
@@ -921,7 +925,8 @@ def performance(as_of_date, benchmark, from_date, period):
 
     service = None
     try:
-        service = PortfolioService(read_only=True)
+        service = PortfolioService()
+        service.ensure_fresh()
         stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark, from_date=resolved_from)
         concentration = service.get_concentration_metrics(as_of_date=as_of)
 
@@ -1079,7 +1084,8 @@ def summary(position_filter, as_of_date):
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
     service = None
     try:
-        service = PortfolioService(read_only=True)
+        service = PortfolioService()
+        service.ensure_fresh()
         include_closed = position_filter == "all"
         snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=include_closed)
         positions = snapshot["positions"]
@@ -1249,6 +1255,47 @@ def health():
         })
     except Exception as e:
         error("health", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── sync ─────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  Reads service_state flags to determine what needs attention.
+  If prices_need_fetch is true: fetches missing prices via yfinance.
+  If needs_recalc is true: rebuilds daily_returns from cached prices.
+  Clears each flag after successful execution.
+  Safe to run on a cron schedule — no-op when everything is fresh.
+
+Examples:
+
+  portfolio sync
+""")
+def sync():
+    """Check and auto-repair fresh state: fetch stale prices, recalculate if needed."""
+    service = None
+    try:
+        service = PortfolioService()
+        state = service.db.get_all_service_state()
+        prices_need_fetch = state.get("prices_need_fetch", {}).get("value") == "true"
+
+        actions = []
+        if prices_need_fetch:
+            service.repair_prices()
+            service.db.set_service_state("prices_need_fetch", "false")
+            actions.append("repair_prices")
+        if service.needs_recalc():
+            service.recalculate()
+            actions.append("recalculate")
+
+        success("sync", {"actions": actions, "synced": len(actions) > 0})
+    except PriceDataUnavailableError as e:
+        error("sync", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("sync", "DB_ERROR", str(e))
     finally:
         if service:
             service.close()

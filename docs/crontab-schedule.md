@@ -36,6 +36,20 @@ export PORTFOLIO_DB_URL='postgresql://postgres:password@db.project.supabase.co:5
 | `status` | Mon–Fri 09:00 | Morning briefing | Snapshot portfolio value to log |
 | `performance` | 1st of month 06:00 | Monthly | Persist monthly performance report to file |
 
+### Lazy-recalc maintenance
+
+| Job | Schedule | When | What |
+|---|---|---|---|
+| `daily_maintenance_check()` | Daily 06:00 (via pg_cron) | Early morning | Sets `prices_need_fetch` and `needs_recalc` flags in `service_state` |
+| `portfolio sync` | Daily 06:15 (via crontab) | After maintenance check | Reads flags, fetches prices / recalculates if needed, clears flags |
+
+`portfolio sync` is also safe to run as a standalone command — it reads `service_state` flags to determine what (if anything) needs attention.
+
+**pg_cron registration:**
+```sql
+SELECT cron.schedule('portfolio_daily_check', '0 6 * * *', $$SELECT daily_maintenance_check();$$);
+```
+
 ---
 
 ## Crontab Entries
@@ -51,6 +65,9 @@ PORTFOLIO_DB_URL=postgresql://postgres:password@localhost:5432/postgres
 
 # ─── NIGHTLY: backup DB before daily operations (02:00) ──────────────────────
 0 2  * * *    cd $PROJECT && $UV run portfolio backup >> $LOG/backup.log 2>&1
+
+# ─── DAILY: lazy-recalc sync (reads service_state flags, repairs/recalc if needed) (06:15)
+15 6 * * *    cd $PROJECT && $UV run portfolio sync >> $LOG/sync.log 2>&1
 
 # ─── SUNDAY: repair missing prices before weekly recalc (02:30) ──────────────
 30 2 * * 0    cd $PROJECT && $UV run portfolio repair_prices >> $LOG/repair-prices.log 2>&1
@@ -129,6 +146,7 @@ crontab -l | grep portfolio
 | `logs/verify-prices.log` | Daily price integrity check |
 | `logs/health.log` | Daily health check |
 | `logs/status.log` | Weekday morning status snapshot |
+| `logs/sync.log` | Daily lazy-recalc sync output |
 | `logs/performance-YYYY-MM.log` | Monthly performance report (one file per month) |
 
 ### Tail logs
