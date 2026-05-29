@@ -1,6 +1,7 @@
 """CLI interface for portfolio_db."""
 
 import click
+import os
 import subprocess
 from datetime import datetime, date
 from pathlib import Path
@@ -77,9 +78,11 @@ Write / maintenance commands:
   sync            Check and auto-repair fresh state (fetch prices, recalculate).
 
 Scheduling commands:
-  cron install    Register all portfolio jobs with pg_cron.
-  cron uninstall  Remove all portfolio jobs from pg_cron.
-  cron status     List active pg_cron scheduled jobs.
+  cron install      Install portfolio sync in macOS crontab.
+  cron uninstall    Remove portfolio entries from macOS crontab.
+  cron status       Show crontab entries and pg_cron jobs.
+  cron db-install   Register daily_maintenance_check() in pg_cron.
+  cron db-uninstall Remove portfolio jobs from pg_cron.
 
 Use `portfolio COMMAND --help` for command-specific details."""
 
@@ -1277,39 +1280,282 @@ def health():
 
 # ─── cron ─────────────────────────────────────────────────────────────────────
 
-_CRON_JOB_NAMES = [
-    "portfolio_backup",
-    "portfolio_repair_prices",
-    "portfolio_recalculate_full",
-    "portfolio_recalculate_weekday",
-    "portfolio_recalculate_saturday",
-    "portfolio_verify_prices",
-    "portfolio_health",
-    "portfolio_status",
-    "portfolio_performance",
+_DB_JOB_NAMES = [
+    "portfolio_daily_check",
 ]
 
+_CRONTAB_MARKER = "# portfolio auto-refresh (managed by `portfolio cron`)"
 
-@cli.group()
+
+def _read_crontab() -> str:
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if result.returncode != 0:
+            return ""
+        return result.stdout
+    except FileNotFoundError:
+        return ""
+
+
+def _write_crontab(content: str) -> None:
+    subprocess.run(["crontab", "-"], input=content, text=True, check=True)
+
+
+@cli.group(epilog="""
+Manage scheduled portfolio maintenance.
+
+Two schedulers:
+  macOS crontab — runs `portfolio sync` (needs Python for yfinance)
+  PostgreSQL pg_cron — runs `daily_maintenance_check()` (SQL-only flag setter)
+
+Examples:
+
+  portfolio cron install --time 19:00 --weekdays-only
+  portfolio cron uninstall
+  portfolio cron status
+  portfolio cron db-install --time 06:00
+  portfolio cron db-uninstall
+""")
 def cron():
-    """Manage pg_cron scheduled jobs for automated portfolio maintenance."""
+    """Manage scheduled jobs (macOS crontab + pg_cron)."""
     pass
 
 
 @cron.command(name="install", epilog="""
 Notes:
-  Requires the pg_cron PostgreSQL extension to be installed.
-  On Supabase, enable pg_cron via Dashboard > Extensions (Pro tier and above).
-  On local PostgreSQL, run: CREATE EXTENSION pg_cron;
-  If pg_cron is unavailable, fall back to OS crontab instructions.
-  This command is idempotent — safe to run multiple times.
+  Adds a crontab entry that runs `portfolio sync` on the configured schedule.
+  Uses PORTFOLIO_DB_URL from the current environment.
+  Idempotent — replaces existing portfolio crontab entries.
 
 Examples:
 
   portfolio cron install
+  portfolio cron install --time 19:00 --weekdays-only
+  portfolio cron install --time 08:00 --log-file ~/logs/sync.log --dry-run
 """)
-def cron_install():
-    """Register all portfolio scheduled jobs with pg_cron."""
+@click.option("--time", "run_time", default="19:00", show_default=True,
+              help="HH:MM (24-hour) to run portfolio sync")
+@click.option("--weekdays-only", is_flag=True,
+              help="Run Mon-Fri only (default: every day)")
+@click.option("--log-file", default="~/portfolio-logs/sync.log", show_default=True,
+              help="Path to append sync output")
+@click.option("--dry-run", is_flag=True, help="Show what would be installed without writing")
+def cron_install(run_time, weekdays_only, log_file, dry_run):
+    """Install portfolio sync in macOS crontab."""
+    try:
+        parts = run_time.split(":")
+        minute = int(parts[1])
+        hour = int(parts[0])
+    except (ValueError, IndexError):
+        error("cron", "VALIDATION_ERROR", f"--time must be HH:MM, got: {run_time!r}")
+
+    dow = "1-5" if weekdays_only else "*"
+    log_dir = str(Path(log_file).expanduser().parent)
+    db_url = os.environ.get("PORTFOLIO_DB_URL", "")
+
+    crontab_line = (
+        f"{minute} {hour} * * {dow}"
+        f"  mkdir -p {log_dir} && "
+        f"cd {Path.cwd()} && "
+        f"PORTFOLIO_DB_URL='{db_url}' "
+        f"uv run portfolio sync >> {Path(log_file).expanduser()} 2>&1"
+    )
+
+    current = _read_crontab()
+
+    if dry_run:
+        success("cron", {
+            "action": "install",
+            "dry_run": True,
+            "would_add": crontab_line,
+            "schedule": f"{minute} {hour} * * {dow}",
+            "weekdays_only": weekdays_only,
+            "log_file": str(Path(log_file).expanduser()),
+        })
+        return
+
+    lines = current.splitlines()
+    new_lines = []
+    skip = False
+    for line in lines:
+        if _CRONTAB_MARKER in line:
+            skip = True
+            continue
+        if skip and line.strip().startswith("#"):
+            skip = False
+            continue
+        if skip and ("portfolio sync" in line or "portfolio" in line):
+            continue
+        skip = False
+        new_lines.append(line)
+
+    new_lines.append(_CRONTAB_MARKER)
+    new_lines.append(crontab_line)
+
+    _write_crontab("\n".join(new_lines) + "\n")
+
+    success("cron", {
+        "action": "install",
+        "entry": crontab_line,
+        "schedule": f"{minute} {hour} * * {dow}",
+        "weekdays_only": weekdays_only,
+        "log_file": str(Path(log_file).expanduser()),
+    })
+
+
+@cron.command(name="uninstall", epilog="""
+Notes:
+  Removes crontab entries marked with the portfolio auto-refresh marker.
+  Does not touch pg_cron jobs — use `cron db-uninstall` for that.
+
+Examples:
+
+  portfolio cron uninstall
+  portfolio cron uninstall --dry-run
+""")
+@click.option("--dry-run", is_flag=True, help="Show what would be removed without writing")
+def cron_uninstall(dry_run):
+    """Remove portfolio entries from macOS crontab."""
+    current = _read_crontab()
+
+    lines = current.splitlines()
+    removed = []
+    new_lines = []
+    skip = False
+    for line in lines:
+        if _CRONTAB_MARKER in line:
+            removed.append(line)
+            skip = True
+            continue
+        if skip:
+            removed.append(line)
+            if not line.strip().startswith("#") and line.strip():
+                skip = False
+            continue
+        new_lines.append(line)
+
+    if dry_run:
+        success("cron", {
+            "action": "uninstall",
+            "dry_run": True,
+            "would_remove": removed,
+            "would_remove_count": len(removed),
+        })
+        return
+
+    _write_crontab("\n".join(new_lines) + "\n")
+
+    success("cron", {
+        "action": "uninstall",
+        "removed": removed,
+        "removed_count": len(removed),
+    })
+
+
+@cron.command(name="status", epilog="""
+Notes:
+  Shows macOS crontab portfolio entries AND pg_cron registered jobs.
+  Returns two sections: crontab and pg_cron.
+
+Examples:
+
+  portfolio cron status
+""")
+def cron_status():
+    """Show crontab entries and pg_cron jobs."""
+    crontab_entries = []
+    current = _read_crontab()
+    capture = False
+    for line in current.splitlines():
+        if _CRONTAB_MARKER in line:
+            capture = True
+            continue
+        if capture and line.strip():
+            crontab_entries.append(line.strip())
+
+    pg_cron_jobs = []
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+        try:
+            rows = service.db.con.execute("""
+                SELECT jobname, schedule, active, last_run, next_run
+                FROM cron.job
+                WHERE jobname LIKE 'portfolio_%'
+                ORDER BY jobname
+            """).fetchall()
+            for row in rows:
+                pg_cron_jobs.append({
+                    "job_name": row[0],
+                    "schedule": row[1],
+                    "active": bool(row[2]) if row[2] is not None else None,
+                    "last_run": str(row[3]) if row[3] else None,
+                    "next_run": str(row[4]) if row[4] else None,
+                })
+        except Exception:
+            pg_cron_jobs = None
+    except Exception:
+        pass
+    finally:
+        if service:
+            service.close()
+
+    success("cron", {
+        "crontab": {
+            "installed": len(crontab_entries) > 0,
+            "entries": crontab_entries,
+        },
+        "pg_cron": {
+            "available": pg_cron_jobs is not None,
+            "jobs": pg_cron_jobs if pg_cron_jobs is not None else [],
+        },
+    })
+
+
+@cron.command(name="db-install", epilog="""
+Notes:
+  Registers daily_maintenance_check() in pg_cron.
+  Requires the pg_cron extension to be installed in PostgreSQL.
+  On Supabase, enable pg_cron via Dashboard > Extensions (Pro tier and above).
+
+Examples:
+
+  portfolio cron db-install
+  portfolio cron db-install --time 06:00
+  portfolio cron db-install --job-name portfolio_daily_check --dry-run
+""")
+@click.option("--time", "run_time", default="06:00", show_default=True,
+              help="HH:MM UTC to run daily_maintenance_check()")
+@click.option("--job-name", "job_names", multiple=True,
+              help="pg_cron job name(s) to register (default: portfolio_daily_check)")
+@click.option("--dry-run", is_flag=True, help="Show SQL without executing")
+def cron_db_install(run_time, job_names, dry_run):
+    """Register daily_maintenance_check() in pg_cron."""
+    try:
+        parts = run_time.split(":")
+        minute = int(parts[1])
+        hour = int(parts[0])
+    except (ValueError, IndexError):
+        error("cron", "VALIDATION_ERROR", f"--time must be HH:MM, got: {run_time!r}")
+
+    names = list(job_names) if job_names else _DB_JOB_NAMES
+    schedule = f"{minute} {hour} * * *"
+    sql_statements = []
+    for name in names:
+        sql_statements.append(
+            f"SELECT cron.schedule('{name}', '{schedule}', $$SELECT daily_maintenance_check();$$)"
+        )
+
+    if dry_run:
+        success("cron", {
+            "action": "db-install",
+            "dry_run": True,
+            "would_execute": sql_statements,
+            "schedule": schedule,
+            "job_names": names,
+        })
+        return
+
     service = None
     try:
         service = PortfolioService()
@@ -1318,46 +1564,28 @@ def cron_install():
         return
 
     try:
-        pg_cron_available = service.db.con.execute(
-            "SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'"
-        ).fetchone()
-
-        if not pg_cron_available:
-            error(
-                "cron",
-                "PG_CRON_UNAVAILABLE",
-                "pg_cron extension is not installed.\n"
-                "Install it with: CREATE EXTENSION pg_cron; (requires superuser)\n"
-                "Or follow OS crontab instructions in docs/crontab-schedule.md",
-            )
-            return
-
         installed = []
         skipped = []
-        sql_dir = Path(__file__).parent / "sql" / "cron_jobs.sql"
-        cron_sql = sql_dir.read_text()
-
-        for line in cron_sql.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("SELECT cron.schedule("):
-                try:
-                    service.db.con.execute(stripped)
-                    service.db.con.commit()
-                    job_name = stripped.split("'")[1] if "'" in stripped else "unknown"
-                    installed.append(job_name)
-                except Exception as e:
-                    error_msg = str(e)
-                    if "already" in error_msg.lower() or "duplicate" in error_msg.lower():
-                        job_name = stripped.split("'")[1] if "'" in stripped else "unknown"
-                        skipped.append(job_name)
-                    else:
-                        raise
+        for name in names:
+            try:
+                service.db.con.execute(
+                    "SELECT cron.schedule(%s, %s, %s)",
+                    [name, schedule, "SELECT daily_maintenance_check();"],
+                )
+                service.db.con.commit()
+                installed.append(name)
+            except Exception as e:
+                error_msg = str(e)
+                if "already" in error_msg.lower() or "duplicate" in error_msg.lower():
+                    skipped.append(name)
+                else:
+                    raise
 
         success("cron", {
-            "action": "install",
+            "action": "db-install",
+            "schedule": schedule,
             "installed": installed,
             "skipped": skipped,
-            "total": len(installed) + len(skipped),
         })
     except Exception as e:
         error("cron", "PG_CRON_ERROR", str(e))
@@ -1366,18 +1594,32 @@ def cron_install():
             service.close()
 
 
-@cron.command(name="uninstall", epilog="""
+@cron.command(name="db-uninstall", epilog="""
 Notes:
-  Removes all portfolio jobs from pg_cron.
-  Does not delete the scheduled_job_log or scheduled_job_backup tables.
+  Removes portfolio jobs from pg_cron via cron.unschedule().
+  Does not delete scheduled_job_log or scheduled_job_backup tables.
   Safe to run if jobs are already removed.
 
 Examples:
 
-  portfolio cron uninstall
+  portfolio cron db-uninstall
+  portfolio cron db-uninstall --job-name portfolio_daily_check --dry-run
 """)
-def cron_uninstall():
-    """Remove all portfolio scheduled jobs from pg_cron."""
+@click.option("--job-name", "job_names", multiple=True,
+              help="pg_cron job name(s) to remove (default: all portfolio_* jobs)")
+@click.option("--dry-run", is_flag=True, help="Show what would be unregistered without executing")
+def cron_db_uninstall(job_names, dry_run):
+    """Remove portfolio jobs from pg_cron."""
+    names = list(job_names) if job_names else _DB_JOB_NAMES
+
+    if dry_run:
+        success("cron", {
+            "action": "db-uninstall",
+            "dry_run": True,
+            "would_remove": names,
+        })
+        return
+
     service = None
     try:
         service = PortfolioService()
@@ -1388,78 +1630,23 @@ def cron_uninstall():
     try:
         removed = []
         not_found = []
-        for job_name in _CRON_JOB_NAMES:
+        for name in names:
             try:
-                service.db.con.execute(
-                    "SELECT cron.unschedule(%s)",
-                    [job_name],
-                )
+                service.db.con.execute("SELECT cron.unschedule(%s)", [name])
                 service.db.con.commit()
-                removed.append(job_name)
+                removed.append(name)
             except Exception as e:
                 error_msg = str(e)
                 if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
-                    not_found.append(job_name)
+                    not_found.append(name)
                 else:
                     raise
 
         success("cron", {
-            "action": "uninstall",
+            "action": "db-uninstall",
             "removed": removed,
             "not_found": not_found,
-            "total_removed": len(removed),
         })
-    except Exception as e:
-        error("cron", "PG_CRON_ERROR", str(e))
-    finally:
-        if service:
-            service.close()
-
-
-@cron.command(name="status", epilog="""
-Notes:
-  Queries pg_cron's cron.job table to list active schedules.
-  Returns job name, schedule, last run, and next run times.
-
-Examples:
-
-  portfolio cron status
-""")
-def cron_status():
-    """List active pg_cron scheduled jobs."""
-    service = None
-    try:
-        service = PortfolioService(read_only=True)
-    except Exception as e:
-        error("cron", "DB_ERROR", f"Cannot connect to database: {e}")
-        return
-
-    try:
-        rows = service.db.con.execute("""
-            SELECT
-                jobname,
-                schedule,
-                last_run AS lastrun,
-                next_run AS nextrun,
-                active,
-                nodename
-            FROM cron.job
-            WHERE jobname LIKE 'portfolio_%'
-            ORDER BY jobname
-        """).fetchall()
-
-        jobs = []
-        for row in rows:
-            jobs.append({
-                "job_name": row[0],
-                "schedule": row[1],
-                "last_run": str(row[2]) if row[2] else None,
-                "next_run": str(row[3]) if row[3] else None,
-                "active": bool(row[4]),
-                "node": row[5],
-            })
-
-        success("cron", jobs, count=len(jobs))
     except Exception as e:
         error("cron", "PG_CRON_ERROR", str(e))
     finally:
@@ -1480,9 +1667,32 @@ Notes:
 Examples:
 
   portfolio sync
+  portfolio sync --dry-run
 """)
-def sync():
+@click.option("--dry-run", is_flag=True, help="Show what would be done without executing")
+def sync(dry_run):
     """Check and auto-repair fresh state: fetch stale prices, recalculate if needed."""
+    if dry_run:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            state = service.db.get_all_service_state()
+            prices_need_fetch = state.get("prices_need_fetch", {}).get("value") == "true"
+            needs_recalc_flag = state.get("needs_recalc", {}).get("value") == "true"
+            needs_recalc_sql = service.needs_recalc()
+            success("sync", {
+                "dry_run": True,
+                "would_repair_prices": prices_need_fetch,
+                "would_recalculate": needs_recalc_flag,
+                "needs_recalc_sql": needs_recalc_sql,
+            })
+        except Exception as e:
+            error("sync", "DB_ERROR", str(e))
+        finally:
+            if service:
+                service.close()
+        return
+
     service = None
     try:
         service = PortfolioService()
