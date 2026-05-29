@@ -638,6 +638,16 @@ class PortfolioService:
             mark_price_data_stale_fn=self._mark_price_data_stale,
         )
 
+    def needs_recalc(self) -> bool:
+        """Return True if last price refresh is newer than last recalculation."""
+        row = self.db.con.execute("SELECT needs_recalc()").fetchone()
+        return bool(row[0]) if row else True
+
+    def ensure_fresh(self):
+        """Recalculate if stale. No network calls — SQL-only recalculation."""
+        if self.needs_recalc():
+            self.recalculate()
+
     def recalculate(self, from_date=None, force=False):
         """
         Smart recalculation with optional date range and caching.

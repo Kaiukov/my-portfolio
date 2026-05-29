@@ -57,6 +57,20 @@ portfolio cron uninstall
 | `status` | Mon-Fri 09:00 | Morning briefing | `job_run_status_snapshot()` |
 | `performance` | 1st of month 06:00 | Monthly | `job_run_monthly_performance()` |
 
+### Lazy-recalc maintenance
+
+| Job | Schedule | When | What |
+|---|---|---|---|
+| `daily_maintenance_check()` | Daily 06:00 (via pg_cron) | Early morning | Sets `prices_need_fetch` and `needs_recalc` flags in `service_state` |
+| `portfolio sync` | Daily 06:15 (via crontab) | After maintenance check | Reads flags, fetches prices / recalculates if needed, clears flags |
+
+`portfolio sync` is also safe to run as a standalone command — it reads `service_state` flags to determine what (if anything) needs attention.
+
+**pg_cron registration:**
+```sql
+SELECT cron.schedule('portfolio_daily_check', '0 6 * * *', $$SELECT daily_maintenance_check();$$);
+```
+
 ---
 
 ## Audit Trail
@@ -106,6 +120,9 @@ UV=uv
 PORTFOLIO_DB_URL=postgresql://postgres:password@localhost:5432/postgres
 
 0 2  * * *    cd $PROJECT && $UV run portfolio backup >> $LOG/backup.log 2>&1
+
+# ─── DAILY: lazy-recalc sync (reads service_state flags, repairs/recalc if needed) (06:15)
+15 6 * * *    cd $PROJECT && $UV run portfolio sync >> $LOG/sync.log 2>&1
 30 2 * * 0    cd $PROJECT && $UV run portfolio repair_prices >> $LOG/repair-prices.log 2>&1
 0 3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force >> $LOG/recalc-full.log 2>&1
 30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
@@ -142,6 +159,41 @@ crontab /tmp/current_crontab && rm /tmp/current_crontab
 
 ```bash
 crontab -l | grep -v "portfolio" | crontab -
+echo "Portfolio crontab entries removed."
+```
+
+### Verify
+```bash
+crontab -l | grep portfolio
+```
+
+---
+
+## Log Files
+
+| File | Updated by |
+|---|---|
+| `logs/portfolio.log` | All mutations and key events (structured JSON lines) |
+| `logs/backup.log` | Nightly backup |
+| `logs/repair-prices.log` | Sunday price repair |
+| `logs/recalc.log` | Weekday + Saturday recalculate |
+| `logs/recalc-full.log` | Sunday forced recalculate |
+| `logs/verify-prices.log` | Daily price integrity check |
+| `logs/health.log` | Daily health check |
+| `logs/status.log` | Weekday morning status snapshot |
+| `logs/sync.log` | Daily lazy-recalc sync output |
+| `logs/performance-YYYY-MM.log` | Monthly performance report (one file per month) |
+
+### Tail logs
+```bash
+# Live tail of recalc
+tail -f $PROJECT/logs/recalc.log
+
+# Last price verification
+tail -20 $PROJECT/logs/verify-prices.log
+
+# This month's performance report
+cat $PROJECT/logs/performance-$(date +%Y-%m).log
 ```
 
 ---
