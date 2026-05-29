@@ -61,59 +61,55 @@ def postgres_test_schema():
         conn.commit()
 
     os.environ["PORTFOLIO_DB_URL"] = test_url
-    yield
+
+    # Persistent connection reused for every pre/post-test truncation.
+    # Avoids opening 2 TCP connections per test (454 connections for 227 tests).
+    cleanup_conn = psycopg.connect(base_url)
+    cleanup_conn.execute(f'SET search_path TO "{schema_name}"')
+    cleanup_conn.commit()
+
+    yield {"base_url": base_url, "schema_name": schema_name, "cleanup_conn": cleanup_conn}
+
+    cleanup_conn.close()
+    with psycopg.connect(base_url) as conn:
+        conn.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+        conn.commit()
 
 
 @pytest.fixture(autouse=True)
-def postgres_schema_isolation():
+def postgres_schema_isolation(postgres_test_schema):
     """Clear the test schema before and after each test."""
-    test_url = os.getenv("PORTFOLIO_DB_URL")
-    if not test_url:
+    if postgres_test_schema is None:
         yield
         return
 
-    # Extract schema name from query parameters
-    parsed = urlsplit(test_url)
-    query_items = parse_qsl(parsed.query, keep_blank_values=True)
-    schema_name = None
-    for key, value in query_items:
-        if key in {"schema", "search_path"}:
-            schema_name = value
-            break
+    conn: psycopg.Connection = postgres_test_schema["cleanup_conn"]
 
-    # Connect without the schema parameter (psycopg doesn't understand it)
-    base_url = _remove_query_param(test_url, "schema")
-    base_url = _remove_query_param(base_url, "search_path")
-
-    def _truncate_schema():
-        with psycopg.connect(base_url) as conn:
-            if schema_name:
-                conn.execute(f'SET search_path TO "{schema_name}"')
-
-            conn.execute(
-                """
-                DO $$
-                BEGIN
-                    IF EXISTS (
-                        SELECT 1
-                        FROM information_schema.tables
-                        WHERE table_schema = current_schema()
-                    ) THEN
-                        EXECUTE (
-                            SELECT 'TRUNCATE TABLE ' || string_agg(quote_ident(table_name), ', ')
-                                 || ' RESTART IDENTITY CASCADE'
-                            FROM information_schema.tables
-                            WHERE table_schema = current_schema()
-                        );
-                    END IF;
-                END $$;
-                """
-            )
-            conn.commit()
-
-    _truncate_schema()
-
+    # Lazily built once per session — table list is stable after first test.
+    _truncate_schema(conn)
     try:
         yield
     finally:
-        _truncate_schema()
+        _truncate_schema(conn)
+
+
+# Cached TRUNCATE statement: built after first schema population, reused for all
+# subsequent tests. Avoids an information_schema.tables query per test.
+_truncate_sql: str | None = None
+
+
+def _truncate_schema(conn: "psycopg.Connection") -> None:
+    global _truncate_sql
+
+    if _truncate_sql is None:
+        row = conn.execute(
+            "SELECT string_agg(quote_ident(table_name), ', ' ORDER BY table_name) "
+            "FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"
+        ).fetchone()
+        if row and row[0]:
+            _truncate_sql = f"TRUNCATE TABLE {row[0]} RESTART IDENTITY CASCADE"
+
+    if _truncate_sql:
+        conn.execute(_truncate_sql)
+        conn.commit()

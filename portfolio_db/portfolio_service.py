@@ -833,6 +833,51 @@ class PortfolioService:
     def sql_backup(self, dst) -> None:
         self.db.dump_sql_backup(dst)
 
+    # ── Service-state façade (CLI must not access service.db directly) ──────────
+
+    def get_all_service_state(self) -> dict:
+        return self.db.get_all_service_state()
+
+    def set_service_state(self, key: str, value: str) -> None:
+        self.db.set_service_state(key, value)
+
+    # ── pg_cron façade (DB-extension ops; CLI must not call db.con directly) ──
+
+    def get_pg_cron_jobs(self) -> list | None:
+        """Return portfolio_ pg_cron jobs, or None when cron extension unavailable."""
+        try:
+            rows = self.db.con.execute("""
+                SELECT jobname, schedule, active, last_run, next_run
+                FROM cron.job
+                WHERE jobname LIKE 'portfolio_%'
+                ORDER BY jobname
+            """).fetchall()
+            return [
+                {
+                    "job_name": row[0],
+                    "schedule": row[1],
+                    "active": bool(row[2]) if row[2] is not None else None,
+                    "last_run": str(row[3]) if row[3] else None,
+                    "next_run": str(row[4]) if row[4] else None,
+                }
+                for row in rows
+            ]
+        except Exception:
+            return None
+
+    def pg_cron_schedule(self, name: str, schedule: str, command: str) -> None:
+        """Schedule a pg_cron job. Raises on error (caller handles duplicate logic)."""
+        self.db.con.execute(
+            "SELECT cron.schedule(%s, %s, %s)",
+            [name, schedule, command],
+        )
+        self.db.con.commit()
+
+    def pg_cron_unschedule(self, name: str) -> None:
+        """Remove a pg_cron job. Raises on error (caller handles not-found logic)."""
+        self.db.con.execute("SELECT cron.unschedule(%s)", [name])
+        self.db.con.commit()
+
     def close(self):
         """Close database connection."""
         self.db.close()

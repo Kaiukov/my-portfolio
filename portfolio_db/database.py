@@ -9,6 +9,11 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
+# Schemas where SQL functions have already been installed in this process.
+# CREATE OR REPLACE FUNCTION is expensive (parses + compiles plpgsql); skip when
+# the functions are already present. TRUNCATE TABLE between tests keeps functions.
+_sql_functions_installed: set[str] = set()
+
 
 def is_postgres_url(target: str) -> bool:
     """Return True when target points to a PostgreSQL connection string."""
@@ -50,6 +55,7 @@ class _ConnectionAdapter:
         clean_target = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
         self._conn = psycopg.connect(clean_target)
         self._conn.autocommit = False
+        self._schema_name = schema_name or "public"
         if schema_name:
             # Use psycopg's Identifier for safe quoting
             from psycopg import sql as psycopg_sql
@@ -62,6 +68,11 @@ class _ConnectionAdapter:
         if params is None:
             return self._conn.execute(sql)
         return self._conn.execute(sql, params)
+
+    def executemany(self, sql: str, params_seq):
+        """Execute SQL once per row in params_seq using server-side batching."""
+        with self._conn.cursor() as cur:
+            cur.executemany(sql, params_seq)
 
     def commit(self):
         self._conn.commit()
@@ -267,14 +278,14 @@ class PortfolioDatabase:
             )
         """)
 
-        # Create SQL helper functions that mirror the Python domain helpers.
-        self._create_sql_helpers()
-
-        # Create the PostgreSQL recalculation procedure for daily returns.
-        self._create_daily_returns_refresh_function()
-
-        # Create lazy-recalc maintenance functions.
-        self._create_maintenance_functions()
+        # Create SQL functions once per schema per process — CREATE OR REPLACE is
+        # expensive (plpgsql compile). TRUNCATE between tests keeps functions alive.
+        schema = self.con._schema_name
+        if schema not in _sql_functions_installed:
+            self._create_sql_helpers()
+            self._create_daily_returns_refresh_function()
+            self._create_maintenance_functions()
+            _sql_functions_installed.add(schema)
 
         self.con.commit()
 
@@ -884,6 +895,28 @@ class PortfolioDatabase:
             [ticker, date_obj],
         ).fetchone()
         return float(result[0]) if result else None
+
+    def bulk_insert_prices(self, rows: list[tuple]) -> int:
+        """Upsert (ticker, date, price) tuples in a single transaction.
+
+        Args:
+            rows: list of (ticker, date, price) tuples.
+        Returns:
+            Number of rows upserted.
+        """
+        if not rows:
+            return 0
+        self.con.executemany(
+            """
+            INSERT INTO prices (ticker, date, price)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (date, ticker) DO UPDATE SET
+                price = EXCLUDED.price
+            """,
+            rows,
+        )
+        self.con.commit()
+        return len(rows)
 
     def insert_price(self, ticker: str, date_obj, price: float):
         """Insert price for ticker on specific date."""

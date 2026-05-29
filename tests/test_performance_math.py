@@ -303,28 +303,30 @@ class TestFXDayGain:
 
     def test_fx_day_gain_pct_nonzero_when_rate_changes(self, tmp_path, monkeypatch):
         """EURUSD=X position must show correct day_gain_pct when rate moves 1.08→1.10."""
+        day1 = date(2026, 1, 2)
+        day2 = date(2026, 1, 3)
+
         def fx_fetch(symbols, start_date, end_date):
             index = pd.date_range(start=start_date, end=end_date, freq="D")
             result = {}
             for sym in symbols:
                 if sym == "EURUSD=X":
-                    prices = [1.08] * max(1, len(index) - 1) + [1.10]
-                    prices = prices[-len(index):]
+                    values = [1.08 if pd.Timestamp(d).date() <= day1 else 1.10 for d in index]
                 else:
-                    prices = [1.0] * len(index)
-                result[sym] = pd.Series(prices, index=index)
+                    values = [1.0] * len(index)
+                result[sym] = pd.Series(values, index=index)
             return result
 
         monkeypatch.setattr(PriceService, "fetch_all_prices", staticmethod(fx_fetch))
 
         svc = PortfolioService()
-        svc.db.add_transaction(date(2026, 1, 2), "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
-        svc.repair_prices()
+        svc.db.add_transaction(day1, "EURUSD=X", "DEPOSIT", 1_000, asset_type="cash_fx", currency="EUR")
+        svc.repair_prices(start_date=day1, end_date=day2)
         svc.recalculate(force=True)
         svc.close()
 
         svc = PortfolioService(read_only=True)
-        positions = svc.get_position_summary()
+        positions = svc.get_position_summary(as_of_date=day2)
         svc.close()
 
         fx_pos = next((p for p in positions if p["symbol"] == "EURUSD=X"), None)

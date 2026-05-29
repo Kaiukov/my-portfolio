@@ -154,36 +154,29 @@ class PriceCacheService:
         return coverage
 
     def _persist_prices_to_db(self, prices_dict: dict):
-        """Store fetched prices to database for caching."""
+        """Store fetched prices to database for caching (single bulk transaction)."""
         import pandas as pd
         try:
+            rows: list[tuple] = []
             for asset, price_data in prices_dict.items():
                 if price_data is None or len(price_data) == 0:
                     continue
 
-                # Handle both Series and DataFrame
                 if isinstance(price_data, pd.DataFrame):
-                    # If DataFrame, extract the first column (usually 'Close')
-                    if len(price_data.columns) > 0:
-                        price_series = price_data.iloc[:, 0]
-                    else:
+                    if len(price_data.columns) == 0:
                         continue
+                    price_series = price_data.iloc[:, 0]
                 else:
                     price_series = price_data
 
-                # Insert prices for this asset
                 for date_idx, price in price_series.items():
-                    date_obj = date_idx.date() if hasattr(date_idx, 'date') else date_idx
-                    # Skip NaN values
-                    try:
-                        if price is None or (isinstance(price, float) and price != price):  # NaN check
-                            continue
-                        self.db.insert_price(asset, date_obj, float(price))
-                    except Exception:
-                        # Individual price insert failures are non-critical
+                    if price is None or (isinstance(price, float) and price != price):
                         continue
+                    date_obj = date_idx.date() if hasattr(date_idx, 'date') else date_idx
+                    rows.append((asset, date_obj, float(price)))
+
+            self.db.bulk_insert_prices(rows)
         except Exception:
-            # Price persistence is non-critical - calculations use fresh prices
             pass
 
     def analyze_price_coverage(self, transactions, required_end, is_cash_like_fn, normalize_cash_asset_fn, base_currency, validate_action_fn, trade_actions) -> dict:

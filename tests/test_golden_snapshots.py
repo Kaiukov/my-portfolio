@@ -8,6 +8,14 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
+
+def _parse_output(output: str) -> dict:
+    """Parse CLI JSON output, skipping any leading non-JSON library warnings."""
+    start = output.find("{")
+    if start == -1:
+        raise json.JSONDecodeError("no JSON object found", output, 0)
+    return json.loads(output[start:])
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 repo_str = str(REPO_ROOT)
 if repo_str not in sys.path:
@@ -97,11 +105,11 @@ def test_reporting_commands_share_consistent_snapshot(golden_db, runner):
     assert cash_result.exit_code == 0, cash_result.output
     assert allocation_result.exit_code == 0, allocation_result.output
 
-    summary_body = json.loads(summary_result.output)
-    performance_body = json.loads(performance_result.output)
-    report_body = json.loads(report_result.output)
-    cash_body = json.loads(cash_result.output)
-    allocation_body = json.loads(allocation_result.output)
+    summary_body = _parse_output(summary_result.output)
+    performance_body = _parse_output(performance_result.output)
+    report_body = _parse_output(report_result.output)
+    cash_body = _parse_output(cash_result.output)
+    allocation_body = _parse_output(allocation_result.output)
 
     summary_as_of = summary_body["meta"]["as_of_date"]
     performance_as_of = performance_body["data"]["period"]["end_date"]

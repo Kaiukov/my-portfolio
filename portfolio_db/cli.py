@@ -1196,8 +1196,9 @@ Examples:
 
   portfolio backup --out /backups/portfolio-2026-01-01.sql
 """)
+@click.argument("legacy_path", required=False, default=None, metavar="[LEGACY_PATH]")
 @click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.sql)")
-def backup(out):
+def backup(legacy_path, out):
     """Create a timestamped backup of the PostgreSQL database."""
     try:
         target = resolve_db_target()
@@ -1483,23 +1484,7 @@ def cron_status():
     service = None
     try:
         service = PortfolioService(read_only=True)
-        try:
-            rows = service.db.con.execute("""
-                SELECT jobname, schedule, active, last_run, next_run
-                FROM cron.job
-                WHERE jobname LIKE 'portfolio_%'
-                ORDER BY jobname
-            """).fetchall()
-            for row in rows:
-                pg_cron_jobs.append({
-                    "job_name": row[0],
-                    "schedule": row[1],
-                    "active": bool(row[2]) if row[2] is not None else None,
-                    "last_run": str(row[3]) if row[3] else None,
-                    "next_run": str(row[4]) if row[4] else None,
-                })
-        except Exception:
-            pg_cron_jobs = None
+        pg_cron_jobs = service.get_pg_cron_jobs()
     except Exception:
         pass
     finally:
@@ -1574,11 +1559,7 @@ def cron_db_install(run_time, job_names, dry_run):
         skipped = []
         for name in names:
             try:
-                service.db.con.execute(
-                    "SELECT cron.schedule(%s, %s, %s)",
-                    [name, schedule, "SELECT daily_maintenance_check();"],
-                )
-                service.db.con.commit()
+                service.pg_cron_schedule(name, schedule, "SELECT daily_maintenance_check();")
                 installed.append(name)
             except Exception as e:
                 error_msg = str(e)
@@ -1638,8 +1619,7 @@ def cron_db_uninstall(job_names, dry_run):
         not_found = []
         for name in names:
             try:
-                service.db.con.execute("SELECT cron.unschedule(%s)", [name])
-                service.db.con.commit()
+                service.pg_cron_unschedule(name)
                 removed.append(name)
             except Exception as e:
                 error_msg = str(e)
@@ -1682,7 +1662,7 @@ def sync(dry_run):
         service = None
         try:
             service = PortfolioService(read_only=True)
-            state = service.db.get_all_service_state()
+            state = service.get_all_service_state()
             prices_need_fetch = state.get("prices_need_fetch", {}).get("value") == "true"
             needs_recalc_flag = state.get("needs_recalc", {}).get("value") == "true"
             needs_recalc_sql = service.needs_recalc()
@@ -1702,18 +1682,18 @@ def sync(dry_run):
     service = None
     try:
         service = PortfolioService()
-        state = service.db.get_all_service_state()
+        state = service.get_all_service_state()
         prices_need_fetch = state.get("prices_need_fetch", {}).get("value") == "true"
         needs_recalc_flag = state.get("needs_recalc", {}).get("value") == "true"
 
         actions = []
         if prices_need_fetch:
             service.repair_prices()
-            service.db.set_service_state("prices_need_fetch", "false")
+            service.set_service_state("prices_need_fetch", "false")
             actions.append("repair_prices")
         if needs_recalc_flag:
             service.recalculate()
-            service.db.set_service_state("needs_recalc", "false")
+            service.set_service_state("needs_recalc", "false")
             actions.append("recalculate")
 
         success("sync", {"actions": actions, "synced": len(actions) > 0})
