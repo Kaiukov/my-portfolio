@@ -75,6 +75,11 @@ Write / maintenance commands:
   backup          Copy the PostgreSQL database to a backup.
   init            Initialize the PostgreSQL schema (idempotent).
 
+Scheduling commands:
+  cron install    Register all portfolio jobs with pg_cron.
+  cron uninstall  Remove all portfolio jobs from pg_cron.
+  cron status     List active pg_cron scheduled jobs.
+
 Use `portfolio COMMAND --help` for command-specific details."""
 
 
@@ -883,7 +888,7 @@ Examples:
 @click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
 @click.option("--benchmark", default=None, help=BENCHMARK_HELP)
 @click.option("--from-date", default=None, help="Filter returns from this date (YYYY-MM-DD)")
-@click.option("--period", default=None, type=click.Choice(["1y", "6m", "3m", "ytd"]), help="Filter to a period: 1y, 6m, 3m, ytd")
+@click.option("--period", default=None, type=click.Choice(["1y", "6m", "3m", "1m", "ytd"]), help="Filter to a period: 1y, 6m, 3m, 1m, ytd")
 def performance(as_of_date, benchmark, from_date, period):
     """Show performance, risk, and benchmark metrics."""
     as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
@@ -906,6 +911,16 @@ def performance(as_of_date, benchmark, from_date, period):
                 resolved_from = date(y, m, 1)
         elif period == "3m":
             m = today.month - 3
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+        elif period == "1m":
+            m = today.month - 1
             y = today.year
             while m < 1:
                 m += 12
@@ -1249,6 +1264,198 @@ def health():
         })
     except Exception as e:
         error("health", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── cron ─────────────────────────────────────────────────────────────────────
+
+_CRON_JOB_NAMES = [
+    "portfolio_backup",
+    "portfolio_repair_prices",
+    "portfolio_recalculate_full",
+    "portfolio_recalculate_weekday",
+    "portfolio_recalculate_saturday",
+    "portfolio_verify_prices",
+    "portfolio_health",
+    "portfolio_status",
+    "portfolio_performance",
+]
+
+
+@cli.group()
+def cron():
+    """Manage pg_cron scheduled jobs for automated portfolio maintenance."""
+    pass
+
+
+@cron.command(name="install", epilog="""
+Notes:
+  Requires the pg_cron PostgreSQL extension to be installed.
+  On Supabase, enable pg_cron via Dashboard > Extensions (Pro tier and above).
+  On local PostgreSQL, run: CREATE EXTENSION pg_cron;
+  If pg_cron is unavailable, fall back to OS crontab instructions.
+  This command is idempotent — safe to run multiple times.
+
+Examples:
+
+  portfolio cron install
+""")
+def cron_install():
+    """Register all portfolio scheduled jobs with pg_cron."""
+    service = None
+    try:
+        service = PortfolioService()
+    except Exception as e:
+        error("cron", "DB_ERROR", f"Cannot connect to database: {e}")
+        return
+
+    try:
+        pg_cron_available = service.db.con.execute(
+            "SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'"
+        ).fetchone()
+
+        if not pg_cron_available:
+            error(
+                "cron",
+                "PG_CRON_UNAVAILABLE",
+                "pg_cron extension is not installed.\n"
+                "Install it with: CREATE EXTENSION pg_cron; (requires superuser)\n"
+                "Or follow OS crontab instructions in docs/crontab-schedule.md",
+            )
+            return
+
+        installed = []
+        skipped = []
+        sql_dir = Path(__file__).parent / "sql" / "cron_jobs.sql"
+        cron_sql = sql_dir.read_text()
+
+        for line in cron_sql.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("SELECT cron.schedule("):
+                try:
+                    service.db.con.execute(stripped)
+                    service.db.con.commit()
+                    job_name = stripped.split("'")[1] if "'" in stripped else "unknown"
+                    installed.append(job_name)
+                except Exception as e:
+                    error_msg = str(e)
+                    if "already" in error_msg.lower() or "duplicate" in error_msg.lower():
+                        job_name = stripped.split("'")[1] if "'" in stripped else "unknown"
+                        skipped.append(job_name)
+                    else:
+                        raise
+
+        success("cron", {
+            "action": "install",
+            "installed": installed,
+            "skipped": skipped,
+            "total": len(installed) + len(skipped),
+        })
+    except Exception as e:
+        error("cron", "PG_CRON_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+@cron.command(name="uninstall", epilog="""
+Notes:
+  Removes all portfolio jobs from pg_cron.
+  Does not delete the scheduled_job_log or scheduled_job_backup tables.
+  Safe to run if jobs are already removed.
+
+Examples:
+
+  portfolio cron uninstall
+""")
+def cron_uninstall():
+    """Remove all portfolio scheduled jobs from pg_cron."""
+    service = None
+    try:
+        service = PortfolioService()
+    except Exception as e:
+        error("cron", "DB_ERROR", f"Cannot connect to database: {e}")
+        return
+
+    try:
+        removed = []
+        not_found = []
+        for job_name in _CRON_JOB_NAMES:
+            try:
+                service.db.con.execute(
+                    "SELECT cron.unschedule(%s)",
+                    [job_name],
+                )
+                service.db.con.commit()
+                removed.append(job_name)
+            except Exception as e:
+                error_msg = str(e)
+                if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+                    not_found.append(job_name)
+                else:
+                    raise
+
+        success("cron", {
+            "action": "uninstall",
+            "removed": removed,
+            "not_found": not_found,
+            "total_removed": len(removed),
+        })
+    except Exception as e:
+        error("cron", "PG_CRON_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+@cron.command(name="status", epilog="""
+Notes:
+  Queries pg_cron's cron.job table to list active schedules.
+  Returns job name, schedule, last run, and next run times.
+
+Examples:
+
+  portfolio cron status
+""")
+def cron_status():
+    """List active pg_cron scheduled jobs."""
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+    except Exception as e:
+        error("cron", "DB_ERROR", f"Cannot connect to database: {e}")
+        return
+
+    try:
+        rows = service.db.con.execute("""
+            SELECT
+                jobname,
+                schedule,
+                last_run AS lastrun,
+                next_run AS nextrun,
+                active,
+                nodename
+            FROM cron.job
+            WHERE jobname LIKE 'portfolio_%'
+            ORDER BY jobname
+        """).fetchall()
+
+        jobs = []
+        for row in rows:
+            jobs.append({
+                "job_name": row[0],
+                "schedule": row[1],
+                "last_run": str(row[2]) if row[2] else None,
+                "next_run": str(row[3]) if row[3] else None,
+                "active": bool(row[4]),
+                "node": row[5],
+            })
+
+        success("cron", jobs, count=len(jobs))
+    except Exception as e:
+        error("cron", "PG_CRON_ERROR", str(e))
     finally:
         if service:
             service.close()
