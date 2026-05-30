@@ -604,7 +604,8 @@ $$;
 
 -- Performance statistics: TWR, Sharpe, Sortino, Treynor, max drawdown, benchmark-relative metrics.
 -- ALL financial math is owned by PostgreSQL. TypeScript must not duplicate any calculation.
--- Uses investment_return for risk metrics (excludes cash flows).
+-- avg_daily_return uses portfolio_daily_return (INCLUDES cash flows).
+-- avg_investment_return and all other risk metrics use investment_return (EXCLUDES cash flows).
 -- Benchmark-relative metrics are joined on date, not aligned by array position.
 CREATE OR REPLACE FUNCTION portfolio_performance_sql(
     p_as_of_date DATE DEFAULT CURRENT_DATE,
@@ -658,7 +659,7 @@ AS $$
             p_from_date AS from_date
     ),
     dr AS (
-        SELECT d.date, d.portfolio_value, d.investment_return
+        SELECT d.date, d.portfolio_value, d.investment_return, d.portfolio_daily_return
         FROM daily_returns d
         CROSS JOIN params p
         WHERE d.portfolio_value > 0
@@ -673,7 +674,8 @@ AS $$
             MAX(date)::TEXT                                              AS end_date,
             (ARRAY_AGG(portfolio_value ORDER BY date))[1]                AS start_value,
             (ARRAY_AGG(portfolio_value ORDER BY date DESC))[1]           AS end_value,
-            AVG(investment_return)                                       AS avg_daily_return,
+            AVG(portfolio_daily_return)                                    AS avg_daily_return,
+            AVG(investment_return)                                       AS avg_investment_return_val,
             STDDEV_POP(investment_return)                                AS std_dev,
             PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY investment_return) AS var_95,
             PERCENTILE_CONT(0.01) WITHIN GROUP (ORDER BY investment_return) AS var_99,
@@ -868,7 +870,7 @@ AS $$
         d.end_value                                                                             AS end_value,
         COALESCE(d.end_value - d.start_value, 0.0)                                              AS total_gain,
         COALESCE(d.avg_daily_return_val, 0.0)                                                   AS avg_daily_return,
-        COALESCE(d.avg_daily_return_val, 0.0)                                                   AS avg_investment_return,
+        COALESCE(d.avg_investment_return_val, 0.0)                                              AS avg_investment_return,
         COALESCE(d.std_dev_val, 0.0)                                                            AS std_dev,
         COALESCE(d.std_dev_val, 0.0) * SQRT(252.0)                                              AS hist_volatility,
         COALESCE(d.var_95_val, 0.0)                                                             AS var_95,
@@ -900,7 +902,7 @@ AS $$
         END                                                                                     AS sharpe_ratio,
         CASE
             WHEN COALESCE(d.downside_dev_daily, 0.0) > 0 THEN
-                ((COALESCE(d.avg_daily_return_val, 0.0) - COALESCE(d.target_daily, 0.0))
+                ((COALESCE(d.avg_investment_return_val, 0.0) - COALESCE(d.target_daily, 0.0))
                   / d.downside_dev_daily) * SQRT(252.0)
             ELSE 0.0
         END                                                                                     AS sortino_ratio,
