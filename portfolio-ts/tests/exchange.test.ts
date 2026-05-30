@@ -3,9 +3,10 @@ import { ValidationError } from "../src/validators.js";
 
 const mockQuerySingle = mock();
 const mockWithTransaction = mock();
+const mockQueryInternal = mock();
 
 mock.module("../src/db.js", () => ({
-  query: mock(),
+  query: mockQueryInternal,
   querySingle: mockQuerySingle,
   runTx: mockWithTransaction,
   connect: () => {},
