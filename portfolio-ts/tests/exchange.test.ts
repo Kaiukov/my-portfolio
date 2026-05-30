@@ -29,17 +29,30 @@ describe("exchangeCurrency", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  test("throws on invalid date format", async () => {
+  test("accepts ISO YYYY-MM-DD date format", async () => {
+    mockQuerySingle
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+    mockWithTransaction.mockImplementation(async (fn: (tx: any) => Promise<any>) => {
+      const fakeTx = {
+        unsafe: mock(async (sql: string) => {
+          if (sql.includes("get_asset_type_sql")) return [{ asset_type: "cash_base" }, { asset_type: "cash_fx" }];
+          if (sql.includes("INSERT INTO transactions")) return [{ id: 1 }, { id: 2 }];
+          if (sql.includes("refresh_daily_returns_sql")) return [];
+          return [];
+        }),
+      };
+      return fn(fakeTx);
+    });
     const { exchangeCurrency } = await import("../src/commands/exchange.js");
-    await expect(
-      exchangeCurrency({
-        dateStr: "2026-01-01",
-        fromAsset: "USD",
-        toAsset: "EURUSD=X",
-        quantity: 1000,
-        rate: 0.92,
-      }),
-    ).rejects.toBeInstanceOf(ValidationError);
+    const result = await exchangeCurrency({
+      dateStr: "2026-01-01",
+      fromAsset: "USD",
+      toAsset: "EURUSD=X",
+      quantity: 1000,
+      rate: 0.92,
+    });
+    expect(result.date).toBe("2026-01-01");
   });
 
   test("throws when FROM is not cash-like", async () => {

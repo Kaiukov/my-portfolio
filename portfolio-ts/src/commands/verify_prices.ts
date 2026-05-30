@@ -6,10 +6,11 @@ export interface VerifyPricesResult {
   date_range: { start: string | null; end: string | null };
   required_tickers: string[];
   coverage_issues: Array<{ ticker: string; issues: string[] }>;
+  stale_tickers: Array<{ ticker: string; last_price_date: string; age_days: number }>;
   needs_recalc: boolean;
 }
 
-export async function verifyPrices(): Promise<VerifyPricesResult> {
+export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesResult> {
   const statsRow = await querySingle<{
     total_rows: number;
     min_date: string | null;
@@ -48,18 +49,40 @@ export async function verifyPrices(): Promise<VerifyPricesResult> {
   // Check which required checkpoint dates are missing from prices
   const coverageIssues: Array<{ ticker: string; issues: string[] }> = [];
   for (const [ticker, dates] of checkpointMap) {
+    if (dates.length === 0) continue;
+    const dateList = dates.map((d) => `('${d}'::date)`).join(", ");
     const missingRows = await query<{ d: string }>(
-      `SELECT d::text FROM unnest($1::date[]) AS d
+      `SELECT d::text FROM (VALUES ${dateList}) AS cp(d)
        WHERE d NOT IN (
-         SELECT date::text FROM prices WHERE ticker = $2
+         SELECT date FROM prices WHERE ticker = $1
        )`,
-      [dates, ticker],
+      [ticker],
     );
     if (missingRows.length > 0) {
       coverageIssues.push({
         ticker,
         issues: [`missing_dates: ${missingRows.map((r) => r.d).join(", ")}`],
       });
+    }
+  }
+
+  // Staleness pass: for each ticker with prices, check if the latest price is too old
+  const staleTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
+  if (maxAgeDays !== undefined && maxAgeDays > 0) {
+    const allTickers = new Set([...requiredTickers, ...tickers.map((r) => r.ticker)]);
+    for (const ticker of allTickers) {
+      const latestRow = await querySingle<{ last_date: string | null }>(
+        `SELECT MAX(date)::text AS last_date FROM prices WHERE ticker = $1`,
+        [ticker],
+      );
+      if (latestRow?.last_date) {
+        const ageDays = Math.floor(
+          (new Date(today).getTime() - new Date(latestRow.last_date).getTime()) / 86400000,
+        );
+        if (ageDays > maxAgeDays) {
+          staleTickers.push({ ticker, last_price_date: latestRow.last_date, age_days: ageDays });
+        }
+      }
     }
   }
 
@@ -76,6 +99,7 @@ export async function verifyPrices(): Promise<VerifyPricesResult> {
     },
     required_tickers: requiredTickers,
     coverage_issues: coverageIssues,
+    stale_tickers: staleTickers,
     needs_recalc: needsRecalcRow?.needs_recalc ?? false,
   };
 }

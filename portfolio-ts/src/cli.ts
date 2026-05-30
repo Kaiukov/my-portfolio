@@ -15,6 +15,7 @@ import { getCash } from "./commands/cash.js";
 import { getAllocation } from "./commands/allocation.js";
 import { getSummary } from "./commands/summary.js";
 import { getConcentration } from "./commands/concentration.js";
+import { getPerformance } from "./commands/performance.js";
 import { getHealth } from "./commands/health.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
@@ -41,6 +42,7 @@ Commands:
   allocation      Portfolio allocation breakdown by asset
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
+  performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   sync            repair_prices + recalculate (daily maintenance)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
@@ -48,8 +50,7 @@ Commands:
   backup          Create a pg_dump backup
   --help          Show this help message
 
-Read command dates: YYYY-MM-DD
-Write command dates: DD-MM-YYYY
+Dates: ISO YYYY-MM-DD (legacy DD-MM-YYYY also accepted on write commands)
 
 Environment:
   PORTFOLIO_DB_URL  PostgreSQL connection string
@@ -276,7 +277,8 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "verify_prices": {
-      const result = await verifyPrices();
+      const maxAgeDays = int(flags, "max-age-days");
+      const result = await verifyPrices(maxAgeDays);
       console.log(JSON.stringify(success("verify_prices", result), null, 2));
       return;
     }
@@ -285,17 +287,19 @@ export async function dispatch(argv: string[]): Promise<void> {
       const tickerArg = str(flags, "ticker");
       const tickers = tickerArg ? tickerArg.split(",").map((t) => t.trim()) : undefined;
       const isDryRun = bool(flags, "dry-run");
+      const maxAgeDays = int(flags, "max-age-days");
 
       if (isDryRun) {
         const result = await repairPricesDryRun({
           tickers,
           startDate: str(flags, "start-date"),
           endDate: str(flags, "end-date"),
+          maxAgeDays,
         });
         console.log(JSON.stringify(success("repair_prices", result), null, 2));
       } else {
         const result = await repairPrices(
-          { tickers, startDate: str(flags, "start-date"), endDate: str(flags, "end-date") },
+          { tickers, startDate: str(flags, "start-date"), endDate: str(flags, "end-date"), maxAgeDays },
           fetchPrices,
         );
         console.log(JSON.stringify(success("repair_prices", result), null, 2));
@@ -305,8 +309,9 @@ export async function dispatch(argv: string[]): Promise<void> {
 
     case "sync": {
       const isDryRun = bool(flags, "dry-run");
+      const maxAgeDays = int(flags, "max-age-days");
       if (isDryRun) {
-        const repairResult = await repairPricesDryRun({});
+        const repairResult = await repairPricesDryRun({ maxAgeDays });
         const recalcResult = await recalculateDryRun({ force: false });
         console.log(
           JSON.stringify(
@@ -316,7 +321,7 @@ export async function dispatch(argv: string[]): Promise<void> {
           ),
         );
       } else {
-        const repairResult = await repairPrices({}, fetchPrices);
+        const repairResult = await repairPrices({ maxAgeDays }, fetchPrices);
         const recalcResult = await recalculate({ force: true });
         console.log(
           JSON.stringify(
@@ -355,7 +360,8 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "health": {
-      const result = await getHealth();
+      const maxAgeDays = int(flags, "max-age-days");
+      const result = await getHealth(maxAgeDays);
       console.log(JSON.stringify(success("health", result), null, 2));
       return;
     }
@@ -404,6 +410,16 @@ export async function dispatch(argv: string[]): Promise<void> {
       const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
       const result = await getConcentration(asOfDate, topN);
       console.log(JSON.stringify(success("concentration", result), null, 2));
+      return;
+    }
+
+    case "performance": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const benchmark = str(flags, "benchmark");
+      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      const period = str(flags, "period");
+      const result = await getPerformance({ asOfDate, benchmark, fromDate, period });
+      console.log(JSON.stringify(success("performance", result), null, 2));
       return;
     }
 

@@ -1,5 +1,5 @@
 import { query, querySingle } from "../db.js";
-import { parseWriteDate } from "../validators.js";
+import { parseDate } from "../validators.js";
 
 export interface RecalculateResult {
   rows_affected: number;
@@ -19,7 +19,7 @@ export async function recalculateDryRun(params: {
   force: boolean;
 }): Promise<RecalculateDryRunResult> {
   const fromDate = params.fromDateStr
-    ? parseWriteDate(params.fromDateStr, "--from-date")
+    ? parseDate(params.fromDateStr, "--from-date")
     : "beginning";
 
   const row = await querySingle<{ needs_recalc: boolean }>("SELECT needs_recalc() AS needs_recalc");
@@ -37,7 +37,7 @@ export async function recalculate(params: {
   force: boolean;
 }): Promise<RecalculateResult> {
   const fromDate = params.fromDateStr
-    ? parseWriteDate(params.fromDateStr, "--from-date")
+    ? parseDate(params.fromDateStr, "--from-date")
     : null;
 
   if (!params.force) {

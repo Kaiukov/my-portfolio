@@ -2,7 +2,7 @@ import { querySingle } from "../db.js";
 import { runTx } from "../tx.js";
 import {
   ValidationError,
-  parseWriteDate,
+  parseDate,
   validatePositiveFloat,
   validateNonNegativeFloat,
 } from "../validators.js";
@@ -30,7 +30,7 @@ export async function addTransaction(params: {
   exchange: string;
   account?: string;
 }): Promise<AddResult> {
-  const date = parseWriteDate(params.dateStr, "--date");
+  const date = parseDate(params.dateStr, "--date");
   const action = params.action.toUpperCase();
 
   if (!USER_ACTIONS.has(action)) {

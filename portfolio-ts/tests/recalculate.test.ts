@@ -26,7 +26,7 @@ describe("recalculateDryRun", () => {
     expect(result.needs_recalc).toBe(true);
   });
 
-  test("parses DD-MM-YYYY from-date", async () => {
+  test("parses DD-MM-YYYY from-date (legacy)", async () => {
     mockQuerySingle.mockResolvedValue({ needs_recalc: false });
     const { recalculateDryRun } = await import("../src/commands/recalculate.js");
     const result = await recalculateDryRun({ fromDateStr: "15-01-2026", force: true });
@@ -34,10 +34,18 @@ describe("recalculateDryRun", () => {
     expect(result.forced).toBe(true);
   });
 
+  test("accepts ISO YYYY-MM-DD from-date", async () => {
+    mockQuerySingle.mockResolvedValue({ needs_recalc: false });
+    const { recalculateDryRun } = await import("../src/commands/recalculate.js");
+    const result = await recalculateDryRun({ fromDateStr: "2026-01-15", force: true });
+    expect(result.from_date).toBe("2026-01-15");
+    expect(result.forced).toBe(true);
+  });
+
   test("throws on invalid date format", async () => {
     const { recalculateDryRun } = await import("../src/commands/recalculate.js");
     await expect(
-      recalculateDryRun({ fromDateStr: "2026-01-15", force: false }),
+      recalculateDryRun({ fromDateStr: "15/01/2026", force: false }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 });

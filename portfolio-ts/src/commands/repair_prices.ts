@@ -6,11 +6,13 @@ export interface RepairPricesResult {
   rows_loaded: number;
   rows_per_ticker: Record<string, number>;
   range: { start: string; end: string };
+  skipped_fresh: string[];
 }
 
 export interface RepairPricesDryRunResult {
   dry_run: true;
   would_repair: string[];
+  would_skip_fresh: string[];
   range: { start: string; end: string };
 }
 
@@ -25,6 +27,18 @@ async function getRequiredTickers(): Promise<string[]> {
     "SELECT ticker FROM discover_required_tickers_sql() WHERE ticker NOT LIKE 'CASH %' ORDER BY ticker",
   );
   return rows.map((r) => r.ticker);
+}
+
+async function getFreshTickers(maxAgeDays: number): Promise<Set<string>> {
+  const today = new Date().toISOString().split("T")[0];
+  const rows = await query<{ ticker: string }>(
+    `SELECT ticker FROM prices
+     WHERE date >= ($1::date - $2)
+     GROUP BY ticker
+     ORDER BY ticker`,
+    [today, maxAgeDays],
+  );
+  return new Set(rows.map((r) => r.ticker));
 }
 
 async function getDateRange(): Promise<{ start: string | null; end: string | null }> {
@@ -53,16 +67,25 @@ export async function repairPricesDryRun(params: {
   tickers?: string[];
   startDate?: string;
   endDate?: string;
+  maxAgeDays?: number;
 }): Promise<RepairPricesDryRunResult> {
   const today = new Date().toISOString().split("T")[0];
   const txRange = await getDateRange();
   const start = params.startDate ?? txRange.start ?? today;
   const end = params.endDate ?? today;
-  const targetTickers = params.tickers?.length ? params.tickers : await getRequiredTickers();
+  let targetTickers = params.tickers?.length ? params.tickers : await getRequiredTickers();
+
+  let skippedFresh: string[] = [];
+  if (params.maxAgeDays !== undefined && params.maxAgeDays > 0) {
+    const freshSet = await getFreshTickers(params.maxAgeDays);
+    skippedFresh = targetTickers.filter((t) => freshSet.has(t));
+    targetTickers = targetTickers.filter((t) => !freshSet.has(t));
+  }
 
   return {
     dry_run: true,
     would_repair: targetTickers,
+    would_skip_fresh: skippedFresh,
     range: { start, end },
   };
 }
@@ -96,14 +119,24 @@ async function markRefreshSuccess(rowsAffected: number): Promise<void> {
 }
 
 export async function repairPrices(
-  params: { tickers?: string[]; startDate?: string; endDate?: string },
+  params: { tickers?: string[]; startDate?: string; endDate?: string; maxAgeDays?: number },
   fetchFn: FetchFn,
 ): Promise<RepairPricesResult> {
   const today = new Date().toISOString().split("T")[0];
   const txRange = await getDateRange();
   const start = params.startDate ?? txRange.start ?? today;
   const end = params.endDate ?? today;
-  const targetTickers = params.tickers?.length ? params.tickers : await getRequiredTickers();
+  let targetTickers = params.tickers?.length ? params.tickers : await getRequiredTickers();
+
+  let skippedFresh: string[] = [];
+  if (params.maxAgeDays !== undefined && params.maxAgeDays > 0) {
+    const freshSet = await getFreshTickers(params.maxAgeDays);
+    skippedFresh = targetTickers.filter((t) => freshSet.has(t));
+    for (const ticker of skippedFresh) {
+      await recordRepair(ticker, start, end, "skipped_fresh", 0, "price already fresh");
+    }
+    targetTickers = targetTickers.filter((t) => !freshSet.has(t));
+  }
 
   const rowsPerTicker: Record<string, number> = {};
   let totalRows = 0;
@@ -131,5 +164,6 @@ export async function repairPrices(
     rows_loaded: totalRows,
     rows_per_ticker: rowsPerTicker,
     range: { start, end },
+    skipped_fresh: skippedFresh,
   };
 }
