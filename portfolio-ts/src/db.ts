@@ -41,7 +41,7 @@ export async function close(): Promise<void> {
   }
 }
 
-export type TxClient = {
+type TxClient = {
   unsafe<T = Record<string, unknown>>(sqlStr: string, params?: unknown[]): PromiseLike<T[]>;
 };
 
