@@ -3,7 +3,7 @@ import { describe, expect, test, mock, jest } from "bun:test";
 mock.module("../src/db.ts", () => ({
   query: mock(),
   querySingle: mock(),
-  withTransaction: mock(),
+  runTx: mock(),
   connect: () => {},
   close: async () => {},
 }));

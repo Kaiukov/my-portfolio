@@ -1,4 +1,4 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle, runTx } from "../db.js";
 import {
   ValidationError,
   NotFoundError,
@@ -121,7 +121,7 @@ export async function editTransaction(
 
   const fromDate = newDate < existing.date ? newDate : existing.date;
   
-  const updated = await withTransaction(async (tx) => {
+  const updated = await runTx(async (tx) => {
     const [atRow] = await tx.unsafe<{ asset_type: string }>(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [newAsset],

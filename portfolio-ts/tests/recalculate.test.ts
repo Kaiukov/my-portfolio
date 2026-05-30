@@ -7,7 +7,7 @@ const mockQuerySingle = mock();
 mock.module("../src/db.ts", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
-  withTransaction: mock(),
+  runTx: mock(),
   connect: () => {},
   close: () => {},
 }));
