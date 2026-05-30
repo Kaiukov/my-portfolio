@@ -1,4 +1,15 @@
-import { describe, expect, test, jest } from "bun:test";
+import { describe, expect, test, mock, jest } from "bun:test";
+
+mock.module("../src/db.js", () => ({
+  query: mock(),
+  querySingle: mock(),
+  connect: () => {},
+  close: async () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: mock(),
+}));
 
 describe("CLI parsing", () => {
   test("--help prints help text", async () => {

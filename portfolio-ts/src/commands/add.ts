@@ -1,4 +1,5 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle } from "../db.js";
+import { runTx } from "../tx.js";
 import {
   ValidationError,
   parseWriteDate,
@@ -80,14 +81,15 @@ export async function addTransaction(params: {
     }
   }
 
-  const inserted = await withTransaction(async (tx) => {
-    const [atRow] = await tx.unsafe<{ asset_type: string }>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const inserted = await runTx(async (tx: any) => {
+    const [atRow] = (await tx.unsafe(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [params.asset],
-    );
+    )) as { asset_type: string }[];
     const assetType = atRow?.asset_type ?? "stock_usd";
 
-    const [ins] = await tx.unsafe<{ id: number }>(
+    const [ins] = (await tx.unsafe(
       `INSERT INTO transactions
        (date, asset, action, quantity, asset_type, price, currency,
         fees, fee_currency, exchange, data_source, account)
@@ -107,17 +109,17 @@ export async function addTransaction(params: {
         "",
         params.account ?? null,
       ],
-    );
+    )) as { id: number }[];
     const transId = ins.id;
 
     await tx.unsafe("SELECT refresh_daily_returns_sql($1)", [date]);
 
-    const [row] = await tx.unsafe<Record<string, unknown>>(
+    const [row] = (await tx.unsafe(
       `SELECT id, date, asset, action, quantity, asset_type, price, currency,
               fees, fee_currency, exchange, data_source, account, created_at, updated_at
        FROM transactions WHERE id = $1`,
       [transId],
-    );
+    )) as Record<string, unknown>[];
     return row;
   });
 

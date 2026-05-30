@@ -40,15 +40,3 @@ export async function close(): Promise<void> {
     sql = null;
   }
 }
-
-export type TxClient = {
-  unsafe<T = Record<string, unknown>>(sqlStr: string, params?: unknown[]): PromiseLike<T[]>;
-};
-
-export async function withTransaction<T>(fn: (tx: TxClient) => Promise<T>): Promise<T> {
-  if (!sql) connect();
-  // TransactionSQL extends SQL, so fn satisfies the callback contract at runtime.
-  // The cast bypasses overload resolution confusion (both overloads have incompatible signatures).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (sql!.begin as any)(fn) as Promise<T>;
-}

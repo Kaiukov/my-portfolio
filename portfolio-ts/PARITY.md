@@ -8,7 +8,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 
 | Python command | TypeScript command | Final status | Notes |
 |---|---|---|---|
-| `portfolio status` | `portfolio-ts status` | **accepted behavior change** | Calls `portfolio_status_sql()` — PostgreSQL owns all calculations. FX-conversion difference: Python converts income/fees/taxes to USD via FX rates; TypeScript's `portfolio_status_sql()` uses raw transaction quantities. For USD-only portfolios results are identical. Difference is in non-USD income/fees/taxes only. Accepted because: (1) the calculation is in PostgreSQL, not TypeScript; (2) raw-quantity approach is correct for USD-denominated accounts; (3) full FX conversion requires `price_asof_sql()` lookups which would complicate the function with no benefit for most users. |
+| `portfolio status` | `portfolio-ts status` | **accepted behavior change** | Calls `portfolio_status_sql()` — PostgreSQL owns all calculations. TypeScript's `portfolio_status_sql()` now uses `cash_amount_to_usd_sql()` for FX-converted deposits/withdrawals/income/fees/taxes. For USD-only portfolios results are identical. For non-USD portfolios, totals are now FX-converted consistent with Python's original behavior. |
 | `portfolio transactions` | `portfolio-ts transactions` | **parity tested** | Paginated daily_returns: row count, pagination shape, and row fields validated live against PostgreSQL. |
 | `portfolio add` | `portfolio-ts add` | **accepted behavior change** | PG transaction rollback (TypeScript uses `sql.begin()`) vs Python application-level snapshot/restore. Functionally equivalent. No `--data-source` flag (Python also doesn't expose it in add). SELL holdings check before insert preserved. |
 | `portfolio edit` | `portfolio-ts edit` | **accepted behavior change** | Same rollback approach as add. `--dry-run` supported. `--fee-currency` not exposed (Python also doesn't expose it). |
@@ -22,9 +22,9 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio init` | `portfolio-ts init` | **accepted behavior change** | TypeScript checks 4 core tables present. Python runs the full PortfolioService constructor which validates schema and runs setup. TypeScript is lighter — DB readiness check only. |
 | `portfolio backup` | `portfolio-ts backup` | **parity tested** | `pg_dump` subprocess. Same flags. `--out` path optional. |
 | — | `portfolio-ts sync` | **TS-only command** | Convenience: `repair_prices` + `recalculate`. No Python equivalent. |
-| `portfolio allocation` | — | **intentionally deferred** | Requires FX-aware allocation with `price_asof_sql()` lookups per asset. PostgreSQL work needed: `portfolio_allocation_sql(as_of_date DATE)` function returning FX-converted USD values per position. |
-| `portfolio cash` | — | **intentionally deferred** | Requires FX-aware cash balance snapshot with historical as-of-date support. PostgreSQL work needed: `portfolio_cash_sql(as_of_date DATE)` function using `price_asof_sql()` and `cash_balances` view. |
-| `portfolio summary` | — | **intentionally deferred** | Requires FX-aware position summary with realized/unrealized gains. PostgreSQL work needed: `portfolio_summary_sql(as_of_date DATE)` function. |
+| `portfolio allocation` | `portfolio-ts allocation` | **accepted behavior change** | Calls `portfolio_allocation_sql(as_of_date)` — PostgreSQL owns all calculations. Returns FX-converted per-asset USD values with allocation percentages. TypeScript only sums `value_usd` for `portfolio_value` and formats rows. Supports `--as-of-date`. |
+| `portfolio cash` | `portfolio-ts cash` | **accepted behavior change** | Calls `portfolio_cash_sql(as_of_date)` — PostgreSQL owns all calculations. Returns per-currency cash buckets with FX-converted USD values. TypeScript only sums `usd_value` to compute `total_usd` (aggregation only, no financial calculation). Supports `--as-of-date` for historical snapshots. |
+| `portfolio summary` | `portfolio-ts summary` | **accepted behavior change** | Calls `portfolio_summary_sql(as_of_date)` — PostgreSQL owns all calculations. Returns holding count, total cash, portfolio value, transaction metadata. Supports `--as-of-date`. |
 | `portfolio performance` | — | **intentionally deferred** | Requires TWR/Sharpe/MDD/benchmark. PostgreSQL work needed: extract `get_performance_stats_sql()` CTE from Python into a standalone `portfolio_performance_sql(as_of_date, benchmark, from_date)` PG function. |
 | `portfolio mwr` | — | **intentionally deferred** | Requires XIRR / Modified Weighted Return calculation. PostgreSQL work needed: XIRR function in PG (either native extension or iterative Newton-Raphson implementation). |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
@@ -48,12 +48,16 @@ Mode: Phase 5 (TS structure validation only)
   PASS  recalculate --dry-run — JSON shape valid, dry_run data present
   PASS  sync --dry-run — JSON shape valid, both sub-commands present
   PASS  error-envelope — Unknown command produces correct error JSON
+  PASS  cash — JSON shape valid, cash rows with USD values present
+  PASS  allocation — JSON shape valid, allocation rows with percentages present
+  PASS  summary — JSON shape valid, portfolio summary metrics present
+  PASS  concentration — JSON shape valid, HHI and top holdings present
 
-Results: 10 pass, 0 fail, 0 skip
+Results: 14 pass, 0 fail, 0 skip
 ```
 
 `bun run typecheck`: ✓  
-`bun test`: 62 pass, 0 fail
+`bun test`: 93 pass, 0 fail
 
 ## Price fetch audit trail
 
@@ -72,7 +76,7 @@ Both `repair_prices` and `recalculate` write process history to PostgreSQL:
 
 Files preserved in `portfolio_db/sql/`:
 - `schema.sql` — table definitions (including `repair_log`, `refresh_log`, `service_state`)
-- `functions.sql` — SQL functions including `portfolio_status_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`
+- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
@@ -81,8 +85,5 @@ Files preserved in `portfolio_db/sql/`:
 
 | Command | PG function/view needed |
 |---|---|
-| allocation | `portfolio_allocation_sql(as_of_date DATE)` — FX-aware per-asset USD values |
-| cash | `portfolio_cash_sql(as_of_date DATE)` — FX-converted cash balances with history |
-| summary | `portfolio_summary_sql(as_of_date DATE)` — position summary with realized/unrealized |
 | performance | `portfolio_performance_sql(as_of_date, benchmark, from_date)` — TWR/risk metrics |
 | mwr | `portfolio_mwr_sql(as_of_date DATE)` — XIRR / Modified Weighted Return |

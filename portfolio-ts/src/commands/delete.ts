@@ -1,4 +1,5 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle } from "../db.js";
+import { runTx } from "../tx.js";
 import { NotFoundError, ValidationError, validatePositiveInt } from "../validators.js";
 
 export interface DeleteDryRunResult {
@@ -69,8 +70,8 @@ export async function deleteTransaction(
   }
 
   const transDate = rowDate(existing["date"]);
-
-  await withTransaction(async (tx) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await runTx(async (tx: any) => {
     await tx.unsafe("DELETE FROM transactions WHERE id = $1", [transId]);
     await tx.unsafe("SELECT refresh_daily_returns_sql($1)", [transDate]);
   });

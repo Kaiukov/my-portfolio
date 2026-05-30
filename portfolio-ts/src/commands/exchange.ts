@@ -1,4 +1,5 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle } from "../db.js";
+import { runTx } from "../tx.js";
 import {
   ValidationError,
   parseWriteDate,
@@ -54,18 +55,19 @@ export async function exchangeCurrency(params: {
   }
 
   const targetAmount = params.quantity * params.rate;
-
-  const result = await withTransaction(async (tx) => {
-    const [fromAt] = await tx.unsafe<{ asset_type: string }>(
+  
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await runTx(async (tx: any) => {
+    const [fromAt] = (await tx.unsafe(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [params.fromAsset],
-    );
-    const [toAt] = await tx.unsafe<{ asset_type: string }>(
+    )) as { asset_type: string }[];
+    const [toAt] = (await tx.unsafe(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [params.toAsset],
-    );
+    )) as { asset_type: string }[];
 
-    const [fromIns] = await tx.unsafe<{ id: number }>(
+    const [fromIns] = (await tx.unsafe(
       `INSERT INTO transactions
        (date, asset, action, quantity, asset_type, price, currency,
         fees, fee_currency, exchange, data_source, account)
@@ -78,9 +80,9 @@ export async function exchangeCurrency(params: {
         fromAt.asset_type,
         `→ ${params.toAsset} @ ${params.rate}`,
       ],
-    );
+    )) as { id: number }[];
 
-    const [toIns] = await tx.unsafe<{ id: number }>(
+    const [toIns] = (await tx.unsafe(
       `INSERT INTO transactions
        (date, asset, action, quantity, asset_type, price, currency,
         fees, fee_currency, exchange, data_source, account)
@@ -93,7 +95,7 @@ export async function exchangeCurrency(params: {
         toAt.asset_type,
         `← ${params.fromAsset} @ ${params.rate}`,
       ],
-    );
+    )) as { id: number }[];
 
     await tx.unsafe("SELECT refresh_daily_returns_sql($1)", [date]);
 

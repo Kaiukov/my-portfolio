@@ -11,6 +11,10 @@ import { verifyPrices } from "./commands/verify_prices.js";
 import { repairPrices, repairPricesDryRun } from "./commands/repair_prices.js";
 import { fetchPrices } from "./providers/yahoo.js";
 import { getReport } from "./commands/report.js";
+import { getCash } from "./commands/cash.js";
+import { getAllocation } from "./commands/allocation.js";
+import { getSummary } from "./commands/summary.js";
+import { getConcentration } from "./commands/concentration.js";
 import { getHealth } from "./commands/health.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
@@ -33,6 +37,10 @@ Commands:
   recalculate     Rebuild daily_returns from cached prices
   verify_prices   Show price coverage diagnostics (read-only)
   repair_prices   Fetch missing prices from Yahoo Finance
+  cash            Cash balances by currency with USD values
+  allocation      Portfolio allocation breakdown by asset
+  summary         High-level portfolio summary metrics
+  concentration   Portfolio concentration metrics (HHI + top holdings)
   sync            repair_prices + recalculate (daily maintenance)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
@@ -367,6 +375,35 @@ export async function dispatch(argv: string[]): Promise<void> {
       }
       const result = await backupDb({ dbUrl, outPath: str(flags, "out") });
       console.log(JSON.stringify(success("backup", result), null, 2));
+      return;
+    }
+
+    case "cash": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getCash(asOfDate);
+      console.log(JSON.stringify(success("cash", result, result.rows.length), null, 2));
+      return;
+    }
+
+    case "allocation": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getAllocation(asOfDate);
+      console.log(JSON.stringify(success("allocation", result, result.rows.length), null, 2));
+      return;
+    }
+
+    case "summary": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getSummary(asOfDate);
+      console.log(JSON.stringify(success("summary", result), null, 2));
+      return;
+    }
+
+    case "concentration": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
+      const result = await getConcentration(asOfDate, topN);
+      console.log(JSON.stringify(success("concentration", result), null, 2));
       return;
     }
 

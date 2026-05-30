@@ -1,4 +1,5 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle } from "../db.js";
+import { runTx } from "../tx.js";
 import {
   ValidationError,
   NotFoundError,
@@ -120,17 +121,18 @@ export async function editTransaction(
   }
 
   const fromDate = newDate < existing.date ? newDate : existing.date;
-
-  const updated = await withTransaction(async (tx) => {
-    const [atRow] = await tx.unsafe<{ asset_type: string }>(
+  
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updated = await runTx(async (tx: any) => {
+    const [atRow] = (await tx.unsafe(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [newAsset],
-    );
+    )) as { asset_type: string }[];
     const assetType = atRow?.asset_type ?? existing.asset_type;
 
     const newFees = changes.fees !== undefined ? changes.fees : existing.fees;
 
-    const [updRow] = await tx.unsafe<Record<string, unknown>>(
+    const [updRow] = (await tx.unsafe(
       `UPDATE transactions SET
          date = $1, asset = $2, action = $3, quantity = $4, asset_type = $5,
          price = $6, currency = $7, fees = $8, fee_currency = $9,
@@ -153,7 +155,7 @@ export async function editTransaction(
         changes.account ?? existing.account,
         transId,
       ],
-    );
+    )) as Record<string, unknown>[];
 
     await tx.unsafe("SELECT refresh_daily_returns_sql($1)", [fromDate]);
     return updRow;

@@ -7,9 +7,12 @@ const mockQuerySingle = mock();
 mock.module("../src/db.js", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
-  withTransaction: mock(),
   connect: () => {},
   close: () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: mock(),
 }));
 
 describe("repairPricesDryRun", () => {

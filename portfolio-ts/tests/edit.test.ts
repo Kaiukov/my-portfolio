@@ -7,9 +7,12 @@ const mockWithTransaction = mock();
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mockQuerySingle,
-  withTransaction: mockWithTransaction,
   connect: () => {},
   close: () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: mockWithTransaction,
 }));
 
 function makeDbRow(overrides: Record<string, unknown> = {}) {
