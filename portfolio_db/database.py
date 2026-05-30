@@ -2675,6 +2675,46 @@ class PortfolioDatabase:
                     fp.write(insert_stmt.as_string(self.con._conn) + "\n")
             fp.write("COMMIT;\n")
 
+    def needs_recalc(self) -> bool:
+        """Return True if last price refresh is newer than last recalculation."""
+        row = self.con.execute("SELECT needs_recalc()").fetchone()
+        return bool(row[0]) if row else True
+
+    def get_pg_cron_jobs(self) -> list | None:
+        """Return portfolio_ pg_cron jobs, or None when cron extension unavailable."""
+        try:
+            rows = self.con.execute("""
+                SELECT jobname, schedule, active, last_run, next_run
+                FROM cron.job
+                WHERE jobname LIKE 'portfolio_%'
+                ORDER BY jobname
+            """).fetchall()
+            return [
+                {
+                    "job_name": row[0],
+                    "schedule": row[1],
+                    "active": bool(row[2]) if row[2] is not None else None,
+                    "last_run": str(row[3]) if row[3] else None,
+                    "next_run": str(row[4]) if row[4] else None,
+                }
+                for row in rows
+            ]
+        except Exception:
+            return None
+
+    def pg_cron_schedule(self, name: str, schedule: str, command: str) -> None:
+        """Schedule a pg_cron job."""
+        self.con.execute(
+            "SELECT cron.schedule(%s, %s, %s)",
+            [name, schedule, command],
+        )
+        self.con.commit()
+
+    def pg_cron_unschedule(self, name: str) -> None:
+        """Remove a pg_cron job."""
+        self.con.execute("SELECT cron.unschedule(%s)", [name])
+        self.con.commit()
+
     def close(self):
         """Close database connection."""
         self.con.close()
