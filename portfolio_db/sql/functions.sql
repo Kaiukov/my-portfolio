@@ -331,6 +331,7 @@ $$;
 -- Portfolio status snapshot: all fields owned by PostgreSQL.
 -- Called by `portfolio-ts status` so TypeScript never computes financial metrics.
 -- Deposits/withdrawals/income/fees/taxes are FX-converted to USD via cash_amount_to_usd_sql().
+-- fees includes: standalone FEE action quantity + fees column from BUY/SELL/all transactions.
 -- portfolio_value and as_of_date are taken from daily_returns (recalculated by PG).
 CREATE OR REPLACE FUNCTION portfolio_status_sql()
 RETURNS TABLE (
@@ -362,8 +363,15 @@ AS $$
                 THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0) AS withdrawals,
             COALESCE(SUM(CASE WHEN t.action IN ('DIVIDEND','INTEREST')
                 THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0) AS income,
+            -- fees = standalone FEE action amounts + fees column from all transactions
             COALESCE(SUM(CASE WHEN t.action = 'FEE'
-                THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0) AS fees,
+                THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0)
+            + COALESCE(SUM(CASE WHEN t.fees IS NOT NULL AND t.fees > 0
+                THEN cash_amount_to_usd_sql(
+                    COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD'),
+                    t.fees,
+                    t.date
+                ) ELSE 0 END), 0) AS fees,
             COALESCE(SUM(CASE WHEN t.action = 'TAX'
                 THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0) AS taxes
         FROM transactions t
@@ -379,6 +387,7 @@ AS $$
         a.start_date,
         a.end_date,
         dr.portfolio_value,
+        -- total_invested = net contributed capital (deposits - withdrawals), NOT gross invested
         a.deposits - a.withdrawals                                      AS total_invested,
         a.deposits,
         a.withdrawals,
