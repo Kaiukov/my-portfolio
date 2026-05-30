@@ -14,8 +14,8 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio edit` | `portfolio-ts edit` | **accepted behavior change** | Same rollback approach as add. `--dry-run` supported. `--fee-currency` not exposed (Python also doesn't expose it). |
 | `portfolio delete` | `portfolio-ts delete` | **accepted behavior change** | `--confirm` required. `--dry-run`. No `--backup` flag (Python backup is a separate command). PG transaction rollback. |
 | `portfolio exchange` | `portfolio-ts exchange` | **accepted behavior change** | Two-leg EXCHANGE_FROM/EXCHANGE_TO. Cash-like validation via `is_cash_like_sql()`. TypeScript checks `fromAsset === toAsset` case-insensitively; Python also checks normalized canonical form. Both reject same-asset exchanges. |
-| `portfolio repair_prices` | `portfolio-ts repair_prices` | **accepted behavior change** | Uses `yahoo-finance2` npm package vs Python yfinance. Same Yahoo Finance data source; same inverted-FX handling. `--ticker` accepts comma-separated list; Python uses repeated flags. Documented in code. |
-| `portfolio recalculate` | `portfolio-ts recalculate` | **parity tested** | Calls `refresh_daily_returns_sql(from_date)`. `--from-date`, `--force`, `--dry-run` supported. Same PostgreSQL function as Python. |
+| `portfolio repair_prices` | `portfolio-ts repair_prices` | **accepted behavior change** | Uses `yahoo-finance2` npm package vs Python yfinance. Same Yahoo Finance data source; same inverted-FX handling. `--ticker` accepts comma-separated list; Python uses repeated flags. Writes `repair_log` per-ticker + `refresh_log` + `service_state` on successful run. |
+| `portfolio recalculate` | `portfolio-ts recalculate` | **parity tested** | Calls `refresh_daily_returns_sql(from_date)`. `--from-date`, `--force`, `--dry-run` supported. Same PostgreSQL function as Python. Writes `refresh_log` + `service_state` on successful run. |
 | `portfolio verify_prices` | `portfolio-ts verify_prices` | **accepted behavior change** | Coverage check via `discover_required_tickers_sql()` + `get_required_price_checkpoints_sql()`. Simplified output (no schema info, repair logs, optimization notes). Diagnostic only — no functional difference. |
 | `portfolio report` | `portfolio-ts report` | **parity tested** | Paginated `daily_returns` with date filters. Fields, pagination, and sort order validated live. Python and TypeScript use the same SQL query path. |
 | `portfolio health` | `portfolio-ts health` | **accepted behavior change** | TypeScript uses `needs_recalc()` + `service_state` + checkpoint coverage. Python uses `analyze_price_coverage()` which checks series density as well. TypeScript health is simpler but surfacing the same key signals: DB reachable, stale data, missing price checkpoints. |
@@ -32,7 +32,9 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 
 ## Validation results (live against PostgreSQL)
 
-Run: `PORTFOLIO_DB_URL=... PARITY_COMMANDS="status transactions report health init" ./scripts/parity-check.sh`
+Run: `PORTFOLIO_DB_URL=... PARITY_COMMANDS="status transactions report health init verify_prices repair_prices_dry_run recalculate_dry_run sync_dry_run" ./scripts/parity-check.sh`
+
+Expected results (each command validates JSON envelope shape + command-specific fields):
 
 ```
 Mode: Phase 5 (TS structure validation only)
@@ -41,19 +43,36 @@ Mode: Phase 5 (TS structure validation only)
   PASS  report --limit 3 — JSON shape valid, daily_returns fields present
   PASS  health — JSON shape valid, all diagnostic keys present
   PASS  init — DB schema ready, 4 core tables found
+  PASS  verify_prices — JSON shape valid, all diagnostic keys present
+  PASS  repair_prices --dry-run — JSON shape valid, dry_run data present
+  PASS  recalculate --dry-run — JSON shape valid, dry_run data present
+  PASS  sync --dry-run — JSON shape valid, both sub-commands present
   PASS  error-envelope — Unknown command produces correct error JSON
 
-Results: 6 pass, 0 fail, 0 skip
+Results: 10 pass, 0 fail, 0 skip
 ```
 
 `bun run typecheck`: ✓  
-`bun test`: 60 pass, 0 fail
+`bun test`: 62 pass, 0 fail
+
+## Price fetch audit trail
+
+Both `repair_prices` and `recalculate` write process history to PostgreSQL:
+
+**`repair_prices`:**
+- Per-ticker `repair_log` entries: ticker, start_date, end_date, status (success/failed), rows_loaded, message
+- On full run (no explicit `--ticker`): `refresh_log` row + `service_state.last_successful_price_refresh` + `prices_need_fetch = false`
+- Failed ticker fetches are recorded in repair_log with the error message; other tickers continue
+
+**`recalculate`:**
+- On success: `refresh_log` row + `service_state.last_successful_recalc` + `needs_recalc = false`
+- `--force` flag honored: skips `refresh_daily_returns_sql()` when `needs_recalc()` is false (unless `--force` is set)
 
 ## PostgreSQL source of truth
 
 Files preserved in `portfolio_db/sql/`:
-- `schema.sql` — table definitions
-- `functions.sql` — SQL functions including `portfolio_status_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `refresh_daily_returns_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`
+- `schema.sql` — table definitions (including `repair_log`, `refresh_log`, `service_state`)
+- `functions.sql` — SQL functions including `portfolio_status_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers

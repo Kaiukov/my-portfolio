@@ -14,7 +14,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TS_CLI="bun $REPO_ROOT/portfolio-ts/src/cli.ts"
 
-COMMANDS="${PARITY_COMMANDS:-status transactions report health init}"
+COMMANDS="${PARITY_COMMANDS:-status transactions report health init verify_prices repair_prices_dry_run recalculate_dry_run sync_dry_run}"
 PHASE4_MODE=false
 
 if command -v uv > /dev/null 2>&1 && uv run portfolio-py --help > /dev/null 2>&1; then
@@ -209,6 +209,71 @@ check_init() {
   else fail_cmd "init" "$errors assertion(s) failed"; fi
 }
 
+check_verify_prices() {
+  local ts; ts=$(run_ts verify_prices)
+  local errors=0
+
+  assert_ts "verify_prices.ok"      "$ts" "d.ok===true"                                    "ok must be true"          || ((errors++)) || true
+  assert_ts "verify_prices.command" "$ts" "d.command==='verify_prices'"                     "command must be 'verify_prices'" || ((errors++)) || true
+  assert_ts "verify_prices.data"    "$ts" "typeof d.data==='object'&&d.data!==null"         "data must be an object"   || ((errors++)) || true
+
+  for key in total_rows unique_tickers date_range required_tickers coverage_issues needs_recalc; do
+    assert_ts "verify_prices.data.$key" "$ts" "Object.prototype.hasOwnProperty.call(d.data,'$key')" "data.$key must exist" || ((errors++)) || true
+  done
+
+  assert_ts "verify_prices.total_rows>=0" "$ts" "typeof d.data.total_rows==='number'&&d.data.total_rows>=0" "total_rows must be non-negative number" || ((errors++)) || true
+  assert_ts "verify_prices.coverage_issues[]" "$ts" "Array.isArray(d.data.coverage_issues)" "coverage_issues must be an array" || ((errors++)) || true
+  assert_ts "verify_prices.required_tickers[]" "$ts" "Array.isArray(d.data.required_tickers)" "required_tickers must be an array" || ((errors++)) || true
+
+  if [ "$errors" -eq 0 ]; then pass_cmd "verify_prices" "JSON shape valid, all diagnostic keys present"
+  else fail_cmd "verify_prices" "$errors assertion(s) failed"; fi
+}
+
+check_repair_prices_dry_run() {
+  local ts; ts=$(run_ts "repair_prices --dry-run")
+  local errors=0
+
+  assert_ts "repair_prices_dry_run.ok"      "$ts" "d.ok===true"                        "ok must be true"        || ((errors++)) || true
+  assert_ts "repair_prices_dry_run.command" "$ts" "d.command==='repair_prices'"         "command must be 'repair_prices'" || ((errors++)) || true
+  assert_ts "repair_prices_dry_run.data"    "$ts" "typeof d.data==='object'&&d.data!==null" "data must be object" || ((errors++)) || true
+  assert_ts "repair_prices_dry_run.data.dry_run" "$ts" "d.data?.dry_run===true"         "dry_run must be true"   || ((errors++)) || true
+  assert_ts "repair_prices_dry_run.data.would_repair[]" "$ts" "Array.isArray(d.data?.would_repair)" "would_repair must be array" || ((errors++)) || true
+  assert_ts "repair_prices_dry_run.data.range" "$ts" "typeof d.data?.range?.start==='string'" "range.start must be string" || ((errors++)) || true
+
+  if [ "$errors" -eq 0 ]; then pass_cmd "repair_prices --dry-run" "JSON shape valid, dry_run data present"
+  else fail_cmd "repair_prices --dry-run" "$errors assertion(s) failed"; fi
+}
+
+check_recalculate_dry_run() {
+  local ts; ts=$(run_ts "recalculate --dry-run")
+  local errors=0
+
+  assert_ts "recalculate_dry_run.ok"      "$ts" "d.ok===true"                              "ok must be true"          || ((errors++)) || true
+  assert_ts "recalculate_dry_run.command" "$ts" "d.command==='recalculate'"                 "command must be 'recalculate'" || ((errors++)) || true
+  assert_ts "recalculate_dry_run.data"    "$ts" "typeof d.data==='object'&&d.data!==null"   "data must be object"      || ((errors++)) || true
+  assert_ts "recalculate_dry_run.data.dry_run" "$ts" "d.data?.dry_run===true"               "dry_run must be true"     || ((errors++)) || true
+  assert_ts "recalculate_dry_run.data.needs_recalc" "$ts" "typeof d.data?.needs_recalc==='boolean'" "needs_recalc must be boolean" || ((errors++)) || true
+  assert_ts "recalculate_dry_run.data.forced" "$ts" "typeof d.data?.forced==='boolean'"     "forced must be boolean"   || ((errors++)) || true
+
+  if [ "$errors" -eq 0 ]; then pass_cmd "recalculate --dry-run" "JSON shape valid, dry_run data present"
+  else fail_cmd "recalculate --dry-run" "$errors assertion(s) failed"; fi
+}
+
+check_sync_dry_run() {
+  local ts; ts=$(run_ts "sync --dry-run")
+  local errors=0
+
+  assert_ts "sync_dry_run.ok"      "$ts" "d.ok===true"                                "ok must be true"          || ((errors++)) || true
+  assert_ts "sync_dry_run.command" "$ts" "d.command==='sync'"                         "command must be 'sync'"   || ((errors++)) || true
+  assert_ts "sync_dry_run.data"    "$ts" "typeof d.data==='object'&&d.data!==null"    "data must be object"      || ((errors++)) || true
+  assert_ts "sync_dry_run.data.dry_run" "$ts" "d.data?.dry_run===true"                "dry_run must be true"     || ((errors++)) || true
+  assert_ts "sync_dry_run.data.repair_prices" "$ts" "typeof d.data?.repair_prices==='object'" "repair_prices sub-object exists" || ((errors++)) || true
+  assert_ts "sync_dry_run.data.recalculate" "$ts" "typeof d.data?.recalculate==='object'" "recalculate sub-object exists" || ((errors++)) || true
+
+  if [ "$errors" -eq 0 ]; then pass_cmd "sync --dry-run" "JSON shape valid, both sub-commands present"
+  else fail_cmd "sync --dry-run" "$errors assertion(s) failed"; fi
+}
+
 check_unknown_command_error() {
   local ts; ts=$(run_ts "_nonexistent_cmd_")
   local errors=0
@@ -234,12 +299,16 @@ echo ""
 
 for cmd in $COMMANDS; do
   case "$cmd" in
-    status)              check_status ;;
-    transactions)        check_transactions "--limit 5" ;;
-    report)              check_report "--limit 3" ;;
-    health)              check_health ;;
-    init)                check_init ;;
-    error-envelope)      check_unknown_command_error ;;
+    status)                    check_status ;;
+    transactions)              check_transactions "--limit 5" ;;
+    report)                    check_report "--limit 3" ;;
+    health)                    check_health ;;
+    init)                      check_init ;;
+    verify_prices)             check_verify_prices ;;
+    repair_prices_dry_run)     check_repair_prices_dry_run ;;
+    recalculate_dry_run)       check_recalculate_dry_run ;;
+    sync_dry_run)              check_sync_dry_run ;;
+    error-envelope)            check_unknown_command_error ;;
     *)                   skip_cmd "$cmd" "no validation logic implemented" ;;
   esac
 done
