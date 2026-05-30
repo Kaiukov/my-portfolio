@@ -2,12 +2,12 @@
 
 | Python command | TypeScript command | Status | Notes |
 |---|---|---|---|
-| `portfolio status` | `portfolio-ts status` | partial | Initial JSON shape. `total_gain_pct` uses simple formula; Python uses TWR. `as_of_date` uses daily_returns date. |
-| `portfolio transactions` | `portfolio-ts transactions` | partial | Read-only, pagination, date filters. Write ops handled by separate commands. |
-| `portfolio add` | `portfolio-ts add` | partial | Validation + INSERT + `refresh_daily_returns_sql`. Rollback via PostgreSQL transaction. Missing: price-pre-check before recalc. |
-| `portfolio edit` | `portfolio-ts edit` | partial | Validation + UPDATE + `refresh_daily_returns_sql`. Supports `--dry-run`. Rollback via PostgreSQL transaction. |
-| `portfolio delete` | `portfolio-ts delete` | partial | `--confirm` required. Supports `--dry-run`. Rollback via PostgreSQL transaction. No `--backup` flag. |
-| `portfolio exchange` | `portfolio-ts exchange` | partial | Two-leg EXCHANGE_FROM/EXCHANGE_TO + `refresh_daily_returns_sql`. Cash-like validated via `is_cash_like_sql`. No normalized-form duplicate-asset check (Python goes deeper). |
+| `portfolio status` | `portfolio-ts status` | Python removed | Simple gain formula; Python TWR removed with Python. `as_of_date` from daily_returns. |
+| `portfolio transactions` | `portfolio-ts transactions` | Python removed | Read-only, pagination, date filters. |
+| `portfolio add` | `portfolio-ts add` | Python removed | Validation + INSERT + recalc. PostgreSQL transaction rollback. |
+| `portfolio edit` | `portfolio-ts edit` | Python removed | Validation + UPDATE + recalc. `--dry-run` supported. |
+| `portfolio delete` | `portfolio-ts delete` | Python removed | `--confirm` required. `--dry-run` supported. |
+| `portfolio exchange` | `portfolio-ts exchange` | Python removed | Two-leg EXCHANGE_FROM/EXCHANGE_TO + recalc. |
 | `portfolio report` | — | not started | |
 | `portfolio allocation` | — | not started | |
 | `portfolio cash` | — | not started | |
@@ -15,9 +15,9 @@
 | `portfolio performance` | — | not started | |
 | `portfolio mwr` | — | not started | |
 | `portfolio verify_prices` | — | not started | |
-| `portfolio repair_prices` | `portfolio-ts repair_prices` | partial | Yahoo Finance via yahoo-finance2 (different library from Python yfinance — same semantics). `--ticker` accepts comma-separated list; Python accepts repeated flags. Dry-run supported. |
-| `portfolio recalculate` | `portfolio-ts recalculate` | partial | `--from-date`, `--force`, `--dry-run` supported. Calls `refresh_daily_returns_sql` directly. |
-| `portfolio verify_prices` | `portfolio-ts verify_prices` | partial | Coverage check via SQL functions. Simpler output format than Python (no schema/optimization_notes). |
+| `portfolio repair_prices` | `portfolio-ts repair_prices` | Python removed | yahoo-finance2. `--ticker` comma-separated. Dry-run supported. |
+| `portfolio recalculate` | `portfolio-ts recalculate` | Python removed | `--from-date`, `--force`, `--dry-run` supported. |
+| `portfolio verify_prices` | `portfolio-ts verify_prices` | Python removed | Coverage check via SQL functions. |
 | — | `portfolio-ts sync` | TS-only | Convenience: `repair_prices` + `recalculate`. No Python equivalent. |
 | `portfolio backup` | — | not started | |
 | `portfolio init` | — | not started | |
@@ -46,6 +46,15 @@
 - **`verify_prices` output**: TypeScript returns simplified coverage data. Python also returns schema info, optimization notes, and repair logs. These can be added in future PRs.
 - **`sync` command**: TypeScript-only convenience command (repair_prices + recalculate). No Python equivalent.
 
-## Next (Phase 4: cutover)
+## Migration complete
 
-Wire `portfolio` entrypoint to TypeScript binary. Keep Python as `portfolio-py` for parity checks. CI output comparison for migrated commands.
+All 5 phases completed:
+1. ✅ Read-only CLI (status, transactions)
+2. ✅ Write commands (add, edit, delete, exchange)
+3. ✅ Maintenance (recalculate, repair_prices, verify_prices, sync)
+4. ✅ Cutover (portfolio → TypeScript, portfolio-py fallback)
+5. ✅ Python removed (CLI, services, dependencies; SQL schema kept)
+
+**Entrypoint**: `bin/portfolio` → `bun portfolio-ts/src/cli.ts`
+**PostgreSQL source of truth**: `portfolio_db/sql/` (schema, functions, procedures, views, triggers)
+**TypeScript tests**: `portfolio-ts/tests/` — 60 passing tests
