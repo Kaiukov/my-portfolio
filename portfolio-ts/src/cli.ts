@@ -276,7 +276,8 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "verify_prices": {
-      const result = await verifyPrices();
+      const maxAgeDays = int(flags, "max-age-days");
+      const result = await verifyPrices(maxAgeDays);
       console.log(JSON.stringify(success("verify_prices", result), null, 2));
       return;
     }
@@ -285,17 +286,19 @@ export async function dispatch(argv: string[]): Promise<void> {
       const tickerArg = str(flags, "ticker");
       const tickers = tickerArg ? tickerArg.split(",").map((t) => t.trim()) : undefined;
       const isDryRun = bool(flags, "dry-run");
+      const maxAgeDays = int(flags, "max-age-days");
 
       if (isDryRun) {
         const result = await repairPricesDryRun({
           tickers,
           startDate: str(flags, "start-date"),
           endDate: str(flags, "end-date"),
+          maxAgeDays,
         });
         console.log(JSON.stringify(success("repair_prices", result), null, 2));
       } else {
         const result = await repairPrices(
-          { tickers, startDate: str(flags, "start-date"), endDate: str(flags, "end-date") },
+          { tickers, startDate: str(flags, "start-date"), endDate: str(flags, "end-date"), maxAgeDays },
           fetchPrices,
         );
         console.log(JSON.stringify(success("repair_prices", result), null, 2));
@@ -305,8 +308,9 @@ export async function dispatch(argv: string[]): Promise<void> {
 
     case "sync": {
       const isDryRun = bool(flags, "dry-run");
+      const maxAgeDays = int(flags, "max-age-days");
       if (isDryRun) {
-        const repairResult = await repairPricesDryRun({});
+        const repairResult = await repairPricesDryRun({ maxAgeDays });
         const recalcResult = await recalculateDryRun({ force: false });
         console.log(
           JSON.stringify(
@@ -316,7 +320,7 @@ export async function dispatch(argv: string[]): Promise<void> {
           ),
         );
       } else {
-        const repairResult = await repairPrices({}, fetchPrices);
+        const repairResult = await repairPrices({ maxAgeDays }, fetchPrices);
         const recalcResult = await recalculate({ force: true });
         console.log(
           JSON.stringify(
@@ -355,7 +359,8 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "health": {
-      const result = await getHealth();
+      const maxAgeDays = int(flags, "max-age-days");
+      const result = await getHealth(maxAgeDays);
       console.log(JSON.stringify(success("health", result), null, 2));
       return;
     }

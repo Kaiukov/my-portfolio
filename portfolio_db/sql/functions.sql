@@ -135,6 +135,23 @@ AS $$
     LIMIT 1
 $$;
 
+-- Get price as of date with max-age enforcement.
+-- Returns NULL if the most recent price on or before p_as_of_date is older than p_max_age_days.
+-- Used by diagnostic commands (verify_prices, health, daily_maintenance_check) for staleness detection.
+CREATE OR REPLACE FUNCTION price_asof_stale_sql(p_ticker TEXT, p_as_of_date DATE, p_max_age_days INTEGER)
+RETURNS DOUBLE PRECISION
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT p.price
+    FROM prices p
+    WHERE p.ticker = p_ticker
+      AND p.date <= p_as_of_date
+      AND p.date >= p_as_of_date - p_max_age_days
+    ORDER BY p.date DESC
+    LIMIT 1
+$$;
+
 -- Convert cash amount to USD using FX rates
 CREATE OR REPLACE FUNCTION cash_amount_to_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
 RETURNS DOUBLE PRECISION
@@ -576,17 +593,38 @@ AS $$
     FROM alloc
 $$;
 
--- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on
-CREATE OR REPLACE FUNCTION daily_maintenance_check()
+-- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on.
+-- p_max_age_days: when set, also checks per-ticker staleness (any ticker with no price
+-- within p_max_age_days triggers prices_need_fetch).
+CREATE OR REPLACE FUNCTION daily_maintenance_check(p_max_age_days INTEGER DEFAULT NULL)
 RETURNS VOID
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    global_max_date DATE;
+    stale_count INTEGER;
 BEGIN
-    IF COALESCE((SELECT MAX(date) FROM prices), DATE '1900-01-01') < CURRENT_DATE - 1 THEN
+    -- Global freshness: if no price is recent, mark as needing fetch
+    global_max_date := COALESCE((SELECT MAX(date) FROM prices), DATE '1900-01-01');
+    IF global_max_date < CURRENT_DATE - 1 THEN
         INSERT INTO service_state (state_key, state_value, updated_at)
         VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
         ON CONFLICT (state_key)
         DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+    END IF;
+
+    -- Per-ticker staleness: if any required ticker lacks a price within max_age_days
+    IF p_max_age_days IS NOT NULL THEN
+        SELECT COUNT(*) INTO stale_count
+        FROM discover_required_tickers_sql() dt
+        WHERE price_asof_stale_sql(dt.ticker, CURRENT_DATE, p_max_age_days) IS NULL;
+
+        IF stale_count > 0 THEN
+            INSERT INTO service_state (state_key, state_value, updated_at)
+            VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
+            ON CONFLICT (state_key)
+            DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+        END IF;
     END IF;
 
     IF needs_recalc() THEN
