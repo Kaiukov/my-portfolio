@@ -23,7 +23,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio backup` | `portfolio-ts backup` | **parity tested** | `pg_dump` subprocess. Same flags. `--out` path optional. |
 | — | `portfolio-ts sync` | **TS-only command** | Convenience: `repair_prices` + `recalculate`. No Python equivalent. |
 | `portfolio allocation` | — | **intentionally deferred** | Requires FX-aware allocation with `price_asof_sql()` lookups per asset. PostgreSQL work needed: `portfolio_allocation_sql(as_of_date DATE)` function returning FX-converted USD values per position. |
-| `portfolio cash` | — | **intentionally deferred** | Requires FX-aware cash balance snapshot with historical as-of-date support. PostgreSQL work needed: `portfolio_cash_sql(as_of_date DATE)` function using `price_asof_sql()` and `cash_balances` view. |
+| `portfolio cash` | `portfolio-ts cash` | **accepted behavior change** | Calls `portfolio_cash_sql(as_of_date)` — PostgreSQL owns all calculations. Returns per-currency cash buckets with FX-converted USD values. TypeScript only sums `usd_value` to compute `total_usd` (aggregation only, no financial calculation). Supports `--as-of-date` for historical snapshots. |
 | `portfolio summary` | — | **intentionally deferred** | Requires FX-aware position summary with realized/unrealized gains. PostgreSQL work needed: `portfolio_summary_sql(as_of_date DATE)` function. |
 | `portfolio performance` | — | **intentionally deferred** | Requires TWR/Sharpe/MDD/benchmark. PostgreSQL work needed: extract `get_performance_stats_sql()` CTE from Python into a standalone `portfolio_performance_sql(as_of_date, benchmark, from_date)` PG function. |
 | `portfolio mwr` | — | **intentionally deferred** | Requires XIRR / Modified Weighted Return calculation. PostgreSQL work needed: XIRR function in PG (either native extension or iterative Newton-Raphson implementation). |
@@ -48,12 +48,13 @@ Mode: Phase 5 (TS structure validation only)
   PASS  recalculate --dry-run — JSON shape valid, dry_run data present
   PASS  sync --dry-run — JSON shape valid, both sub-commands present
   PASS  error-envelope — Unknown command produces correct error JSON
+  PASS  cash — JSON shape valid, cash rows with USD values present
 
-Results: 10 pass, 0 fail, 0 skip
+Results: 11 pass, 0 fail, 0 skip
 ```
 
 `bun run typecheck`: ✓  
-`bun test`: 62 pass, 0 fail
+`bun test`: 72 pass, 0 fail
 
 ## Price fetch audit trail
 
@@ -80,9 +81,8 @@ Files preserved in `portfolio_db/sql/`:
 ## Deferred commands — PG work required before TS implementation
 
 | Command | PG function/view needed |
-|---|---|
+|---|---|---|
 | allocation | `portfolio_allocation_sql(as_of_date DATE)` — FX-aware per-asset USD values |
-| cash | `portfolio_cash_sql(as_of_date DATE)` — FX-converted cash balances with history |
 | summary | `portfolio_summary_sql(as_of_date DATE)` — position summary with realized/unrealized |
 | performance | `portfolio_performance_sql(as_of_date, benchmark, from_date)` — TWR/risk metrics |
 | mwr | `portfolio_mwr_sql(as_of_date DATE)` — XIRR / Modified Weighted Return |

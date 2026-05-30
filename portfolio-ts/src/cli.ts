@@ -11,6 +11,7 @@ import { verifyPrices } from "./commands/verify_prices.js";
 import { repairPrices, repairPricesDryRun } from "./commands/repair_prices.js";
 import { fetchPrices } from "./providers/yahoo.js";
 import { getReport } from "./commands/report.js";
+import { getCash } from "./commands/cash.js";
 import { getHealth } from "./commands/health.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
@@ -33,6 +34,7 @@ Commands:
   recalculate     Rebuild daily_returns from cached prices
   verify_prices   Show price coverage diagnostics (read-only)
   repair_prices   Fetch missing prices from Yahoo Finance
+  cash            Cash balances by currency with USD values
   sync            repair_prices + recalculate (daily maintenance)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
@@ -367,6 +369,13 @@ export async function dispatch(argv: string[]): Promise<void> {
       }
       const result = await backupDb({ dbUrl, outPath: str(flags, "out") });
       console.log(JSON.stringify(success("backup", result), null, 2));
+      return;
+    }
+
+    case "cash": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getCash(asOfDate);
+      console.log(JSON.stringify(success("cash", result, result.rows.length), null, 2));
       return;
     }
 

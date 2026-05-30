@@ -380,6 +380,63 @@ AS $$
     LEFT JOIN latest_dr dr ON TRUE
 $$;
 
+-- Cash balances snapshot: FX-converted cash balances as of a given date.
+-- Returns cash per bucket with native currency balance and USD value.
+-- All financial calculations are owned by PostgreSQL.
+CREATE OR REPLACE FUNCTION portfolio_cash_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (
+    cash_key       TEXT,
+    currency       TEXT,
+    display_bucket TEXT,
+    balance        DOUBLE PRECISION,
+    usd_value      DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH cash_txns AS (
+        SELECT
+            get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset)) AS cash_key,
+            cash_display_currency_sql(get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset))) AS currency,
+            CASE
+                WHEN t.asset LIKE 'CASH %' THEN t.asset
+                WHEN get_asset_type_sql(t.asset) = 'cash_base' THEN 'CASH USD'
+                WHEN get_asset_type_sql(t.asset) = 'cash_fx'
+                    THEN 'CASH ' || cash_display_currency_sql(get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset)))
+                ELSE NULL
+            END AS display_bucket,
+            CASE
+                WHEN t.action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN t.quantity
+                WHEN t.action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -t.quantity
+                WHEN t.action = 'EXCHANGE_FROM' THEN t.quantity
+                ELSE 0
+            END AS cash_delta
+        FROM transactions t
+        WHERE t.date <= p_as_of_date
+    ),
+    aggregated AS (
+        SELECT
+            cash_key,
+            currency,
+            COALESCE(display_bucket, 'CASH ' || currency) AS display_bucket,
+            SUM(cash_delta) AS balance
+        FROM cash_txns
+        GROUP BY cash_key, currency, display_bucket
+        HAVING SUM(cash_delta) <> 0
+    )
+    SELECT
+        a.cash_key,
+        a.currency,
+        a.display_bucket,
+        a.balance,
+        CASE
+            WHEN a.cash_key = 'USD' THEN a.balance
+            ELSE a.balance * COALESCE(price_asof_sql(a.cash_key, p_as_of_date), 0)
+        END AS usd_value
+    FROM aggregated a
+    ORDER BY a.cash_key
+$$;
+
 -- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on
 CREATE OR REPLACE FUNCTION daily_maintenance_check()
 RETURNS VOID
