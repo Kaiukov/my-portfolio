@@ -42,6 +42,14 @@ IMMUTABLE
 AS $$
     SELECT CASE
         WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
+        WHEN asset = 'EUR' THEN 'EURUSD=X'
+        WHEN asset = 'GBP' THEN 'GBPUSD=X'
+        WHEN asset = 'CHF' THEN 'CHFUSD=X'
+        WHEN asset = 'CAD' THEN 'CADUSD=X'
+        WHEN asset = 'AUD' THEN 'AUDUSD=X'
+        WHEN asset = 'HKD' THEN 'HKDUSD=X'
+        WHEN asset = 'SGD' THEN 'SGDUSD=X'
+        WHEN asset = 'JPY' THEN 'JPYUSD=X'
         WHEN asset_type = 'cash_fx' THEN asset
         WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
         WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
@@ -160,4 +168,167 @@ AS $$
         )
         ELSE p_quantity * price_asof_sql(p_asset, p_as_of_date)
     END
+$$;
+
+-- Lazy-recalc staleness check: TRUE when price refresh is newer than last recalculation
+CREATE OR REPLACE FUNCTION needs_recalc()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT CASE
+        WHEN (SELECT state_value FROM service_state
+              WHERE state_key = 'last_successful_recalc') IS NULL
+            THEN TRUE
+        WHEN (SELECT state_value FROM service_state
+              WHERE state_key = 'last_successful_price_refresh') IS NULL
+            THEN FALSE
+        ELSE
+            (SELECT state_value::timestamptz FROM service_state
+             WHERE state_key = 'last_successful_price_refresh')
+            >
+            (SELECT state_value::timestamptz FROM service_state
+             WHERE state_key = 'last_successful_recalc')
+    END
+$$;
+
+-- Discover all required tickers (assets + FX) from transaction data
+-- Returns ticker_category = 'asset' for tradeable assets, 'fx' for FX pairs
+CREATE OR REPLACE FUNCTION discover_required_tickers_sql()
+RETURNS TABLE(ticker TEXT, ticker_category TEXT)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT ticker, ticker_category
+    FROM (
+        -- All unique assets from transactions
+        SELECT t.asset AS ticker, 'asset'::TEXT AS ticker_category
+        FROM transactions t
+
+        UNION
+
+        -- FX pairs derived from non-USD currencies in transactions
+        SELECT CASE
+            WHEN t.currency = 'EUR' THEN 'EURUSD=X'
+            WHEN t.currency = 'GBP' THEN 'GBPUSD=X'
+            WHEN t.currency = 'UAH' THEN 'UAHUSD=X'
+            WHEN t.currency = 'JPY' THEN 'JPYUSD=X'
+            WHEN t.currency = 'CHF' THEN 'CHFUSD=X'
+            WHEN t.currency = 'CAD' THEN 'CADUSD=X'
+            WHEN t.currency = 'AUD' THEN 'AUDUSD=X'
+            WHEN t.currency = 'HKD' THEN 'HKDUSD=X'
+            WHEN t.currency = 'SGD' THEN 'SGDUSD=X'
+        END, 'fx'::TEXT
+        FROM transactions t
+        WHERE t.currency IS NOT NULL AND t.currency != 'USD'
+
+        UNION
+
+        -- FX pairs needed by regional stock types
+        SELECT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset)), 'fx'::TEXT
+        FROM transactions t
+        WHERE get_asset_type_sql(t.asset) IN (
+            'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+            'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+        )
+
+        UNION
+
+        -- Cash FX assets directly (e.g. EURUSD=X as a traded asset)
+        SELECT t.asset, 'fx'::TEXT
+        FROM transactions t
+        WHERE get_asset_type_sql(t.asset) = 'cash_fx'
+
+        UNION
+
+        -- Legacy CASH buckets (CASH EUR -> EURUSD=X, etc.)
+        SELECT CASE
+            WHEN t.asset = 'CASH EUR' THEN 'EURUSD=X'
+            WHEN t.asset = 'CASH GBP' THEN 'GBPUSD=X'
+            WHEN t.asset = 'CASH UAH' THEN 'UAHUSD=X'
+        END, 'fx'::TEXT
+        FROM transactions t
+        WHERE t.asset IN ('CASH EUR', 'CASH GBP', 'CASH UAH')
+    ) sub
+    WHERE ticker IS NOT NULL
+$$;
+
+-- Required price checkpoints per ticker: trade dates + end date
+-- Used to validate that the price cache covers all valuation points.
+CREATE OR REPLACE FUNCTION get_required_price_checkpoints_sql(p_end_date DATE)
+RETURNS TABLE(ticker TEXT, checkpoint_date DATE)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT DISTINCT t.asset::TEXT, t.date
+    FROM transactions t
+    WHERE t.action IN ('BUY', 'SELL')
+      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+      AND t.asset NOT LIKE 'CASH %'
+
+    UNION
+
+    SELECT DISTINCT t.asset::TEXT, p_end_date
+    FROM transactions t
+    WHERE t.action IN ('BUY', 'SELL')
+      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+      AND t.asset NOT LIKE 'CASH %'
+
+    UNION
+
+    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT, t.date
+    FROM transactions t
+    WHERE t.action IN ('BUY', 'SELL')
+      AND get_asset_type_sql(t.asset) IN (
+          'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+          'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+      )
+
+    UNION
+
+    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT, p_end_date
+    FROM transactions t
+    WHERE t.action IN ('BUY', 'SELL')
+      AND get_asset_type_sql(t.asset) IN (
+          'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+          'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+      )
+
+    UNION
+
+    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT, t.date
+    FROM transactions t
+    WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+       OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+      AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+
+    UNION
+
+    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT, p_end_date
+    FROM transactions t
+    WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+       OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+      AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+$$;
+
+-- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on
+CREATE OR REPLACE FUNCTION daily_maintenance_check()
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF COALESCE((SELECT MAX(date) FROM prices), DATE '1900-01-01') < CURRENT_DATE - 1 THEN
+        INSERT INTO service_state (state_key, state_value, updated_at)
+        VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
+        ON CONFLICT (state_key)
+        DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+    END IF;
+
+    IF needs_recalc() THEN
+        INSERT INTO service_state (state_key, state_value, updated_at)
+        VALUES ('needs_recalc', 'true', CURRENT_TIMESTAMP)
+        ON CONFLICT (state_key)
+        DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+    END IF;
+END;
 $$;

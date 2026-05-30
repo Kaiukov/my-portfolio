@@ -9,6 +9,10 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
+# Schemas where SQL functions have already been installed in this process.
+# CREATE OR REPLACE FUNCTION is expensive; skip when functions are already present.
+_sql_functions_installed: set[str] = set()
+
 
 def is_postgres_url(target: str) -> bool:
     """Return True when target points to a PostgreSQL connection string."""
@@ -56,12 +60,18 @@ class _ConnectionAdapter:
             self._conn.execute(psycopg_sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(psycopg_sql.Identifier(schema_name)))
             self._conn.execute(psycopg_sql.SQL('SET search_path TO {}').format(psycopg_sql.Identifier(schema_name)))
         self._read_only = read_only
+        self._schema_name = schema_name or "public"
 
     def execute(self, sql: str, params=None):
         """Execute SQL with psycopg %s placeholders."""
         if params is None:
             return self._conn.execute(sql)
         return self._conn.execute(sql, params)
+
+    def executemany(self, sql: str, params_seq):
+        """Execute SQL once per row in params_seq using server-side batching."""
+        with self._conn.cursor() as cur:
+            cur.executemany(sql, params_seq)
 
     def commit(self):
         self._conn.commit()
@@ -241,11 +251,14 @@ class PortfolioDatabase:
             )
         """)
 
-        # Create SQL helper functions that mirror the Python domain helpers.
-        self._create_sql_helpers()
-
-        # Create the PostgreSQL recalculation procedure for daily returns.
-        self._create_daily_returns_refresh_function()
+        # Create SQL functions once per schema per process — CREATE OR REPLACE is
+        # expensive (plpgsql compile). TRUNCATE between tests keeps functions alive.
+        schema = self.con._schema_name
+        if schema not in _sql_functions_installed:
+            self._create_sql_helpers()
+            self._create_daily_returns_refresh_function()
+            self._create_maintenance_functions()
+            _sql_functions_installed.add(schema)
 
         self.con.commit()
 
@@ -259,6 +272,7 @@ class PortfolioDatabase:
             AS $$
                 SELECT CASE
                     WHEN ticker = 'USD' THEN 'cash_base'
+                    WHEN ticker IN ('EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'JPY') THEN 'cash_fx'
                     WHEN RIGHT(ticker, 5) = 'USD=X' THEN 'cash_fx'
                     WHEN RIGHT(ticker, 4) = '-USD' THEN 'crypto'
                     WHEN RIGHT(ticker, 2) = '.L' THEN 'stock_gbp'
@@ -293,6 +307,14 @@ class PortfolioDatabase:
             AS $$
                 SELECT CASE
                     WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
+                    WHEN asset = 'EUR' THEN 'EURUSD=X'
+                    WHEN asset = 'GBP' THEN 'GBPUSD=X'
+                    WHEN asset = 'CHF' THEN 'CHFUSD=X'
+                    WHEN asset = 'CAD' THEN 'CADUSD=X'
+                    WHEN asset = 'AUD' THEN 'AUDUSD=X'
+                    WHEN asset = 'HKD' THEN 'HKDUSD=X'
+                    WHEN asset = 'SGD' THEN 'SGDUSD=X'
+                    WHEN asset = 'JPY' THEN 'JPYUSD=X'
                     WHEN asset_type = 'cash_fx' THEN asset
                     WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
                     WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
@@ -333,6 +355,15 @@ class PortfolioDatabase:
             IMMUTABLE
             AS $$
                 SELECT CASE
+                    WHEN asset_type = 'cash_base' OR asset = 'USD' THEN 'USD'
+                    WHEN asset = 'EUR' THEN 'EURUSD=X'
+                    WHEN asset = 'GBP' THEN 'GBPUSD=X'
+                    WHEN asset = 'CHF' THEN 'CHFUSD=X'
+                    WHEN asset = 'CAD' THEN 'CADUSD=X'
+                    WHEN asset = 'AUD' THEN 'AUDUSD=X'
+                    WHEN asset = 'HKD' THEN 'HKDUSD=X'
+                    WHEN asset = 'SGD' THEN 'SGDUSD=X'
+                    WHEN asset = 'JPY' THEN 'JPYUSD=X'
                     WHEN asset_type = 'stock_eur' THEN 'EURUSD=X'
                     WHEN asset_type = 'stock_gbp' THEN 'GBPUSD=X'
                     WHEN asset_type = 'stock_jpy' THEN 'JPYUSD=X'
@@ -417,6 +448,62 @@ class PortfolioDatabase:
                     )
                     ELSE p_quantity * price_asof_sql(p_asset, p_as_of_date)
                 END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION discover_required_tickers_sql()
+            RETURNS TABLE(ticker TEXT, ticker_category TEXT)
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT ticker, ticker_category
+                FROM (
+                    SELECT t.asset AS ticker, 'asset'::TEXT AS ticker_category
+                    FROM transactions t
+
+                    UNION
+
+                    SELECT CASE
+                        WHEN t.currency = 'EUR' THEN 'EURUSD=X'
+                        WHEN t.currency = 'GBP' THEN 'GBPUSD=X'
+                        WHEN t.currency = 'UAH' THEN 'UAHUSD=X'
+                        WHEN t.currency = 'JPY' THEN 'JPYUSD=X'
+                        WHEN t.currency = 'CHF' THEN 'CHFUSD=X'
+                        WHEN t.currency = 'CAD' THEN 'CADUSD=X'
+                        WHEN t.currency = 'AUD' THEN 'AUDUSD=X'
+                        WHEN t.currency = 'HKD' THEN 'HKDUSD=X'
+                        WHEN t.currency = 'SGD' THEN 'SGDUSD=X'
+                    END, 'fx'::TEXT
+                    FROM transactions t
+                    WHERE t.currency IS NOT NULL AND t.currency != 'USD'
+
+                    UNION
+
+                    SELECT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset)), 'fx'::TEXT
+                    FROM transactions t
+                    WHERE get_asset_type_sql(t.asset) IN (
+                        'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                        'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                    )
+
+                    UNION
+
+                    SELECT t.asset, 'fx'::TEXT
+                    FROM transactions t
+                    WHERE get_asset_type_sql(t.asset) = 'cash_fx'
+
+                    UNION
+
+                    SELECT CASE
+                        WHEN t.asset = 'CASH EUR' THEN 'EURUSD=X'
+                        WHEN t.asset = 'CASH GBP' THEN 'GBPUSD=X'
+                        WHEN t.asset = 'CASH UAH' THEN 'UAHUSD=X'
+                    END, 'fx'::TEXT
+                    FROM transactions t
+                    WHERE t.asset IN ('CASH EUR', 'CASH GBP', 'CASH UAH')
+                ) sub
+                WHERE ticker IS NOT NULL
             $$;
         """)
 
@@ -617,6 +704,120 @@ class PortfolioDatabase:
             $$;
         """)
 
+    def _create_maintenance_functions(self):
+        """Create lazy-recalc helper functions."""
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION needs_recalc()
+            RETURNS BOOLEAN
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT CASE
+                    WHEN (SELECT state_value FROM service_state
+                          WHERE state_key = 'last_successful_recalc') IS NULL
+                        THEN TRUE
+                    WHEN (SELECT state_value FROM service_state
+                          WHERE state_key = 'last_successful_price_refresh') IS NULL
+                        THEN FALSE
+                    ELSE
+                        (SELECT state_value::timestamptz FROM service_state
+                         WHERE state_key = 'last_successful_price_refresh')
+                        >
+                        (SELECT state_value::timestamptz FROM service_state
+                         WHERE state_key = 'last_successful_recalc')
+                END
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION daily_maintenance_check()
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF COALESCE((SELECT MAX(date) FROM prices), DATE '1900-01-01') < CURRENT_DATE - 1 THEN
+                    INSERT INTO service_state (state_key, state_value, updated_at)
+                    VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
+                    ON CONFLICT (state_key)
+                    DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+                END IF;
+
+                IF needs_recalc() THEN
+                    INSERT INTO service_state (state_key, state_value, updated_at)
+                    VALUES ('needs_recalc', 'true', CURRENT_TIMESTAMP)
+                    ON CONFLICT (state_key)
+                    DO UPDATE SET state_value = 'true', updated_at = CURRENT_TIMESTAMP;
+                END IF;
+            END;
+            $$;
+        """)
+
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION get_required_price_checkpoints_sql(p_end_date DATE)
+            RETURNS TABLE(ticker TEXT, checkpoint_date DATE)
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT DISTINCT t.asset::TEXT, t.date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+                  AND t.asset NOT LIKE 'CASH %'
+
+                UNION
+
+                SELECT DISTINCT t.asset::TEXT, p_end_date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+                  AND t.asset NOT LIKE 'CASH %'
+
+                UNION
+
+                SELECT DISTINCT
+                    cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
+                    t.date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) IN (
+                      'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                      'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                  )
+
+                UNION
+
+                SELECT DISTINCT
+                    cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
+                    p_end_date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) IN (
+                      'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                      'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                  )
+
+                UNION
+
+                SELECT DISTINCT
+                    normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
+                    t.date
+                FROM transactions t
+                WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+                   OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+                  AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+
+                UNION
+
+                SELECT DISTINCT
+                    normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
+                    p_end_date
+                FROM transactions t
+                WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+                   OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+                  AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+            $$;
+        """)
+
     def migrate_from_csv(self, csv_path: str):
         """Migrate transactions from CSV file."""
         # Read CSV with pandas to handle date parsing
@@ -798,6 +999,28 @@ class PortfolioDatabase:
             [ticker, date_obj],
         ).fetchone()
         return float(result[0]) if result else None
+
+    def bulk_insert_prices(self, rows: list[tuple]) -> int:
+        """Upsert (ticker, date, price) tuples in a single transaction.
+
+        Args:
+            rows: list of (ticker, date, price) tuples.
+        Returns:
+            Number of rows upserted.
+        """
+        if not rows:
+            return 0
+        self.con.executemany(
+            """
+            INSERT INTO prices (ticker, date, price)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (date, ticker) DO UPDATE SET
+                price = EXCLUDED.price
+            """,
+            rows,
+        )
+        self.con.commit()
+        return len(rows)
 
     def insert_price(self, ticker: str, date_obj, price: float):
         """Insert price for ticker on specific date."""
@@ -2435,18 +2658,18 @@ class PortfolioDatabase:
 
         trans is the full tuple returned by get_transaction_by_id:
         (id, date, asset, action, quantity, asset_type, price, currency,
-         fees, exchange, data_source, account, created_at, updated_at)
+         fees, fee_currency, exchange, data_source, account, created_at, updated_at)
         """
         self.con.execute(
             """
             INSERT INTO transactions
             (id, date, asset, action, quantity, asset_type, price, currency,
-             fees, exchange, data_source, account, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             fees, fee_currency, exchange, data_source, account, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [trans[0], trans[1], trans[2], trans[3], trans[4],
              trans[5], trans[6], trans[7], trans[8], trans[9],
-             trans[10], trans[11], trans[12], trans[13]],
+             trans[10], trans[11], trans[12], trans[13], trans[14]],
         )
         self.con.commit()
 
@@ -2555,6 +2778,36 @@ class PortfolioDatabase:
                     )
                     fp.write(insert_stmt.as_string(self.con._conn) + "\n")
             fp.write("COMMIT;\n")
+
+    def needs_recalc(self) -> bool:
+        """Return True if last price refresh is newer than last recalculation."""
+        row = self.con.execute("SELECT needs_recalc()").fetchone()
+        return bool(row[0]) if row else True
+
+    def discover_assets_and_currencies(self) -> dict:
+        """Discover all assets and required FX currencies from transactions via SQL."""
+        rows = self.con.execute(
+            "SELECT ticker, ticker_category FROM discover_required_tickers_sql()"
+        ).fetchall()
+        assets = []
+        fx_currencies = []
+        for ticker, category in rows:
+            if category == 'asset':
+                assets.append(ticker)
+            else:
+                fx_currencies.append(ticker)
+        return {'assets': sorted(assets), 'fx_currencies': sorted(fx_currencies)}
+
+    def get_required_price_checkpoints(self, end_date) -> dict:
+        """Return per-ticker required price checkpoint dates up to end_date."""
+        rows = self.con.execute(
+            "SELECT ticker, checkpoint_date FROM get_required_price_checkpoints_sql(%s)",
+            [end_date],
+        ).fetchall()
+        result: dict = {}
+        for ticker, checkpoint_date in rows:
+            result.setdefault(ticker, set()).add(checkpoint_date)
+        return {ticker: sorted(dates) for ticker, dates in result.items()}
 
     def close(self):
         """Close database connection."""
