@@ -3,7 +3,7 @@ import { describe, expect, test, mock } from "bun:test";
 const mockQuerySingle = mock();
 const mockQuery = mock();
 
-mock.module("../src/db.js", () => ({
+mock.module("../src/db.ts", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
   connect: () => {},

@@ -4,7 +4,7 @@ import { ValidationError, NotFoundError } from "../src/validators.js";
 const mockQuerySingle = mock();
 const mockWithTransaction = mock();
 
-mock.module("../src/db.js", () => ({
+mock.module("../src/db.ts", () => ({
   query: mock(),
   querySingle: mockQuerySingle,
   withTransaction: mockWithTransaction,
