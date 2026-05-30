@@ -67,6 +67,34 @@ export async function repairPricesDryRun(params: {
   };
 }
 
+async function recordRepair(ticker: string, startDate: string, endDate: string, status: string, rowsLoaded: number, message?: string): Promise<void> {
+  await query(
+    `INSERT INTO repair_log (ticker, start_date, end_date, status, rows_loaded, message)
+     VALUES ($1, $2::date, $3::date, $4, $5, $6)`,
+    [ticker, startDate, endDate, status, rowsLoaded, message ?? null],
+  );
+}
+
+async function markRefreshSuccess(rowsAffected: number): Promise<void> {
+  const now = new Date().toISOString();
+  await query(
+    `INSERT INTO refresh_log (refresh_date, refresh_type, rows_affected)
+     VALUES (CURRENT_DATE, 'price_refresh', $1)`,
+    [rowsAffected],
+  );
+  await query(
+    `INSERT INTO service_state (state_key, state_value, updated_at)
+     VALUES ('last_successful_price_refresh', $1, $2)
+     ON CONFLICT (state_key)
+     DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = EXCLUDED.updated_at`,
+    [now, now],
+  );
+  await query(
+    `UPDATE service_state SET state_value = 'false', updated_at = NOW()
+     WHERE state_key = 'prices_need_fetch'`,
+  );
+}
+
 export async function repairPrices(
   params: { tickers?: string[]; startDate?: string; endDate?: string },
   fetchFn: FetchFn,
@@ -81,10 +109,21 @@ export async function repairPrices(
   let totalRows = 0;
 
   for (const ticker of targetTickers) {
-    const rows = await fetchFn(ticker, start, end);
-    const inserted = await upsertPrices(rows);
-    rowsPerTicker[ticker] = inserted;
-    totalRows += inserted;
+    try {
+      const rows = await fetchFn(ticker, start, end);
+      const inserted = await upsertPrices(rows);
+      rowsPerTicker[ticker] = inserted;
+      totalRows += inserted;
+      await recordRepair(ticker, start, end, "success", inserted);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      rowsPerTicker[ticker] = 0;
+      await recordRepair(ticker, start, end, "failed", 0, msg);
+    }
+  }
+
+  if (totalRows > 0 && (params.tickers?.length ?? 0) === 0) {
+    await markRefreshSuccess(totalRows);
   }
 
   return {

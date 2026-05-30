@@ -53,6 +53,26 @@ export async function recalculate(params: {
   );
   const rowsAffected = Number(rows[0]?.refresh_daily_returns_sql ?? 0);
 
+  if (rowsAffected > 0) {
+    await query(
+      `INSERT INTO refresh_log (refresh_date, refresh_type, rows_affected)
+       VALUES (CURRENT_DATE, 'daily_returns', $1)`,
+      [rowsAffected],
+    );
+    const now = new Date().toISOString();
+    await query(
+      `INSERT INTO service_state (state_key, state_value, updated_at)
+       VALUES ('last_successful_recalc', $1, $2)
+       ON CONFLICT (state_key)
+       DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = EXCLUDED.updated_at`,
+      [now, now],
+    );
+    await query(
+      `UPDATE service_state SET state_value = 'false', updated_at = NOW()
+       WHERE state_key = 'needs_recalc'`,
+    );
+  }
+
   return {
     rows_affected: rowsAffected,
     recalc_type: fromDate ? "partial" : "full",
