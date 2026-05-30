@@ -1,4 +1,4 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle } from "../db.js";
 import {
   ValidationError,
   parseWriteDate,
@@ -80,6 +80,7 @@ export async function addTransaction(params: {
     }
   }
 
+  const { withTransaction } = await import("../db.js");
   const inserted = await withTransaction(async (tx) => {
     const [atRow] = await tx.unsafe<{ asset_type: string }>(
       "SELECT get_asset_type_sql($1) AS asset_type",

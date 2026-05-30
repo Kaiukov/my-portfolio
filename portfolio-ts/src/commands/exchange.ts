@@ -1,4 +1,4 @@
-import { querySingle, withTransaction } from "../db.js";
+import { querySingle } from "../db.js";
 import {
   ValidationError,
   parseWriteDate,
@@ -54,7 +54,7 @@ export async function exchangeCurrency(params: {
   }
 
   const targetAmount = params.quantity * params.rate;
-
+  const { withTransaction } = await import("../db.js");
   const result = await withTransaction(async (tx) => {
     const [fromAt] = await tx.unsafe<{ asset_type: string }>(
       "SELECT get_asset_type_sql($1) AS asset_type",
