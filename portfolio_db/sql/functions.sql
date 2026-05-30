@@ -311,6 +311,75 @@ AS $$
       AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
 $$;
 
+-- Portfolio status snapshot: all fields owned by PostgreSQL.
+-- Called by `portfolio-ts status` so TypeScript never computes financial metrics.
+--
+-- Known parity gap vs Python: deposits/withdrawals/income/fees/taxes use raw transaction
+-- quantities in the asset's native currency, not FX-converted USD amounts. For portfolios
+-- with non-USD cash flows the totals may differ from Python's FX-aware cash-flow analysis.
+-- portfolio_value and as_of_date are taken from daily_returns (recalculated by PG).
+CREATE OR REPLACE FUNCTION portfolio_status_sql()
+RETURNS TABLE (
+    transactions_count    INTEGER,
+    start_date            TEXT,
+    end_date              TEXT,
+    portfolio_value       DOUBLE PRECISION,
+    total_invested        DOUBLE PRECISION,
+    deposits              DOUBLE PRECISION,
+    withdrawals           DOUBLE PRECISION,
+    income                DOUBLE PRECISION,
+    fees                  DOUBLE PRECISION,
+    taxes                 DOUBLE PRECISION,
+    total_gain            DOUBLE PRECISION,
+    total_gain_pct        DOUBLE PRECISION,
+    as_of_date            TEXT
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH agg AS (
+        SELECT
+            COUNT(*)::INTEGER                                            AS transactions_count,
+            MIN(date)::TEXT                                             AS start_date,
+            MAX(date)::TEXT                                             AS end_date,
+            COALESCE(SUM(CASE WHEN action = 'DEPOSIT'  THEN quantity ELSE 0 END), 0) AS deposits,
+            COALESCE(SUM(CASE WHEN action = 'WITHDRAW' THEN quantity ELSE 0 END), 0) AS withdrawals,
+            COALESCE(SUM(CASE WHEN action IN ('DIVIDEND','INTEREST') THEN quantity ELSE 0 END), 0) AS income,
+            COALESCE(SUM(CASE WHEN action = 'FEE' THEN quantity ELSE 0 END), 0) AS fees,
+            COALESCE(SUM(CASE WHEN action = 'TAX' THEN quantity ELSE 0 END), 0) AS taxes
+        FROM transactions
+    ),
+    latest_dr AS (
+        SELECT portfolio_value, date::TEXT AS as_of_date
+        FROM daily_returns
+        ORDER BY date DESC
+        LIMIT 1
+    )
+    SELECT
+        a.transactions_count,
+        a.start_date,
+        a.end_date,
+        dr.portfolio_value,
+        a.deposits - a.withdrawals                                      AS total_invested,
+        a.deposits,
+        a.withdrawals,
+        a.income,
+        a.fees,
+        a.taxes,
+        CASE WHEN dr.portfolio_value IS NOT NULL
+                  AND (a.deposits - a.withdrawals) > 0
+             THEN dr.portfolio_value - (a.deposits - a.withdrawals)
+             ELSE NULL END                                              AS total_gain,
+        CASE WHEN dr.portfolio_value IS NOT NULL
+                  AND (a.deposits - a.withdrawals) > 0
+             THEN (dr.portfolio_value - (a.deposits - a.withdrawals))
+                   / (a.deposits - a.withdrawals) * 100.0
+             ELSE NULL END                                              AS total_gain_pct,
+        dr.as_of_date
+    FROM agg a
+    LEFT JOIN latest_dr dr ON TRUE
+$$;
+
 -- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on
 CREATE OR REPLACE FUNCTION daily_maintenance_check()
 RETURNS VOID

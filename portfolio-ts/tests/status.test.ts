@@ -11,26 +11,22 @@ mock.module("../src/db.js", () => ({
 }));
 
 describe("getStatus", () => {
-  test("returns status with transaction count and portfolio value", async () => {
-    mockQuerySingle.mockClear();
-    mockQuery.mockClear();
-
-    mockQuerySingle.mockImplementation(async (sql: string) => {
-      if (sql.includes("COUNT(*)")) return { count: 42 };
-      if (sql.includes("MIN(date)")) return { start_date: "2024-01-15", end_date: "2026-03-20" };
-      if (sql.includes("portfolio_value")) return { portfolio_value: 125000.50, as_of_date: "2026-03-20" };
-      return null;
+  test("returns status from portfolio_status_sql()", async () => {
+    mockQuerySingle.mockResolvedValue({
+      transactions_count: 42,
+      start_date: "2024-01-15",
+      end_date: "2026-03-20",
+      portfolio_value: 125000.50,
+      total_invested: 85000,
+      deposits: 100000,
+      withdrawals: 15000,
+      income: 2500,
+      fees: 120,
+      taxes: 50,
+      total_gain: 40000.50,
+      total_gain_pct: 47.06,
+      as_of_date: "2026-03-20",
     });
-
-    mockQuery.mockResolvedValue([
-      { action: "DEPOSIT", cnt: 5, total_quantity: 100000 },
-      { action: "WITHDRAW", cnt: 2, total_quantity: 15000 },
-      { action: "DIVIDEND", cnt: 10, total_quantity: 2500 },
-      { action: "BUY", cnt: 20, total_quantity: 0 },
-      { action: "SELL", cnt: 8, total_quantity: 0 },
-      { action: "FEE", cnt: 5, total_quantity: 120 },
-      { action: "TAX", cnt: 1, total_quantity: 50 },
-    ]);
 
     const { getStatus } = await import("../src/commands/status.js");
     const result = await getStatus();
@@ -39,21 +35,19 @@ describe("getStatus", () => {
     expect(result.start_date).toBe("2024-01-15");
     expect(result.end_date).toBe("2026-03-20");
     expect(result.portfolio_value).toBe(125000.50);
+    expect(result.total_invested).toBe(85000);
     expect(result.deposits).toBe(100000);
     expect(result.withdrawals).toBe(15000);
-    expect(result.total_invested).toBe(85000);
     expect(result.income).toBe(2500);
     expect(result.fees).toBe(120);
     expect(result.taxes).toBe(50);
+    expect(result.total_gain).toBe(40000.50);
+    expect(result.total_gain_pct).toBe(47.06);
     expect(result.as_of_date).toBe("2026-03-20");
   });
 
   test("handles empty database gracefully", async () => {
-    mockQuerySingle.mockClear();
-    mockQuery.mockClear();
-
     mockQuerySingle.mockResolvedValue(null);
-    mockQuery.mockResolvedValue([]);
 
     const { getStatus } = await import("../src/commands/status.js");
     const result = await getStatus();

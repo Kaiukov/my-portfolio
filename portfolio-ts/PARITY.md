@@ -1,60 +1,47 @@
 # Parity
 
+PostgreSQL is the only source of truth for portfolio data and financial correctness.
+TypeScript/Bun is CLI adapter, orchestration, and JSON formatting only.
+
 | Python command | TypeScript command | Status | Notes |
 |---|---|---|---|
-| `portfolio status` | `portfolio-ts status` | Python removed | Simple gain formula; Python TWR removed with Python. `as_of_date` from daily_returns. |
-| `portfolio transactions` | `portfolio-ts transactions` | Python removed | Read-only, pagination, date filters. |
-| `portfolio add` | `portfolio-ts add` | Python removed | Validation + INSERT + recalc. PostgreSQL transaction rollback. |
-| `portfolio edit` | `portfolio-ts edit` | Python removed | Validation + UPDATE + recalc. `--dry-run` supported. |
-| `portfolio delete` | `portfolio-ts delete` | Python removed | `--confirm` required. `--dry-run` supported. |
-| `portfolio exchange` | `portfolio-ts exchange` | Python removed | Two-leg EXCHANGE_FROM/EXCHANGE_TO + recalc. |
+| `portfolio status` | `portfolio-ts status` | partial | Calls `portfolio_status_sql()` — PG owns all calculations. Known gap: deposits/withdrawals/income/fees/taxes use raw quantities (not FX-converted). Python uses FX-aware cash flow analysis. |
+| `portfolio transactions` | `portfolio-ts transactions` | partial | Read-only, pagination, date filters. Write ops via dedicated commands. |
+| `portfolio add` | `portfolio-ts add` | partial | Validation + INSERT + `refresh_daily_returns_sql`. Rollback via PG transaction. Not parity-tested against real DB yet. |
+| `portfolio edit` | `portfolio-ts edit` | partial | UPDATE + recalc. `--dry-run` supported. PG transaction rollback. Not parity-tested. |
+| `portfolio delete` | `portfolio-ts delete` | partial | `--confirm` required. `--dry-run`. PG transaction rollback. No `--backup`. Not parity-tested. |
+| `portfolio exchange` | `portfolio-ts exchange` | partial | Two-leg EXCHANGE_FROM/EXCHANGE_TO + recalc. Cash-like validated via `is_cash_like_sql()`. Not parity-tested. |
+| `portfolio repair_prices` | `portfolio-ts repair_prices` | partial | `yahoo-finance2` (same Yahoo Finance source as Python yfinance). `--ticker` comma-separated. `--dry-run`. Not parity-tested. |
+| `portfolio recalculate` | `portfolio-ts recalculate` | partial | `--from-date`, `--force`, `--dry-run`. Calls `refresh_daily_returns_sql`. Not parity-tested. |
+| `portfolio verify_prices` | `portfolio-ts verify_prices` | partial | Coverage check via `discover_required_tickers_sql()` + `get_required_price_checkpoints_sql()`. Simplified output. |
+| — | `portfolio-ts sync` | partial | TS-only: `repair_prices` + `recalculate`. No Python equivalent. |
 | `portfolio report` | — | not started | |
 | `portfolio allocation` | — | not started | |
 | `portfolio cash` | — | not started | |
 | `portfolio summary` | — | not started | |
 | `portfolio performance` | — | not started | |
 | `portfolio mwr` | — | not started | |
-| `portfolio verify_prices` | — | not started | |
-| `portfolio repair_prices` | `portfolio-ts repair_prices` | Python removed | yahoo-finance2. `--ticker` comma-separated. Dry-run supported. |
-| `portfolio recalculate` | `portfolio-ts recalculate` | Python removed | `--from-date`, `--force`, `--dry-run` supported. |
-| `portfolio verify_prices` | `portfolio-ts verify_prices` | Python removed | Coverage check via SQL functions. |
-| — | `portfolio-ts sync` | TS-only | Convenience: `repair_prices` + `recalculate`. No Python equivalent. |
 | `portfolio backup` | — | not started | |
 | `portfolio init` | — | not started | |
 | `portfolio health` | — | not started | |
 | `portfolio migrate` | — | not started | |
 | `portfolio migrate-duckdb-to-postgres` | — | not started | |
 
-## Known differences — write commands
+## Python removal prerequisites (NOT met yet)
 
-- **Rollback**: TypeScript uses a PostgreSQL transaction (`BEGIN/COMMIT/ROLLBACK` via `sql.begin()`). Python uses application-level snapshot/restore. Both achieve the same atomicity guarantee; TypeScript approach is cleaner.
-- **Price pre-check**: Python runs `_require_cached_price_requirements` before calling `refresh_daily_returns_sql` to fail fast on missing prices. TypeScript skips this and lets PostgreSQL raise `'Price unavailable for X as of Y'` from inside the function. Error is surfaced as a DB error.
-- **exchange asset normalization**: Python normalises `from`/`to` assets (e.g., `CASH USD` → `USD`) and then checks if they resolve to the same canonical form. TypeScript only checks `fromAsset.toUpperCase() === toAsset.toUpperCase()` (matches Python CLI check but not the deeper service-layer check).
-- **add `--backup` delete**: Python's `delete` supports `--backup` to create a DB dump before deleting. TypeScript omits this flag.
-- **Date format write commands**: Both use `DD-MM-YYYY`. TypeScript validates the format strictly and converts to `YYYY-MM-DD` for PostgreSQL.
+Python must NOT be removed until ALL of the following are satisfied:
 
-## Known differences — read commands
+- [ ] All kept commands are implemented in TypeScript
+- [ ] All kept commands have parity tests comparing real JSON against Python output
+- [ ] Unported commands (report, allocation, cash, summary, performance, mwr, backup, init, health, migrate) are either ported or explicitly documented as intentionally dropped
+- [ ] `portfolio_status_sql()` FX-conversion gap is resolved or documented as acceptable
+- [ ] `scripts/parity-check.sh` passes for all migrated commands
 
-- **Portfolio value**: TypeScript reads `portfolio_value` from the latest `daily_returns` row. Python computes it via a complex CTE that joins `daily_returns` with `prices` for benchmark/comparison data.
-- **Total invested**: TypeScript uses `DEPOSIT - WITHDRAW` from transaction quantities. Python uses `net_contributions` from cash flow analysis (includes FX conversion).
-- **Income / Fees / Taxes**: TypeScript reads raw quantities. Python includes trade-level fees and FX conversion.
+## Known differences
 
-## Known differences — Phase 3
-
-- **Price provider**: TypeScript uses `yahoo-finance2` npm package; Python uses `yfinance`. Both use Yahoo Finance as the data source. Inverted FX pairs and ticker mapping are ported to TypeScript.
-- **`repair_prices --ticker`**: Python CLI accepts `--ticker AAPL --ticker MSFT` (repeated flags); TypeScript CLI accepts `--ticker AAPL,MSFT` (comma-separated). Functional parity.
-- **`verify_prices` output**: TypeScript returns simplified coverage data. Python also returns schema info, optimization notes, and repair logs. These can be added in future PRs.
-- **`sync` command**: TypeScript-only convenience command (repair_prices + recalculate). No Python equivalent.
-
-## Migration complete
-
-All 5 phases completed:
-1. ✅ Read-only CLI (status, transactions)
-2. ✅ Write commands (add, edit, delete, exchange)
-3. ✅ Maintenance (recalculate, repair_prices, verify_prices, sync)
-4. ✅ Cutover (portfolio → TypeScript, portfolio-py fallback)
-5. ✅ Python removed (CLI, services, dependencies; SQL schema kept)
-
-**Entrypoint**: `bin/portfolio` → `bun portfolio-ts/src/cli.ts`
-**PostgreSQL source of truth**: `portfolio_db/sql/` (schema, functions, procedures, views, triggers)
-**TypeScript tests**: `portfolio-ts/tests/` — 60 passing tests
+- **status — financial metrics**: TypeScript calls `portfolio_status_sql()` which uses raw transaction quantities. Python uses FX-aware cash flow analysis (`get_reporting_totals_sql` via reporting snapshot). For USD-only portfolios results are identical. For mixed-currency portfolios there may be small differences.
+- **exchange normalization**: TypeScript only checks `fromAsset === toAsset` case-insensitively. Python also checks normalized canonical form.
+- **repair_prices --ticker**: Python uses repeated flags; TypeScript uses comma-separated string.
+- **verify_prices output**: TypeScript returns simplified coverage data (no schema info, repair logs, or optimization notes).
+- **sync**: TypeScript-only convenience command. No Python equivalent.
+- **PostgreSQL transaction rollback**: TypeScript uses `sql.begin()` (native PG transactions). Python uses application-level snapshot/restore. Both are atomic; TypeScript approach is cleaner.

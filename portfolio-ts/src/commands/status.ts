@@ -1,4 +1,4 @@
-import { query, querySingle } from "../db.js";
+import { querySingle } from "../db.js";
 
 export interface StatusData {
   transactions: number;
@@ -21,61 +21,50 @@ function num(val: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function numOrNull(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function getStatus(): Promise<StatusData> {
-  const countRow = await querySingle("SELECT COUNT(*)::int AS count FROM transactions");
-  const transactions = num(countRow?.count ?? 0);
-
-  const dateRow = await querySingle(
-    "SELECT MIN(date)::text AS start_date, MAX(date)::text AS end_date FROM transactions",
+  // All financial metrics are owned by PostgreSQL via portfolio_status_sql().
+  // TypeScript does not compute any financial values — it only formats the output.
+  const row = await querySingle<Record<string, unknown>>(
+    "SELECT * FROM portfolio_status_sql()",
   );
 
-  const portfolioRow = await querySingle(
-    "SELECT portfolio_value, date::text AS as_of_date FROM daily_returns ORDER BY date DESC LIMIT 1",
-  );
-
-  const actionRows = (await query(`
-    SELECT
-      action,
-      COUNT(*)::int AS cnt,
-      COALESCE(SUM(quantity), 0) AS total_quantity
-    FROM transactions
-    GROUP BY action
-  `)) as { action: string; cnt: number; total_quantity: number }[];
-
-  const actionQty: Record<string, number> = {};
-  for (const row of actionRows) {
-    actionQty[row.action] = num(row.total_quantity);
+  if (!row) {
+    return {
+      transactions: 0,
+      start_date: null,
+      end_date: null,
+      portfolio_value: null,
+      total_invested: null,
+      deposits: 0,
+      withdrawals: 0,
+      income: 0,
+      fees: 0,
+      taxes: 0,
+      total_gain: null,
+      total_gain_pct: null,
+      as_of_date: null,
+    };
   }
 
-  const deposits = actionQty["DEPOSIT"] ?? 0;
-  const withdrawals = actionQty["WITHDRAW"] ?? 0;
-  const income = (actionQty["DIVIDEND"] ?? 0) + (actionQty["INTEREST"] ?? 0);
-  const fees = actionQty["FEE"] ?? 0;
-  const taxes = actionQty["TAX"] ?? 0;
-  const totalInvested = deposits - withdrawals;
-  const portfolioValue = portfolioRow ? num(portfolioRow["portfolio_value"]) : null;
-  const totalGain =
-    portfolioValue !== null && totalInvested !== 0
-      ? portfolioValue - totalInvested
-      : null;
-  const totalGainPct =
-    totalInvested > 0 && totalGain !== null
-      ? (totalGain / totalInvested) * 100
-      : null;
-
   return {
-    transactions,
-    start_date: (dateRow?.start_date as string) ?? null,
-    end_date: (dateRow?.end_date as string) ?? null,
-    portfolio_value: portfolioValue,
-    total_invested: totalInvested,
-    deposits,
-    withdrawals,
-    income,
-    fees,
-    taxes,
-    total_gain: totalGain,
-    total_gain_pct: totalGainPct,
-    as_of_date: (portfolioRow?.as_of_date as string) ?? null,
+    transactions: num(row["transactions_count"]),
+    start_date: row["start_date"] != null ? String(row["start_date"]) : null,
+    end_date: row["end_date"] != null ? String(row["end_date"]) : null,
+    portfolio_value: numOrNull(row["portfolio_value"]),
+    total_invested: numOrNull(row["total_invested"]),
+    deposits: num(row["deposits"]),
+    withdrawals: num(row["withdrawals"]),
+    income: num(row["income"]),
+    fees: num(row["fees"]),
+    taxes: num(row["taxes"]),
+    total_gain: numOrNull(row["total_gain"]),
+    total_gain_pct: numOrNull(row["total_gain_pct"]),
+    as_of_date: row["as_of_date"] != null ? String(row["as_of_date"]) : null,
   };
 }
