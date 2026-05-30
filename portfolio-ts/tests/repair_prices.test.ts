@@ -4,7 +4,7 @@ import type { PriceRow } from "../src/providers/yahoo.js";
 const mockQuery = mock();
 const mockQuerySingle = mock();
 
-mock.module("../src/db.ts", () => ({
+mock.module("../src/db.js", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
   runTx: mock(),

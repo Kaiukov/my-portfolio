@@ -1,6 +1,6 @@
 import { describe, expect, test, mock, jest } from "bun:test";
 
-mock.module("../src/db.ts", () => ({
+mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mock(),
   runTx: mock(),
