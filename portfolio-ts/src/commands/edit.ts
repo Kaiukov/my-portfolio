@@ -1,4 +1,4 @@
-import { querySingle } from "../db.js";
+import * as db from "../db.js";
 import {
   ValidationError,
   NotFoundError,
@@ -37,7 +37,7 @@ export interface EditDryRunResult {
 }
 
 async function fetchById(transId: number): Promise<TransactionRow | null> {
-  const row = await querySingle<Record<string, unknown>>(
+  const row = await db.querySingle<Record<string, unknown>>(
     `SELECT id, date, asset, action, quantity, asset_type, price, currency,
             fees, fee_currency, exchange, data_source, account, created_at, updated_at
      FROM transactions WHERE id = $1`,
@@ -104,7 +104,7 @@ export async function editTransaction(
   const newAsset = changes.asset ?? existing.asset;
 
   if (newAction === "SELL") {
-    const row = await querySingle<{ net: string }>(
+    const row = await db.querySingle<{ net: string }>(
       `SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN quantity
                                WHEN action = 'SELL' THEN -quantity
                                ELSE 0 END), 0)::text AS net
@@ -120,8 +120,8 @@ export async function editTransaction(
   }
 
   const fromDate = newDate < existing.date ? newDate : existing.date;
-  const { withTransaction } = await import("../db.js");
-  const updated = await withTransaction(async (tx) => {
+  
+  const updated = await db.withTransaction(async (tx) => {
     const [atRow] = await tx.unsafe<{ asset_type: string }>(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [newAsset],

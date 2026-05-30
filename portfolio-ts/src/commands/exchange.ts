@@ -1,4 +1,4 @@
-import { querySingle } from "../db.js";
+import * as db from "../db.js";
 import {
   ValidationError,
   parseWriteDate,
@@ -33,11 +33,11 @@ export async function exchangeCurrency(params: {
   }
 
   // Cash-like validation via PostgreSQL — avoids duplicating domain logic
-  const fromCashRow = await querySingle<{ ok: boolean }>(
+  const fromCashRow = await db.querySingle<{ ok: boolean }>(
     "SELECT is_cash_like_sql($1) AS ok",
     [params.fromAsset],
   );
-  const toCashRow = await querySingle<{ ok: boolean }>(
+  const toCashRow = await db.querySingle<{ ok: boolean }>(
     "SELECT is_cash_like_sql($1) AS ok",
     [params.toAsset],
   );
@@ -54,8 +54,8 @@ export async function exchangeCurrency(params: {
   }
 
   const targetAmount = params.quantity * params.rate;
-  const { withTransaction } = await import("../db.js");
-  const result = await withTransaction(async (tx) => {
+  
+  const result = await db.withTransaction(async (tx) => {
     const [fromAt] = await tx.unsafe<{ asset_type: string }>(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [params.fromAsset],

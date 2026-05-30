@@ -1,4 +1,4 @@
-import { querySingle } from "../db.js";
+import * as db from "../db.js";
 import {
   ValidationError,
   parseWriteDate,
@@ -64,7 +64,7 @@ export async function addTransaction(params: {
   }
 
   if (action === "SELL") {
-    const row = await querySingle<{ net: string }>(
+    const row = await db.querySingle<{ net: string }>(
       `SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN quantity
                                WHEN action = 'SELL' THEN -quantity
                                ELSE 0 END), 0)::text AS net
@@ -80,8 +80,7 @@ export async function addTransaction(params: {
     }
   }
 
-  const { withTransaction } = await import("../db.js");
-  const inserted = await withTransaction(async (tx) => {
+  const inserted = await db.withTransaction(async (tx) => {
     const [atRow] = await tx.unsafe<{ asset_type: string }>(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [params.asset],
