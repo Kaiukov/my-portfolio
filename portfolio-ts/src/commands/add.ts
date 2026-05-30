@@ -1,0 +1,125 @@
+import { querySingle, withTransaction } from "../db.js";
+import {
+  ValidationError,
+  parseWriteDate,
+  validatePositiveFloat,
+  validateNonNegativeFloat,
+} from "../validators.js";
+import { parseRow, type TransactionRow } from "./transactions.js";
+
+const USER_ACTIONS = new Set([
+  "BUY", "SELL", "DEPOSIT", "WITHDRAW", "TRANSFER",
+  "DIVIDEND", "INTEREST", "FEE", "TAX",
+]);
+
+export interface AddResult {
+  transaction: TransactionRow;
+  recalculated: boolean;
+}
+
+export async function addTransaction(params: {
+  dateStr: string;
+  asset: string;
+  action: string;
+  quantity: number;
+  price?: number;
+  currency?: string;
+  fees?: number;
+  feeCurrency?: string;
+  exchange: string;
+  account?: string;
+}): Promise<AddResult> {
+  const date = parseWriteDate(params.dateStr, "--date");
+  const action = params.action.toUpperCase();
+
+  if (!USER_ACTIONS.has(action)) {
+    throw new ValidationError(
+      `--action: unknown action ${JSON.stringify(action)}. ` +
+        `Valid: ${[...USER_ACTIONS].join(", ")}`,
+    );
+  }
+
+  if (!params.exchange || !params.exchange.trim()) {
+    throw new ValidationError(
+      "--exchange is required.\n" +
+        "Expected: --exchange <broker or exchange name>\n" +
+        "Example:  portfolio-ts add --date 01-01-2026 --asset AAPL --action BUY " +
+        "--quantity 10 --price 150 --exchange Interactive",
+    );
+  }
+
+  validatePositiveFloat(params.quantity, "--quantity", "add");
+  if (params.price !== undefined) validatePositiveFloat(params.price, "--price", "add");
+  if (params.fees !== undefined) validateNonNegativeFloat(params.fees, "--fees", "add");
+
+  if (action === "TRANSFER" && !params.account) {
+    throw new ValidationError(
+      "--account is required for TRANSFER transactions.\n" +
+        "Expected: --account <account label>",
+    );
+  }
+
+  if ((action === "BUY" || action === "SELL") && params.price === undefined) {
+    throw new ValidationError(`--price is required for ${action} transactions`);
+  }
+
+  if (action === "SELL") {
+    const row = await querySingle<{ net: string }>(
+      `SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN quantity
+                               WHEN action = 'SELL' THEN -quantity
+                               ELSE 0 END), 0)::text AS net
+       FROM transactions WHERE asset = $1 AND date <= $2`,
+      [params.asset, date],
+    );
+    const net = Number(row?.net ?? 0);
+    if (params.quantity > net) {
+      throw new ValidationError(
+        `Cannot SELL ${params.quantity} of ${params.asset}: ` +
+          `only ${net} shares held as of ${date}`,
+      );
+    }
+  }
+
+  const inserted = await withTransaction(async (tx) => {
+    const [atRow] = await tx.unsafe<{ asset_type: string }>(
+      "SELECT get_asset_type_sql($1) AS asset_type",
+      [params.asset],
+    );
+    const assetType = atRow?.asset_type ?? "stock_usd";
+
+    const [ins] = await tx.unsafe<{ id: number }>(
+      `INSERT INTO transactions
+       (date, asset, action, quantity, asset_type, price, currency,
+        fees, fee_currency, exchange, data_source, account)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id`,
+      [
+        date,
+        params.asset,
+        action,
+        params.quantity,
+        assetType,
+        params.price ?? null,
+        params.currency ?? "USD",
+        params.fees ?? null,
+        params.feeCurrency ?? null,
+        params.exchange,
+        "",
+        params.account ?? null,
+      ],
+    );
+    const transId = ins.id;
+
+    await tx.unsafe("SELECT refresh_daily_returns_sql($1)", [date]);
+
+    const [row] = await tx.unsafe<Record<string, unknown>>(
+      `SELECT id, date, asset, action, quantity, asset_type, price, currency,
+              fees, fee_currency, exchange, data_source, account, created_at, updated_at
+       FROM transactions WHERE id = $1`,
+      [transId],
+    );
+    return row;
+  });
+
+  return { transaction: parseRow(inserted), recalculated: true };
+}

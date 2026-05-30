@@ -2,12 +2,12 @@
 
 | Python command | TypeScript command | Status | Notes |
 |---|---|---|---|
-| `portfolio status` | `portfolio-ts status` | partial | Initial JSON shape implemented. Missing complex performance stats (requires daily_returns + price data); uses simple transaction aggregation instead. `total_gain_pct` is computed as `(portfolio_value - total_invested) / total_invested * 100` — Python uses TWR from performance_stats SQL. |
-| `portfolio transactions` | `portfolio-ts transactions` | partial | Read-only output matches column schema and pagination. Does not implement `add`/`edit`/`delete`/`exchange`. |
-| `portfolio add` | — | not started | Next command to port. |
-| `portfolio edit` | — | not started | |
-| `portfolio delete` | — | not started | |
-| `portfolio exchange` | — | not started | |
+| `portfolio status` | `portfolio-ts status` | partial | Initial JSON shape. `total_gain_pct` uses simple formula; Python uses TWR. `as_of_date` uses daily_returns date. |
+| `portfolio transactions` | `portfolio-ts transactions` | partial | Read-only, pagination, date filters. Write ops handled by separate commands. |
+| `portfolio add` | `portfolio-ts add` | partial | Validation + INSERT + `refresh_daily_returns_sql`. Rollback via PostgreSQL transaction. Missing: price-pre-check before recalc. |
+| `portfolio edit` | `portfolio-ts edit` | partial | Validation + UPDATE + `refresh_daily_returns_sql`. Supports `--dry-run`. Rollback via PostgreSQL transaction. |
+| `portfolio delete` | `portfolio-ts delete` | partial | `--confirm` required. Supports `--dry-run`. Rollback via PostgreSQL transaction. No `--backup` flag. |
+| `portfolio exchange` | `portfolio-ts exchange` | partial | Two-leg EXCHANGE_FROM/EXCHANGE_TO + `refresh_daily_returns_sql`. Cash-like validated via `is_cash_like_sql`. No normalized-form duplicate-asset check (Python goes deeper). |
 | `portfolio report` | — | not started | |
 | `portfolio allocation` | — | not started | |
 | `portfolio cash` | — | not started | |
@@ -15,22 +15,28 @@
 | `portfolio performance` | — | not started | |
 | `portfolio mwr` | — | not started | |
 | `portfolio verify_prices` | — | not started | |
-| `portfolio repair_prices` | — | not started | |
-| `portfolio recalculate` | — | not started | |
+| `portfolio repair_prices` | — | not started | Phase 3 |
+| `portfolio recalculate` | — | not started | Phase 3 |
 | `portfolio backup` | — | not started | |
 | `portfolio init` | — | not started | |
 | `portfolio health` | — | not started | |
 | `portfolio migrate` | — | not started | |
 | `portfolio migrate-duckdb-to-postgres` | — | not started | |
 
-## Known differences
+## Known differences — write commands
+
+- **Rollback**: TypeScript uses a PostgreSQL transaction (`BEGIN/COMMIT/ROLLBACK` via `sql.begin()`). Python uses application-level snapshot/restore. Both achieve the same atomicity guarantee; TypeScript approach is cleaner.
+- **Price pre-check**: Python runs `_require_cached_price_requirements` before calling `refresh_daily_returns_sql` to fail fast on missing prices. TypeScript skips this and lets PostgreSQL raise `'Price unavailable for X as of Y'` from inside the function. Error is surfaced as a DB error.
+- **exchange asset normalization**: Python normalises `from`/`to` assets (e.g., `CASH USD` → `USD`) and then checks if they resolve to the same canonical form. TypeScript only checks `fromAsset.toUpperCase() === toAsset.toUpperCase()` (matches Python CLI check but not the deeper service-layer check).
+- **add `--backup` delete**: Python's `delete` supports `--backup` to create a DB dump before deleting. TypeScript omits this flag.
+- **Date format write commands**: Both use `DD-MM-YYYY`. TypeScript validates the format strictly and converts to `YYYY-MM-DD` for PostgreSQL.
+
+## Known differences — read commands
 
 - **Portfolio value**: TypeScript reads `portfolio_value` from the latest `daily_returns` row. Python computes it via a complex CTE that joins `daily_returns` with `prices` for benchmark/comparison data.
 - **Total invested**: TypeScript uses `DEPOSIT - WITHDRAW` from transaction quantities. Python uses `net_contributions` from cash flow analysis (includes FX conversion).
-- **Income**: TypeScript sums `DIVIDEND + INTEREST` quantities. Python computes from cash flow metrics with FX conversion.
-- **Fees/Taxes**: TypeScript reads raw quantities from `FEE`/`TAX` transactions. Python includes both standalone fees and trade fees via cash flow analysis.
-- **Date format**: Both use `YYYY-MM-DD` for read commands (consistent with Python CLI contract).
+- **Income / Fees / Taxes**: TypeScript reads raw quantities. Python includes trade-level fees and FX conversion.
 
-## Next command to port
+## Next command to port (Phase 3)
 
-`portfolio-ts add` — basic transaction insertion without recalculation logic.
+`portfolio-ts recalculate` — explicit recalculation without a mutation trigger.

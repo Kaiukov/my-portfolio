@@ -2,6 +2,11 @@
 import { success, error, buildPagination } from "./response.js";
 import { getStatus } from "./commands/status.js";
 import { getTransactions } from "./commands/transactions.js";
+import { addTransaction } from "./commands/add.js";
+import { editTransaction, editDryRun } from "./commands/edit.js";
+import { deleteTransaction, deletePreview } from "./commands/delete.js";
+import { exchangeCurrency } from "./commands/exchange.js";
+import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -13,65 +18,77 @@ Usage:
 Commands:
   status          Current portfolio status snapshot
   transactions    Paginated transaction list
+  add             Add a transaction and recalculate
+  edit            Edit an existing transaction and recalculate
+  delete          Delete a transaction and recalculate
+  exchange        Record a currency exchange (two linked transactions)
   --help          Show this help message
+
+Read command dates: YYYY-MM-DD
+Write command dates: DD-MM-YYYY
 
 Environment:
   PORTFOLIO_DB_URL  PostgreSQL connection string
 
 Examples:
   portfolio-ts status
-  portfolio-ts transactions
   portfolio-ts transactions --limit 20 --offset 40
+  portfolio-ts add --date 01-01-2026 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive
+  portfolio-ts edit --id 42 --price 155.50
+  portfolio-ts delete --id 42 --confirm
+  portfolio-ts exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
   portfolio-ts --help
 `.trim();
 
-function parseArgs(argv: string[]): {
-  command: string;
-  limit: number;
-  offset: number;
-  startDate?: string;
-  endDate?: string;
-} {
+type FlagValue = string | true;
+
+function parseArgs(argv: string[]): { command: string; flags: Map<string, FlagValue> } {
   const args = argv.slice(2);
-  const command = args[0] ?? "";
+  const raw = args[0] ?? "";
+  const command =
+    raw === "--help" || raw === "-h" || raw === "" ? "help" : raw;
 
-  if (command === "--help" || command === "-h" || command === "") {
-    return { command: "help", limit: 50, offset: 0 };
-  }
-
-  let limit = 50;
-  let offset = 0;
-  let startDate: string | undefined;
-  let endDate: string | undefined;
-
+  const flags = new Map<string, FlagValue>();
   for (let i = 1; i < args.length; i++) {
-    switch (args[i]) {
-      case "--limit": {
-        const v = parseInt(args[++i] ?? "50", 10);
-        limit = Number.isFinite(v) && v > 0 ? v : 50;
-        break;
-      }
-      case "--offset": {
-        const v = parseInt(args[++i] ?? "0", 10);
-        offset = Number.isFinite(v) && v >= 0 ? v : 0;
-        break;
-      }
-      case "--start-date":
-      case "--start_date":
-        startDate = args[++i];
-        break;
-      case "--end-date":
-      case "--end_date":
-        endDate = args[++i];
-        break;
+    const arg = args[i];
+    if (!arg.startsWith("--")) continue;
+    const key = arg.slice(2);
+    const next = args[i + 1];
+    if (next !== undefined && !next.startsWith("--")) {
+      flags.set(key, next);
+      i++;
+    } else {
+      flags.set(key, true);
     }
   }
+  return { command, flags };
+}
 
-  return { command, limit, offset, startDate, endDate };
+function str(flags: Map<string, FlagValue>, key: string): string | undefined {
+  const v = flags.get(key);
+  return typeof v === "string" ? v : undefined;
+}
+
+function float(flags: Map<string, FlagValue>, key: string): number | undefined {
+  const s = str(flags, key);
+  if (!s) return undefined;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function int(flags: Map<string, FlagValue>, key: string): number | undefined {
+  const s = str(flags, key);
+  if (!s) return undefined;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function bool(flags: Map<string, FlagValue>, key: string): boolean {
+  return flags.has(key);
 }
 
 export async function dispatch(argv: string[]): Promise<void> {
-  const { command, limit, offset, startDate, endDate } = parseArgs(argv);
+  const { command, flags } = parseArgs(argv);
 
   switch (command) {
     case "help": {
@@ -81,16 +98,130 @@ export async function dispatch(argv: string[]): Promise<void> {
 
     case "status": {
       const data = await getStatus();
-      const envelope = success("status", data);
-      console.log(JSON.stringify(envelope, null, 2));
+      console.log(JSON.stringify(success("status", data), null, 2));
       return;
     }
 
     case "transactions": {
+      const limit = (() => {
+        const v = int(flags, "limit");
+        return Number.isFinite(v) && (v ?? 0) > 0 ? (v as number) : 50;
+      })();
+      const offset = (() => {
+        const v = int(flags, "offset");
+        return Number.isFinite(v) && (v ?? 0) >= 0 ? (v as number) : 0;
+      })();
+      const startDate = str(flags, "start-date") ?? str(flags, "start_date");
+      const endDate = str(flags, "end-date") ?? str(flags, "end_date");
       const { data, total } = await getTransactions(limit, offset, startDate, endDate);
       const pagination = buildPagination(limit, offset, total);
-      const envelope = success("transactions", data, data.length, pagination);
-      console.log(JSON.stringify(envelope, null, 2));
+      console.log(JSON.stringify(success("transactions", data, data.length, pagination), null, 2));
+      return;
+    }
+
+    case "add": {
+      const dateStr = str(flags, "date");
+      const asset = str(flags, "asset");
+      const action = str(flags, "action");
+      const quantity = float(flags, "quantity");
+
+      if (!dateStr || !asset || !action || quantity === undefined) {
+        const env = error(
+          "add",
+          "VALIDATION_ERROR",
+          "Required: --date DD-MM-YYYY --asset SYMBOL --action ACTION --quantity N --exchange NAME",
+        );
+        console.log(JSON.stringify(env, null, 2));
+        process.exit(1);
+        return;
+      }
+
+      const result = await addTransaction({
+        dateStr,
+        asset,
+        action,
+        quantity,
+        price: float(flags, "price"),
+        currency: str(flags, "currency"),
+        fees: float(flags, "fees"),
+        feeCurrency: str(flags, "fee-currency") ?? str(flags, "fee_currency"),
+        exchange: str(flags, "exchange") ?? "",
+        account: str(flags, "account"),
+      });
+      console.log(JSON.stringify(success("add", result), null, 2));
+      return;
+    }
+
+    case "edit": {
+      const transId = int(flags, "id");
+      if (!transId) {
+        console.log(JSON.stringify(error("edit", "VALIDATION_ERROR", "--id is required"), null, 2));
+        process.exit(1);
+        return;
+      }
+      const changes = {
+        dateStr: str(flags, "date"),
+        asset: str(flags, "asset"),
+        action: str(flags, "action"),
+        quantity: float(flags, "quantity"),
+        price: float(flags, "price"),
+        currency: str(flags, "currency"),
+        fees: float(flags, "fees"),
+        exchange: str(flags, "exchange"),
+        dataSource: str(flags, "data-source") ?? str(flags, "data_source"),
+        account: str(flags, "account"),
+      };
+      const isDryRun = bool(flags, "dry-run");
+      if (isDryRun) {
+        const result = await editDryRun(transId, changes);
+        console.log(JSON.stringify(success("edit", result), null, 2));
+      } else {
+        const result = await editTransaction(transId, changes);
+        console.log(JSON.stringify(success("edit", result), null, 2));
+      }
+      return;
+    }
+
+    case "delete": {
+      const transId = int(flags, "id");
+      if (!transId) {
+        console.log(
+          JSON.stringify(error("delete", "VALIDATION_ERROR", "--id is required"), null, 2),
+        );
+        process.exit(1);
+        return;
+      }
+      const isDryRun = bool(flags, "dry-run");
+      if (isDryRun) {
+        const result = await deletePreview(transId);
+        console.log(JSON.stringify(success("delete", result), null, 2));
+      } else {
+        const result = await deleteTransaction(transId, bool(flags, "confirm"));
+        console.log(JSON.stringify(success("delete", result), null, 2));
+      }
+      return;
+    }
+
+    case "exchange": {
+      const dateStr = str(flags, "date");
+      const fromAsset = str(flags, "from");
+      const toAsset = str(flags, "to");
+      const quantity = float(flags, "quantity");
+      const rate = float(flags, "rate");
+
+      if (!dateStr || !fromAsset || !toAsset || quantity === undefined || rate === undefined) {
+        const env = error(
+          "exchange",
+          "VALIDATION_ERROR",
+          "Required: --date DD-MM-YYYY --from ASSET --to ASSET --quantity N --rate N",
+        );
+        console.log(JSON.stringify(env, null, 2));
+        process.exit(1);
+        return;
+      }
+
+      const result = await exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
+      console.log(JSON.stringify(success("exchange", result), null, 2));
       return;
     }
 
@@ -103,12 +234,20 @@ export async function dispatch(argv: string[]): Promise<void> {
 }
 
 if (import.meta.main) {
-  dispatch(process.argv).catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    const envelope = error("_", "INTERNAL_ERROR", msg);
-    console.log(JSON.stringify(envelope, null, 2));
-    process.exit(1);
-  }).finally(() => {
-    close().catch(() => {});
-  });
+  dispatch(process.argv)
+    .catch((err: unknown) => {
+      const cmd = process.argv[2] ?? "_";
+      if (err instanceof ValidationError) {
+        console.log(JSON.stringify(error(cmd, "VALIDATION_ERROR", err.message), null, 2));
+      } else if (err instanceof NotFoundError) {
+        console.log(JSON.stringify(error(cmd, "NOT_FOUND", err.message), null, 2));
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(JSON.stringify(error(cmd, "INTERNAL_ERROR", msg), null, 2));
+      }
+      process.exit(1);
+    })
+    .finally(() => {
+      close().catch(() => {});
+    });
 }

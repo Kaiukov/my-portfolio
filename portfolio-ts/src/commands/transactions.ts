@@ -55,7 +55,7 @@ function int(val: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function parseRow(row: Record<string, unknown>): TransactionRow {
+export function parseRow(row: Record<string, unknown>): TransactionRow {
   return {
     id: int(row["id"]),
     date: formatDate(row["date"]),
