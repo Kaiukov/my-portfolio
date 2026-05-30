@@ -467,7 +467,7 @@ RETURNS TABLE (
     start_date            TEXT,
     end_date              TEXT,
     portfolio_value       DOUBLE PRECISION,
-    total_invested        DOUBLE PRECISION,
+    total_invested        DOUBLE PRECISION,       -- net contributed capital (deposits - withdrawals), NOT gross invested
     deposits              DOUBLE PRECISION,
     withdrawals           DOUBLE PRECISION,
     income                DOUBLE PRECISION,
@@ -525,7 +525,8 @@ AS $$
         a.start_date,
         a.end_date,
         dr.portfolio_value,
-        -- total_invested = net contributed capital (deposits - withdrawals), NOT gross invested
+        -- total_invested = net contributed capital (deposits - withdrawals), NOT gross invested.
+        -- total_gain = portfolio_value - total_invested; total_gain and total_gain_pct are NULL when deposits <= withdrawals.
         a.deposits - a.withdrawals                                      AS total_invested,
         a.deposits,
         a.withdrawals,
