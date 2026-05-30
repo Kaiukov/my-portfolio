@@ -6,6 +6,10 @@ import { addTransaction } from "./commands/add.js";
 import { editTransaction, editDryRun } from "./commands/edit.js";
 import { deleteTransaction, deletePreview } from "./commands/delete.js";
 import { exchangeCurrency } from "./commands/exchange.js";
+import { recalculate, recalculateDryRun } from "./commands/recalculate.js";
+import { verifyPrices } from "./commands/verify_prices.js";
+import { repairPrices, repairPricesDryRun } from "./commands/repair_prices.js";
+import { fetchPrices } from "./providers/yahoo.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -22,6 +26,10 @@ Commands:
   edit            Edit an existing transaction and recalculate
   delete          Delete a transaction and recalculate
   exchange        Record a currency exchange (two linked transactions)
+  recalculate     Rebuild daily_returns from cached prices
+  verify_prices   Show price coverage diagnostics (read-only)
+  repair_prices   Fetch missing prices from Yahoo Finance
+  sync            repair_prices + recalculate (daily maintenance)
   --help          Show this help message
 
 Read command dates: YYYY-MM-DD
@@ -222,6 +230,78 @@ export async function dispatch(argv: string[]): Promise<void> {
 
       const result = await exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
       console.log(JSON.stringify(success("exchange", result), null, 2));
+      return;
+    }
+
+    case "recalculate": {
+      const isDryRun = bool(flags, "dry-run");
+      if (isDryRun) {
+        const result = await recalculateDryRun({
+          fromDateStr: str(flags, "from-date") ?? str(flags, "from_date"),
+          force: bool(flags, "force"),
+        });
+        console.log(JSON.stringify(success("recalculate", result), null, 2));
+      } else {
+        const result = await recalculate({
+          fromDateStr: str(flags, "from-date") ?? str(flags, "from_date"),
+          force: bool(flags, "force"),
+        });
+        console.log(JSON.stringify(success("recalculate", result), null, 2));
+      }
+      return;
+    }
+
+    case "verify_prices": {
+      const result = await verifyPrices();
+      console.log(JSON.stringify(success("verify_prices", result), null, 2));
+      return;
+    }
+
+    case "repair_prices": {
+      const tickerArg = str(flags, "ticker");
+      const tickers = tickerArg ? tickerArg.split(",").map((t) => t.trim()) : undefined;
+      const isDryRun = bool(flags, "dry-run");
+
+      if (isDryRun) {
+        const result = await repairPricesDryRun({
+          tickers,
+          startDate: str(flags, "start-date"),
+          endDate: str(flags, "end-date"),
+        });
+        console.log(JSON.stringify(success("repair_prices", result), null, 2));
+      } else {
+        const result = await repairPrices(
+          { tickers, startDate: str(flags, "start-date"), endDate: str(flags, "end-date") },
+          fetchPrices,
+        );
+        console.log(JSON.stringify(success("repair_prices", result), null, 2));
+      }
+      return;
+    }
+
+    case "sync": {
+      const isDryRun = bool(flags, "dry-run");
+      if (isDryRun) {
+        const repairResult = await repairPricesDryRun({});
+        const recalcResult = await recalculateDryRun({ force: false });
+        console.log(
+          JSON.stringify(
+            success("sync", { dry_run: true, repair_prices: repairResult, recalculate: recalcResult }),
+            null,
+            2,
+          ),
+        );
+      } else {
+        const repairResult = await repairPrices({}, fetchPrices);
+        const recalcResult = await recalculate({ force: true });
+        console.log(
+          JSON.stringify(
+            success("sync", { repair_prices: repairResult, recalculate: recalcResult }),
+            null,
+            2,
+          ),
+        );
+      }
       return;
     }
 

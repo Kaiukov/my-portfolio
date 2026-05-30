@@ -15,8 +15,10 @@
 | `portfolio performance` | — | not started | |
 | `portfolio mwr` | — | not started | |
 | `portfolio verify_prices` | — | not started | |
-| `portfolio repair_prices` | — | not started | Phase 3 |
-| `portfolio recalculate` | — | not started | Phase 3 |
+| `portfolio repair_prices` | `portfolio-ts repair_prices` | partial | Yahoo Finance via yahoo-finance2 (different library from Python yfinance — same semantics). `--ticker` accepts comma-separated list; Python accepts repeated flags. Dry-run supported. |
+| `portfolio recalculate` | `portfolio-ts recalculate` | partial | `--from-date`, `--force`, `--dry-run` supported. Calls `refresh_daily_returns_sql` directly. |
+| `portfolio verify_prices` | `portfolio-ts verify_prices` | partial | Coverage check via SQL functions. Simpler output format than Python (no schema/optimization_notes). |
+| — | `portfolio-ts sync` | TS-only | Convenience: `repair_prices` + `recalculate`. No Python equivalent. |
 | `portfolio backup` | — | not started | |
 | `portfolio init` | — | not started | |
 | `portfolio health` | — | not started | |
@@ -37,6 +39,13 @@
 - **Total invested**: TypeScript uses `DEPOSIT - WITHDRAW` from transaction quantities. Python uses `net_contributions` from cash flow analysis (includes FX conversion).
 - **Income / Fees / Taxes**: TypeScript reads raw quantities. Python includes trade-level fees and FX conversion.
 
-## Next command to port (Phase 3)
+## Known differences — Phase 3
 
-`portfolio-ts recalculate` — explicit recalculation without a mutation trigger.
+- **Price provider**: TypeScript uses `yahoo-finance2` npm package; Python uses `yfinance`. Both use Yahoo Finance as the data source. Inverted FX pairs and ticker mapping are ported to TypeScript.
+- **`repair_prices --ticker`**: Python CLI accepts `--ticker AAPL --ticker MSFT` (repeated flags); TypeScript CLI accepts `--ticker AAPL,MSFT` (comma-separated). Functional parity.
+- **`verify_prices` output**: TypeScript returns simplified coverage data. Python also returns schema info, optimization notes, and repair logs. These can be added in future PRs.
+- **`sync` command**: TypeScript-only convenience command (repair_prices + recalculate). No Python equivalent.
+
+## Next (Phase 4: cutover)
+
+Wire `portfolio` entrypoint to TypeScript binary. Keep Python as `portfolio-py` for parity checks. CI output comparison for migrated commands.
