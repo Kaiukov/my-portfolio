@@ -39,9 +39,9 @@ describe("getTransactions", () => {
     mockQuerySingle.mockResolvedValue({ count: 3 });
 
     mockQuery.mockResolvedValue([
-      makeRow(3),
-      makeRow(2),
       makeRow(1),
+      makeRow(2),
+      makeRow(3),
     ]);
 
     const { getTransactions } = await import("../src/commands/transactions.js");

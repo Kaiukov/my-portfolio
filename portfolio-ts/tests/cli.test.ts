@@ -46,6 +46,7 @@ describe("CLI parsing", () => {
     expect(output.ok).toBe(false);
     expect(output.command).toBe("nonexistent");
     expect(output.error.code).toBe("UNKNOWN_COMMAND");
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

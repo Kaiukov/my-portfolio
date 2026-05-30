@@ -18,7 +18,7 @@ describe("getStatus", () => {
     mockQuerySingle.mockImplementation(async (sql: string) => {
       if (sql.includes("COUNT(*)")) return { count: 42 };
       if (sql.includes("MIN(date)")) return { start_date: "2024-01-15", end_date: "2026-03-20" };
-      if (sql.includes("portfolio_value")) return { portfolio_value: 125000.50 };
+      if (sql.includes("portfolio_value")) return { portfolio_value: 125000.50, as_of_date: "2026-03-20" };
       return null;
     });
 
@@ -45,6 +45,7 @@ describe("getStatus", () => {
     expect(result.income).toBe(2500);
     expect(result.fees).toBe(120);
     expect(result.taxes).toBe(50);
+    expect(result.as_of_date).toBe("2026-03-20");
   });
 
   test("handles empty database gracefully", async () => {

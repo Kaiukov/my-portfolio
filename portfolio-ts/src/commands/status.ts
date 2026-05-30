@@ -30,7 +30,7 @@ export async function getStatus(): Promise<StatusData> {
   );
 
   const portfolioRow = await querySingle(
-    "SELECT portfolio_value FROM daily_returns ORDER BY date DESC LIMIT 1",
+    "SELECT portfolio_value, date::text AS as_of_date FROM daily_returns ORDER BY date DESC LIMIT 1",
   );
 
   const actionRows = (await query(`
@@ -76,6 +76,6 @@ export async function getStatus(): Promise<StatusData> {
     taxes,
     total_gain: totalGain,
     total_gain_pct: totalGainPct,
-    as_of_date: (dateRow?.end_date as string) ?? null,
+    as_of_date: (portfolioRow?.as_of_date as string) ?? null,
   };
 }

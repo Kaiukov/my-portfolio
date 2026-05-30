@@ -46,12 +46,16 @@ function parseArgs(argv: string[]): {
 
   for (let i = 1; i < args.length; i++) {
     switch (args[i]) {
-      case "--limit":
-        limit = parseInt(args[++i] ?? "50", 10);
+      case "--limit": {
+        const v = parseInt(args[++i] ?? "50", 10);
+        limit = Number.isFinite(v) && v > 0 ? v : 50;
         break;
-      case "--offset":
-        offset = parseInt(args[++i] ?? "0", 10);
+      }
+      case "--offset": {
+        const v = parseInt(args[++i] ?? "0", 10);
+        offset = Number.isFinite(v) && v >= 0 ? v : 0;
         break;
+      }
       case "--start-date":
       case "--start_date":
         startDate = args[++i];
@@ -70,10 +74,7 @@ export async function dispatch(argv: string[]): Promise<void> {
   const { command, limit, offset, startDate, endDate } = parseArgs(argv);
 
   switch (command) {
-    case "help":
-    case "--help":
-    case "-h":
-    case "": {
+    case "help": {
       console.log(HELP_TEXT);
       return;
     }

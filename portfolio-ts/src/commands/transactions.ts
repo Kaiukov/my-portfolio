@@ -105,11 +105,11 @@ export async function getTransactions(
   const rows = (await query(
     `SELECT id, date, asset, action, quantity, asset_type, price, currency, fees, fee_currency, exchange, data_source, account, created_at, updated_at
      FROM transactions ${whereSQL}
-     ORDER BY date DESC, id DESC
+     ORDER BY date ASC, id ASC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     pageParams,
   )) as Record<string, unknown>[];
 
-  const data = rows.reverse().map(parseRow);
+  const data = rows.map(parseRow);
   return { data, total };
 }
