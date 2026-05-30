@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# portfolio — TypeScript/Bun CLI entrypoint
+exec bun "$(dirname "$0")/../portfolio-ts/src/cli.ts" "$@"
