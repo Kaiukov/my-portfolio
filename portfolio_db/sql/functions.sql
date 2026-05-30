@@ -211,6 +211,7 @@ $$;
 
 -- Discover all required tickers (assets + FX) from transaction data
 -- Returns ticker_category = 'asset' for tradeable assets, 'fx' for FX pairs
+DROP FUNCTION IF EXISTS discover_required_tickers_sql();
 CREATE OR REPLACE FUNCTION discover_required_tickers_sql()
 RETURNS TABLE(ticker TEXT, ticker_category TEXT)
 LANGUAGE sql
@@ -272,6 +273,7 @@ $$;
 
 -- Required price checkpoints per ticker: trade dates + end date
 -- Used to validate that the price cache covers all valuation points.
+DROP FUNCTION IF EXISTS get_required_price_checkpoints_sql(DATE);
 CREATE OR REPLACE FUNCTION get_required_price_checkpoints_sql(p_end_date DATE)
 RETURNS TABLE(ticker TEXT, checkpoint_date DATE)
 LANGUAGE sql
@@ -333,6 +335,7 @@ $$;
 -- BUY creates a lot with cost = qty*price + fees, converted to USD.
 -- SELL consumes oldest lots first (FIFO); realized gain = proceeds - cost of consumed units.
 -- All values in USD; trades in non-USD currencies are FX-converted via cash_amount_to_usd_sql.
+DROP FUNCTION IF EXISTS portfolio_fifo_metrics_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_fifo_metrics_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     cost_basis       DOUBLE PRECISION,
@@ -446,6 +449,7 @@ $$;
 -- Deposits/withdrawals/income/fees/taxes are FX-converted to USD via cash_amount_to_usd_sql().
 -- fees includes: standalone FEE action quantity + fees column from BUY/SELL/all transactions.
 -- portfolio_value and as_of_date are taken from daily_returns (recalculated by PG).
+DROP FUNCTION IF EXISTS portfolio_status_sql();
 CREATE OR REPLACE FUNCTION portfolio_status_sql()
 RETURNS TABLE (
     transactions_count    INTEGER,
@@ -539,6 +543,7 @@ $$;
 -- Cash balances snapshot: FX-converted cash balances as of a given date.
 -- Returns cash per bucket with native currency balance and USD value.
 -- All financial calculations are owned by PostgreSQL.
+DROP FUNCTION IF EXISTS portfolio_cash_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_cash_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     cash_key       TEXT,
@@ -599,6 +604,7 @@ $$;
 
 -- Allocation snapshot: FX-converted per-asset USD values and allocation percentages.
 -- Returns all holdings with net_quantity, value_usd, and allocation_pct as of the given date.
+DROP FUNCTION IF EXISTS portfolio_allocation_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_allocation_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     asset           TEXT,
@@ -669,6 +675,7 @@ $$;
 
 -- Portfolio summary: high-level portfolio metrics as of a given date.
 -- Returns holding count, total cash, portfolio value, transaction metadata.
+DROP FUNCTION IF EXISTS portfolio_summary_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_summary_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     holding_count        BIGINT,
@@ -715,6 +722,7 @@ $$;
 
 -- Concentration metrics: Herfindahl-Hirschman Index (HHI) and holding count.
 -- HHI ranges from 0 (infinitely diversified) to 10,000 (single asset).
+DROP FUNCTION IF EXISTS portfolio_concentration_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_concentration_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     hhi               DOUBLE PRECISION,
@@ -741,6 +749,7 @@ $$;
 -- total_gain = start_value * TWR decimal — pure market gain in USD, excludes cash flows.
 --   Reconcile: total_gain / start_value * 100 ≈ time_weighted_return_pct.
 -- Benchmark-relative metrics are joined on date, not aligned by array position.
+DROP FUNCTION IF EXISTS portfolio_performance_sql(DATE, TEXT, DATE, DOUBLE PRECISION);
 CREATE OR REPLACE FUNCTION portfolio_performance_sql(
     p_as_of_date DATE DEFAULT CURRENT_DATE,
     p_benchmark TEXT DEFAULT 'SPY',
@@ -1106,6 +1115,7 @@ $$;
 -- amounts: cash flow amounts (negative = outflow, positive = inflow, investor perspective)
 -- dates: corresponding dates for each amount
 -- Returns annualized rate as decimal (e.g. 0.10 = 10%). Returns 0.0 on failure.
+DROP FUNCTION IF EXISTS xirr_sql(DOUBLE PRECISION[], DATE[]);
 CREATE OR REPLACE FUNCTION xirr_sql(
     amounts DOUBLE PRECISION[],
     dates DATE[]
@@ -1269,6 +1279,7 @@ $$;
 --   WITHDRAW  → positive (money returns to investor)
 -- Terminal portfolio value → positive (could be liquidated)
 -- Returns annualized MWR as decimal. Returns NULL if insufficient data.
+DROP FUNCTION IF EXISTS portfolio_mwr_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_mwr_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS DOUBLE PRECISION
 LANGUAGE plpgsql
