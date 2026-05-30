@@ -21,6 +21,7 @@ export interface EditChanges {
   price?: number;
   currency?: string;
   fees?: number;
+  feeCurrency?: string;
   exchange?: string;
   dataSource?: string;
   account?: string;
@@ -137,6 +138,7 @@ export async function editTransaction(
     const assetType = atRow?.asset_type ?? existing.asset_type;
 
     const newFees = changes.fees !== undefined ? changes.fees : existing.fees;
+    const newFeeCurrency = changes.feeCurrency !== undefined ? changes.feeCurrency : existing.fee_currency;
 
     const [updRow] = (await tx.unsafe(
       `UPDATE transactions SET
@@ -155,7 +157,7 @@ export async function editTransaction(
         changes.price !== undefined ? changes.price : existing.price,
         changes.currency ?? existing.currency,
         newFees,
-        existing.fee_currency,
+        newFeeCurrency,
         changes.exchange ?? existing.exchange,
         changes.dataSource ?? existing.data_source,
         changes.account ?? existing.account,
