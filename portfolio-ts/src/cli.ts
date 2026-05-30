@@ -15,6 +15,7 @@ import { getCash } from "./commands/cash.js";
 import { getAllocation } from "./commands/allocation.js";
 import { getSummary } from "./commands/summary.js";
 import { getConcentration } from "./commands/concentration.js";
+import { getPerformance } from "./commands/performance.js";
 import { getHealth } from "./commands/health.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
@@ -41,6 +42,7 @@ Commands:
   allocation      Portfolio allocation breakdown by asset
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
+  performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   sync            repair_prices + recalculate (daily maintenance)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
@@ -408,6 +410,16 @@ export async function dispatch(argv: string[]): Promise<void> {
       const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
       const result = await getConcentration(asOfDate, topN);
       console.log(JSON.stringify(success("concentration", result), null, 2));
+      return;
+    }
+
+    case "performance": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const benchmark = str(flags, "benchmark");
+      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      const period = str(flags, "period");
+      const result = await getPerformance({ asOfDate, benchmark, fromDate, period });
+      console.log(JSON.stringify(success("performance", result), null, 2));
       return;
     }
 
