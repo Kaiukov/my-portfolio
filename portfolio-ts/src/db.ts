@@ -41,9 +41,8 @@ export async function close(): Promise<void> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// deno-lint-ignore no-explicit-any
 export async function runTx(fn: any) {
   if (!sql) connect();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (sql!.begin as any)(fn);
+  return (sql as any).begin(fn);
 }
