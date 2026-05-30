@@ -140,60 +140,14 @@ class RecalculationService:
             'rows_affected': rows_affected
         }
 
-    def discover_assets_and_currencies(self, base_currency) -> dict:
+    def discover_assets_and_currencies(self, base_currency=None) -> dict:
         """
-        Discover all assets and required FX currencies from transactions.
+        Discover all assets and required FX currencies from transactions via SQL.
+
+        Args:
+            base_currency: Kept for backwards compatibility, unused (logic is in SQL).
 
         Returns:
             dict: Contains 'assets' and 'fx_currencies' lists
         """
-        from portfolio_db.domain import get_asset_type
-
-        # Get unique assets from database
-        assets = set(self.db.get_unique_assets())
-
-        # Get unique currencies from transactions
-        currencies = set(self.db.get_unique_currencies())
-
-        # Determine required FX pairs
-        fx_currencies = set()
-
-        # Based on explicit currencies field
-        currency_to_fx = {
-            'EUR': 'EURUSD=X', 'GBP': 'GBPUSD=X', 'UAH': 'UAHUSD=X',
-            'JPY': 'JPYUSD=X', 'CHF': 'CHFUSD=X', 'CAD': 'CADUSD=X',
-            'AUD': 'AUDUSD=X', 'HKD': 'HKDUSD=X', 'SGD': 'SGDUSD=X',
-        }
-        for currency in currencies:
-            if currency and currency != base_currency:
-                fx_ticker = currency_to_fx.get(currency)
-                if fx_ticker:
-                    fx_currencies.add(fx_ticker)
-
-        # Check assets using get_asset_type for unified classification
-        from portfolio_db.domain import ASSET_TYPE_TO_CASH
-
-        for asset in assets:
-            asset_type = get_asset_type(asset)
-
-            # FX currencies that are needed
-            if asset_type == 'cash_fx':
-                # Asset itself is FX (e.g., EURUSD=X, GBPUSD=X)
-                fx_currencies.add(asset)
-            elif asset_type in ASSET_TYPE_TO_CASH:
-                # Regional stocks need their FX rate
-                fx_currencies.add(ASSET_TYPE_TO_CASH[asset_type])
-
-            # Backwards compatibility: old CASH format
-            if asset.startswith('CASH'):
-                if asset == 'CASH EUR':
-                    fx_currencies.add('EURUSD=X')
-                elif asset == 'CASH GBP':
-                    fx_currencies.add('GBPUSD=X')
-                elif asset == 'CASH UAH':
-                    fx_currencies.add('UAHUSD=X')
-
-        return {
-            'assets': list(assets),
-            'fx_currencies': list(fx_currencies)
-        }
+        return self.db.discover_assets_and_currencies()

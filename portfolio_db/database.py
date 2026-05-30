@@ -469,6 +469,62 @@ class PortfolioDatabase:
             $$;
         """)
 
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION discover_required_tickers_sql()
+            RETURNS TABLE(ticker TEXT, ticker_category TEXT)
+            LANGUAGE sql
+            STABLE
+            AS $$
+                SELECT ticker, ticker_category
+                FROM (
+                    SELECT t.asset AS ticker, 'asset'::TEXT AS ticker_category
+                    FROM transactions t
+
+                    UNION
+
+                    SELECT CASE
+                        WHEN t.currency = 'EUR' THEN 'EURUSD=X'
+                        WHEN t.currency = 'GBP' THEN 'GBPUSD=X'
+                        WHEN t.currency = 'UAH' THEN 'UAHUSD=X'
+                        WHEN t.currency = 'JPY' THEN 'JPYUSD=X'
+                        WHEN t.currency = 'CHF' THEN 'CHFUSD=X'
+                        WHEN t.currency = 'CAD' THEN 'CADUSD=X'
+                        WHEN t.currency = 'AUD' THEN 'AUDUSD=X'
+                        WHEN t.currency = 'HKD' THEN 'HKDUSD=X'
+                        WHEN t.currency = 'SGD' THEN 'SGDUSD=X'
+                    END, 'fx'::TEXT
+                    FROM transactions t
+                    WHERE t.currency IS NOT NULL AND t.currency != 'USD'
+
+                    UNION
+
+                    SELECT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset)), 'fx'::TEXT
+                    FROM transactions t
+                    WHERE get_asset_type_sql(t.asset) IN (
+                        'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                        'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                    )
+
+                    UNION
+
+                    SELECT t.asset, 'fx'::TEXT
+                    FROM transactions t
+                    WHERE get_asset_type_sql(t.asset) = 'cash_fx'
+
+                    UNION
+
+                    SELECT CASE
+                        WHEN t.asset = 'CASH EUR' THEN 'EURUSD=X'
+                        WHEN t.asset = 'CASH GBP' THEN 'GBPUSD=X'
+                        WHEN t.asset = 'CASH UAH' THEN 'UAHUSD=X'
+                    END, 'fx'::TEXT
+                    FROM transactions t
+                    WHERE t.asset IN ('CASH EUR', 'CASH GBP', 'CASH UAH')
+                ) sub
+                WHERE ticker IS NOT NULL
+            $$;
+        """)
+
     def _create_daily_returns_refresh_function(self):
         """Create the PostgreSQL function that rebuilds daily_returns."""
         self.con.execute("""
@@ -2714,6 +2770,26 @@ class PortfolioDatabase:
         """Remove a pg_cron job."""
         self.con.execute("SELECT cron.unschedule(%s)", [name])
         self.con.commit()
+
+    def discover_assets_and_currencies(self) -> dict:
+        """
+        Discover all assets and required FX currencies from transactions via SQL.
+
+        Returns:
+            dict: Contains 'assets' and 'fx_currencies' lists
+        """
+        rows = self.con.execute(
+            "SELECT ticker, ticker_category FROM discover_required_tickers_sql()"
+        ).fetchall()
+
+        assets = []
+        fx_currencies = []
+        for ticker, category in rows:
+            if category == 'asset':
+                assets.append(ticker)
+            else:
+                fx_currencies.append(ticker)
+        return {'assets': sorted(assets), 'fx_currencies': sorted(fx_currencies)}
 
     def close(self):
         """Close database connection."""
