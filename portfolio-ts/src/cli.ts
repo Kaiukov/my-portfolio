@@ -121,11 +121,19 @@ export async function dispatch(argv: string[]): Promise<void> {
     case "transactions": {
       const limit = (() => {
         const v = int(flags, "limit");
-        return Number.isFinite(v) && (v ?? 0) > 0 ? (v as number) : 50;
+        if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
+          console.log(JSON.stringify(error("transactions", "VALIDATION_ERROR", "--limit must be a positive number"), null, 2));
+          process.exit(1);
+        }
+        return v ?? 50;
       })();
       const offset = (() => {
         const v = int(flags, "offset");
-        return Number.isFinite(v) && (v ?? 0) >= 0 ? (v as number) : 0;
+        if (v !== undefined && (!Number.isFinite(v) || v < 0)) {
+          console.log(JSON.stringify(error("transactions", "VALIDATION_ERROR", "--offset must be a non-negative number"), null, 2));
+          process.exit(1);
+        }
+        return v ?? 0;
       })();
       const startDate = str(flags, "start-date") ?? str(flags, "start_date");
       const endDate = str(flags, "end-date") ?? str(flags, "end_date");
@@ -314,8 +322,22 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "report": {
-      const limit = (() => { const v = int(flags, "limit"); return v && v > 0 ? v : 50; })();
-      const offset = (() => { const v = int(flags, "offset"); return v != null && v >= 0 ? v : 0; })();
+      const limit = (() => {
+        const v = int(flags, "limit");
+        if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
+          console.log(JSON.stringify(error("report", "VALIDATION_ERROR", "--limit must be a positive number"), null, 2));
+          process.exit(1);
+        }
+        return v ?? 50;
+      })();
+      const offset = (() => {
+        const v = int(flags, "offset");
+        if (v !== undefined && (!Number.isFinite(v) || v < 0)) {
+          console.log(JSON.stringify(error("report", "VALIDATION_ERROR", "--offset must be a non-negative number"), null, 2));
+          process.exit(1);
+        }
+        return v ?? 0;
+      })();
       const startDate = str(flags, "start-date") ?? str(flags, "start_date");
       const endDate = str(flags, "end-date") ?? str(flags, "end_date");
       const { data, total } = await getReport(limit, offset, startDate, endDate);

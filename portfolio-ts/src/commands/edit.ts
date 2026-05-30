@@ -150,7 +150,7 @@ export async function editTransaction(
         existing.fee_currency,
         changes.exchange ?? existing.exchange,
         changes.dataSource ?? existing.data_source,
-        "account" in changes ? (changes.account ?? null) : existing.account,
+        changes.account ?? existing.account,
         transId,
       ],
     );

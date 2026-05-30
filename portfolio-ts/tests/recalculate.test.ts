@@ -41,6 +41,7 @@ describe("recalculateDryRun", () => {
 
 describe("recalculate", () => {
   test("calls refresh_daily_returns_sql and returns rows_affected", async () => {
+    mockQuerySingle.mockResolvedValue({ needs_recalc: true });
     mockQuery.mockResolvedValue([{ refresh_daily_returns_sql: 42 }]);
     const { recalculate } = await import("../src/commands/recalculate.js");
     const result = await recalculate({ force: false });
@@ -49,7 +50,23 @@ describe("recalculate", () => {
     expect(result.from_date).toBeNull();
   });
 
+  test("skips recalc when not needed", async () => {
+    mockQuerySingle.mockResolvedValue({ needs_recalc: false });
+    const { recalculate } = await import("../src/commands/recalculate.js");
+    const result = await recalculate({ force: false });
+    expect(result.rows_affected).toBe(0);
+  });
+
+  test("force=true bypasses needs_recalc check", async () => {
+    mockQuerySingle.mockResolvedValue({ needs_recalc: false });
+    mockQuery.mockResolvedValue([{ refresh_daily_returns_sql: 42 }]);
+    const { recalculate } = await import("../src/commands/recalculate.js");
+    const result = await recalculate({ force: true });
+    expect(result.rows_affected).toBe(42);
+  });
+
   test("partial recalc when from_date provided", async () => {
+    mockQuerySingle.mockResolvedValue({ needs_recalc: true });
     mockQuery.mockResolvedValue([{ refresh_daily_returns_sql: 10 }]);
     const { recalculate } = await import("../src/commands/recalculate.js");
     const result = await recalculate({ fromDateStr: "01-01-2026", force: false });

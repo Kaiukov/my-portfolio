@@ -40,6 +40,13 @@ export async function recalculate(params: {
     ? parseWriteDate(params.fromDateStr, "--from-date")
     : null;
 
+  if (!params.force) {
+    const row = await querySingle<{ needs_recalc: boolean }>("SELECT needs_recalc() AS needs_recalc");
+    if (row && !row.needs_recalc) {
+      return { rows_affected: 0, recalc_type: fromDate ? "partial" : "full", from_date: fromDate };
+    }
+  }
+
   const rows = await query<{ refresh_daily_returns_sql: number }>(
     "SELECT refresh_daily_returns_sql($1) AS refresh_daily_returns_sql",
     [fromDate],
