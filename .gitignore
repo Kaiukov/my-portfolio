@@ -79,3 +79,5 @@ $DB
 .tmp/
 .env.backup.*
 *.backup-*.sql
+portfolio.backup-*.sql
+portfolio_db/__pycache__/
