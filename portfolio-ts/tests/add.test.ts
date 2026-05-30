@@ -30,18 +30,33 @@ describe("addTransaction validation", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  test("throws on invalid date format", async () => {
+  test("accepts ISO YYYY-MM-DD date format", async () => {
     const { addTransaction } = await import("../src/commands/add.js");
+    // Will fail at SELL check (no holdings) rather than date validation
+    mockQuerySingle.mockResolvedValueOnce({ net: "5" });
     await expect(
       addTransaction({
         dateStr: "2026-01-01",
         asset: "AAPL",
-        action: "BUY",
+        action: "SELL",
         quantity: 10,
         price: 150,
         exchange: "Interactive",
       }),
     ).rejects.toBeInstanceOf(ValidationError);
+    // Error should be about SELL quantity, not date format
+    try {
+      await addTransaction({
+        dateStr: "2026-01-01",
+        asset: "AAPL",
+        action: "SELL",
+        quantity: 10,
+        price: 150,
+        exchange: "Interactive",
+      });
+    } catch (e) {
+      expect((e as ValidationError).message).toContain("SELL");
+    }
   });
 
   test("throws on BUY without price", async () => {

@@ -2,7 +2,7 @@ import { querySingle } from "../db.js";
 import { runTx } from "../tx.js";
 import {
   ValidationError,
-  parseWriteDate,
+  parseDate,
   validatePositiveFloat,
 } from "../validators.js";
 
@@ -21,7 +21,7 @@ export async function exchangeCurrency(params: {
   quantity: number;
   rate: number;
 }): Promise<ExchangeResult> {
-  const date = parseWriteDate(params.dateStr, "--date");
+  const date = parseDate(params.dateStr, "--date");
   validatePositiveFloat(params.quantity, "--quantity", "exchange");
   validatePositiveFloat(params.rate, "--rate", "exchange");
 

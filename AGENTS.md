@@ -160,10 +160,10 @@ All commands emit pure JSON with this envelope:
 ```
 Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."}, "meta": {...}}`
 
-## Date format trap
+## Date format
 
-- **Read/report commands**: `YYYY-MM-DD` (`--start-date`, `--end-date`, `--as-of-date`)
-- **Write/recalc commands**: `DD-MM-YYYY` (legacy; `--date`, `--from-date` on `add`/`edit`/`exchange`/`recalculate`)
+- **All commands**: `YYYY-MM-DD` (ISO 8601, primary format)
+- **Legacy `DD-MM-YYYY`** is still accepted on write commands (`--date`, `--from-date`) but deprecated — a stderr warning is emitted via `console.warn`. Remove legacy support after migration window closes.
 - `migrate` ingests semicolon-separated CSV with `DD-MM-YYYY` dates
 
 ## Command classification
@@ -239,7 +239,7 @@ Every calculation bug fix needs:
 ### Open issue #22 items
 
 - Time-based stale-price max-age is still not enforced.
-- Read/report and write/recalc date formats are still split (`YYYY-MM-DD` vs `DD-MM-YYYY`).
+- **DONE**: Date-format split was unified — all commands accept ISO `YYYY-MM-DD`; legacy `DD-MM-YYYY` accepted with deprecation warning.
 
 ## Style
 

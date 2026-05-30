@@ -48,8 +48,7 @@ Commands:
   backup          Create a pg_dump backup
   --help          Show this help message
 
-Read command dates: YYYY-MM-DD
-Write command dates: DD-MM-YYYY
+Dates: ISO YYYY-MM-DD (legacy DD-MM-YYYY also accepted on write commands)
 
 Environment:
   PORTFOLIO_DB_URL  PostgreSQL connection string
