@@ -12,7 +12,8 @@ dependencies = [
 ]
 
 [project.scripts]
-portfolio = "portfolio_db.cli:cli"
+portfolio = "portfolio_db.ts_shim:main"
+portfolio-py = "portfolio_db.cli:cli"
 
 [project.optional-dependencies]
 migrate = ["duckdb>=0.9"]
