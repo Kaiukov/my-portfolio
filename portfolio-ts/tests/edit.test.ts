@@ -96,4 +96,49 @@ describe("editTransaction", () => {
     expect(result.transaction.price).toBe(155.5);
     expect(result.from_date).toBe("2026-01-15");
   });
+
+  // Regression: issue #27 — backdated SELL validation on edit
+  test("SELL validation: rejects edit when increasing SELL quantity beyond holdings", async () => {
+    const existing = makeDbRow({ action: "SELL", quantity: 10, date: new Date("2026-01-15") });
+
+    // fetchById returns existing SELL; holdings check only 5 shares available
+    mockQuerySingle.mockResolvedValueOnce(existing);
+    mockQuerySingle.mockResolvedValueOnce({ net: "5" });
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    await expect(
+      editTransaction(42, { quantity: 50 }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("SELL validation: rejects edit when changing BUY to SELL exceeding holdings", async () => {
+    const existing = makeDbRow({ action: "BUY", quantity: 10, date: new Date("2026-01-15") });
+
+    // fetchById returns existing BUY; holdings check only 3 shares available
+    mockQuerySingle.mockResolvedValueOnce(existing);
+    mockQuerySingle.mockResolvedValueOnce({ net: "3" });
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    await expect(
+      editTransaction(42, { action: "SELL" }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("SELL validation: rejects edit when backdating SELL date reduces holdings", async () => {
+    // Existing SELL on 2026-03-01 (when 20 shares were held).
+    // Backdating to 2026-01-01 when only 5 shares were held.
+    const existing = makeDbRow({
+      action: "SELL",
+      quantity: 10,
+      date: new Date("2026-03-01"),
+    });
+
+    mockQuerySingle.mockResolvedValueOnce(existing);
+    mockQuerySingle.mockResolvedValueOnce({ net: "5" }); // holdings as of earlier date
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    await expect(
+      editTransaction(42, { dateStr: "2026-01-01" }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
 });
