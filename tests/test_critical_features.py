@@ -12,9 +12,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 repo_str = str(REPO_ROOT)
 if repo_str not in sys.path:
     sys.path.insert(0, repo_str)
-for module_name in list(sys.modules):
-    if module_name == "portfolio_db" or module_name.startswith("portfolio_db."):
-        del sys.modules[module_name]
 
 from portfolio_db.cli import cli  # noqa: E402
 from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError  # noqa: E402

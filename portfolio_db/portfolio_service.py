@@ -638,6 +638,21 @@ class PortfolioService:
             mark_price_data_stale_fn=self._mark_price_data_stale,
         )
 
+    def needs_recalc(self) -> bool:
+        """Return True if last price refresh is newer than last recalculation."""
+        return self.db.needs_recalc()
+
+    def ensure_fresh(self) -> bool:
+        """Recalculate if stale. No network calls — SQL-only recalculation.
+
+        Returns:
+            True if recalculation was triggered, False if data was already fresh.
+        """
+        if self.needs_recalc():
+            self.recalculate()
+            return True
+        return False
+
     def recalculate(self, from_date=None, force=False):
         """
         Smart recalculation with optional date range and caching.
@@ -660,13 +675,8 @@ class PortfolioService:
         )
 
     def discover_assets_and_currencies(self):
-        """
-        Discover all assets and required FX currencies from transactions.
-
-        Returns:
-            dict: Contains 'assets' and 'fx_currencies' lists
-        """
-        return self._recalc.discover_assets_and_currencies(self.BASE_CURRENCY)
+        """Discover all assets and required FX currencies from transactions via SQL."""
+        return self.db.discover_assets_and_currencies()
 
     def analyze_price_coverage(self, start_date=None, end_date=None) -> dict:
         """Inspect cached price coverage for all required tickers."""
@@ -816,6 +826,12 @@ class PortfolioService:
 
     def sql_backup(self, dst) -> None:
         self.db.dump_sql_backup(dst)
+
+    def get_all_service_state(self) -> dict:
+        return self.db.get_all_service_state()
+
+    def set_service_state(self, key: str, value: str) -> None:
+        self.db.set_service_state(key, value)
 
     def close(self):
         """Close database connection."""
