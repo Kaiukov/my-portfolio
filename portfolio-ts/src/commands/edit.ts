@@ -7,6 +7,9 @@ import {
   validatePositiveFloat,
   validateNonNegativeFloat,
   validatePositiveInt,
+  validateAssetSymbol,
+  validateAction,
+  validateCurrency,
 } from "../validators.js";
 import { parseRow, type TransactionRow } from "./transactions.js";
 
@@ -86,6 +89,9 @@ export async function editTransaction(
     );
   }
 
+  if (changes.action !== undefined) validateAction(changes.action);
+  if (changes.asset !== undefined) validateAssetSymbol(changes.asset, changes.action ?? "");
+  if (changes.currency !== undefined) validateCurrency(changes.currency, "--currency");
   if (changes.quantity !== undefined) validatePositiveFloat(changes.quantity, "--quantity", "edit");
   if (changes.price !== undefined) validatePositiveFloat(changes.price, "--price", "edit");
   if (changes.fees !== undefined) validateNonNegativeFloat(changes.fees, "--fees", "edit");

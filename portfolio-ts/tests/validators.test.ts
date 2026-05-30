@@ -4,6 +4,10 @@ import {
   validatePositiveFloat,
   validateNonNegativeFloat,
   validatePositiveInt,
+  validateAssetSymbol,
+  validateAction,
+  validateCurrency,
+  USER_ACTIONS,
   ValidationError,
 } from "../src/validators.js";
 
@@ -64,5 +68,91 @@ describe("validatePositiveInt", () => {
     expect(() => validatePositiveInt(-1, "--id", "edit")).toThrow(ValidationError);
     expect(() => validatePositiveInt(1.5, "--id", "edit")).toThrow(ValidationError);
     expect(() => validatePositiveInt(undefined, "--id", "edit")).toThrow(ValidationError);
+  });
+});
+
+describe("USER_ACTIONS", () => {
+  test("contains all canonical actions", () => {
+    expect(USER_ACTIONS.has("BUY")).toBe(true);
+    expect(USER_ACTIONS.has("SELL")).toBe(true);
+    expect(USER_ACTIONS.has("DEPOSIT")).toBe(true);
+    expect(USER_ACTIONS.has("WITHDRAW")).toBe(true);
+    expect(USER_ACTIONS.has("TRANSFER")).toBe(true);
+    expect(USER_ACTIONS.has("DIVIDEND")).toBe(true);
+    expect(USER_ACTIONS.has("INTEREST")).toBe(true);
+    expect(USER_ACTIONS.has("FEE")).toBe(true);
+    expect(USER_ACTIONS.has("TAX")).toBe(true);
+    expect(USER_ACTIONS.size).toBe(9);
+  });
+});
+
+describe("validateAssetSymbol", () => {
+  test("passes for stock ticker with BUY", () => {
+    expect(() => validateAssetSymbol("AAPL", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("MSFT", "SELL")).not.toThrow();
+  });
+
+  test("passes for FX pair format with BUY/SELL", () => {
+    expect(() => validateAssetSymbol("EURUSD=X", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("GBPUSD=X", "SELL")).not.toThrow();
+  });
+
+  test("rejects bare ISO currency code with BUY", () => {
+    const err = tryValidateAsset("EUR", "BUY");
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err!.message).toContain("EURUSD=X");
+  });
+
+  test("rejects bare ISO currency code with SELL", () => {
+    const err = tryValidateAsset("GBP", "SELL");
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err!.message).toContain("EURUSD=X");
+  });
+
+  test("passes for non-BUY/SELL action with bare currency (DEPOSIT)", () => {
+    expect(() => validateAssetSymbol("EUR", "DEPOSIT")).not.toThrow();
+  });
+
+  test("throws for empty asset", () => {
+    expect(() => validateAssetSymbol("", "BUY")).toThrow(ValidationError);
+  });
+});
+
+function tryValidateAsset(asset: string, action: string): Error | null {
+  try {
+    validateAssetSymbol(asset, action);
+    return null;
+  } catch (e) {
+    return e as Error;
+  }
+}
+
+describe("validateAction", () => {
+  test("passes for known actions", () => {
+    expect(validateAction("buy")).toBe("BUY");
+    expect(validateAction("SELL")).toBe("SELL");
+    expect(validateAction("Deposit")).toBe("DEPOSIT");
+  });
+
+  test("throws for unknown action", () => {
+    expect(() => validateAction("INVALID")).toThrow(ValidationError);
+    expect(() => validateAction("")).toThrow(ValidationError);
+  });
+});
+
+describe("validateCurrency", () => {
+  test("passes for known currencies", () => {
+    expect(() => validateCurrency("USD", "--currency")).not.toThrow();
+    expect(() => validateCurrency("EUR", "--currency")).not.toThrow();
+    expect(() => validateCurrency("GBP", "--currency")).not.toThrow();
+  });
+
+  test("passes when currency is undefined (optional)", () => {
+    expect(() => validateCurrency(undefined, "--currency")).not.toThrow();
+  });
+
+  test("throws for unknown currency", () => {
+    expect(() => validateCurrency("XYZ", "--currency")).toThrow(ValidationError);
+    expect(() => validateCurrency("BTC", "--currency")).toThrow(ValidationError);
   });
 });

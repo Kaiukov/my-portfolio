@@ -115,6 +115,78 @@ describe("addTransaction validation", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  test("rejects asset='EUR' (bare currency) for BUY before any DB write", async () => {
+    const { addTransaction } = await import("../src/commands/add.js");
+    await expect(
+      addTransaction({
+        dateStr: "01-01-2026",
+        asset: "EUR",
+        action: "BUY",
+        quantity: 10,
+        price: 150,
+        exchange: "Interactive",
+      }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("accepts asset='EURUSD=X' (FX pair) for BUY", async () => {
+    mockQuerySingle.mockResolvedValue(null);
+    mockWithTransaction.mockImplementation(async (fn: (tx: any) => Promise<any>) => {
+      const fakeTx = {
+        unsafe: mock(async (sql: string) => {
+          if (sql.includes("get_asset_type_sql")) return [{ asset_type: "cash_fx" }];
+          if (sql.includes("INSERT INTO transactions")) return [{ id: 100 }];
+          if (sql.includes("refresh_daily_returns_sql")) return [];
+          if (sql.includes("SELECT id, date")) return [{
+            id: 100,
+            date: new Date("2026-01-01"),
+            asset: "EURUSD=X",
+            action: "BUY",
+            quantity: 1000,
+            asset_type: "cash_fx",
+            price: 1.05,
+            currency: "USD",
+            fees: null,
+            fee_currency: null,
+            exchange: "Interactive",
+            data_source: "",
+            account: null,
+            created_at: new Date(),
+            updated_at: null,
+          }];
+          return [];
+        }),
+      };
+      return fn(fakeTx);
+    });
+    const { addTransaction } = await import("../src/commands/add.js");
+    const result = await addTransaction({
+      dateStr: "01-01-2026",
+      asset: "EURUSD=X",
+      action: "BUY",
+      quantity: 1000,
+      price: 1.05,
+      exchange: "Interactive",
+    });
+    expect(result.recalculated).toBe(true);
+    expect(result.transaction.asset).toBe("EURUSD=X");
+  });
+
+  test("rejects invalid currency value", async () => {
+    const { addTransaction } = await import("../src/commands/add.js");
+    await expect(
+      addTransaction({
+        dateStr: "01-01-2026",
+        asset: "AAPL",
+        action: "BUY",
+        quantity: 10,
+        price: 150,
+        currency: "XYZ",
+        exchange: "Interactive",
+      }),
+    ).rejects.toThrow(ValidationError);
+  });
+
   test("succeeds: inserts, recalculates, returns transaction", async () => {
     mockQuerySingle.mockResolvedValue(null); // SELL check not called for BUY
 

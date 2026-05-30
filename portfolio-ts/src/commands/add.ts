@@ -5,13 +5,11 @@ import {
   parseDate,
   validatePositiveFloat,
   validateNonNegativeFloat,
+  validateAssetSymbol,
+  validateAction,
+  validateCurrency,
 } from "../validators.js";
 import { parseRow, type TransactionRow } from "./transactions.js";
-
-const USER_ACTIONS = new Set([
-  "BUY", "SELL", "DEPOSIT", "WITHDRAW", "TRANSFER",
-  "DIVIDEND", "INTEREST", "FEE", "TAX",
-]);
 
 export interface AddResult {
   transaction: TransactionRow;
@@ -31,14 +29,10 @@ export async function addTransaction(params: {
   account?: string;
 }): Promise<AddResult> {
   const date = parseDate(params.dateStr, "--date");
-  const action = params.action.toUpperCase();
+  const action = validateAction(params.action);
 
-  if (!USER_ACTIONS.has(action)) {
-    throw new ValidationError(
-      `--action: unknown action ${JSON.stringify(action)}. ` +
-        `Valid: ${[...USER_ACTIONS].join(", ")}`,
-    );
-  }
+  validateAssetSymbol(params.asset, action);
+  validateCurrency(params.currency, "--currency");
 
   if (!params.exchange || !params.exchange.trim()) {
     throw new ValidationError(
