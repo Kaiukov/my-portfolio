@@ -34,19 +34,6 @@ export async function querySingle<T = Record<string, unknown>>(
   return rows.length > 0 ? rows[0] : null;
 }
 
-export async function runTx(fn: any): Promise<any> {
-  if (!sql) connect();
-  await sql!.unsafe("BEGIN");
-  try {
-    const result = await fn(sql);
-    await sql!.unsafe("COMMIT");
-    return result;
-  } catch (e) {
-    await sql!.unsafe("ROLLBACK");
-    throw e;
-  }
-}
-
 export async function close(): Promise<void> {
   if (sql) {
     await sql.end();

@@ -24,11 +24,5 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
-      - name: Debug — can runTx be imported?
-        run: bun -e "import { runTx, query } from './src/db.ts'; console.log('runTx:', typeof runTx, 'query:', typeof query);"
-
-      - name: Debug — bun test no-mock import
-        run: bun test tests/__debug.test.ts 2>&1
-
       - name: Run tests
         run: bun test

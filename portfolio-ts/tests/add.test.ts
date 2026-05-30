@@ -7,9 +7,12 @@ const mockWithTransaction = mock();
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mockQuerySingle,
-  runTx: mockWithTransaction,
   connect: () => {},
   close: () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: mockWithTransaction,
 }));
 
 describe("addTransaction validation", () => {

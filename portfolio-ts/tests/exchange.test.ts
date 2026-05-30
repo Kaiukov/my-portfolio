@@ -3,14 +3,16 @@ import { ValidationError } from "../src/validators.js";
 
 const mockQuerySingle = mock();
 const mockWithTransaction = mock();
-const mockQueryInternal = mock();
 
 mock.module("../src/db.js", () => ({
-  query: mockQueryInternal,
+  query: mock(),
   querySingle: mockQuerySingle,
-  runTx: mockWithTransaction,
   connect: () => {},
   close: () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: mockWithTransaction,
 }));
 
 describe("exchangeCurrency", () => {

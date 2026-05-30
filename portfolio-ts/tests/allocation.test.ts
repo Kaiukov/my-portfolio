@@ -8,6 +8,9 @@ mock.module("../src/db.js", () => ({
   querySingle: mockQuerySingle,
   connect: () => {},
   close: () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
   runTx: async <T>(fn: (tx: { unsafe: (sql: string, params?: unknown[]) => Promise<unknown[]> }) => Promise<T>): Promise<T> => {
     return fn({ unsafe: async (_sql: string, _params?: unknown[]) => [] });
   },

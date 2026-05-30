@@ -1,4 +1,5 @@
-import { querySingle, runTx } from "../db.js";
+import { querySingle } from "../db.js";
+import { runTx } from "../tx.js";
 import { NotFoundError, ValidationError, validatePositiveInt } from "../validators.js";
 
 export interface DeleteDryRunResult {

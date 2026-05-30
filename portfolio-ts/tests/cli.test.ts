@@ -3,9 +3,12 @@ import { describe, expect, test, mock, jest } from "bun:test";
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mock(),
-  runTx: mock(),
   connect: () => {},
   close: async () => {},
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: mock(),
 }));
 
 describe("CLI parsing", () => {
