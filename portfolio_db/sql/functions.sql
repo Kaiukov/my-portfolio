@@ -311,6 +311,119 @@ AS $$
       AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
 $$;
 
+-- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.
+-- Processes BUY/SELL transactions in chronological order (date, then id).
+-- BUY creates a lot with cost = qty*price + fees, converted to USD.
+-- SELL consumes oldest lots first (FIFO); realized gain = proceeds - cost of consumed units.
+-- All values in USD; trades in non-USD currencies are FX-converted via cash_amount_to_usd_sql.
+CREATE OR REPLACE FUNCTION portfolio_fifo_metrics_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (
+    cost_basis       DOUBLE PRECISION,
+    realized_gain    DOUBLE PRECISION,
+    unrealized_gain  DOUBLE PRECISION,
+    total_profit     DOUBLE PRECISION
+)
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+DECLARE
+    v_cost_basis       DOUBLE PRECISION := 0;
+    v_realized_gain    DOUBLE PRECISION := 0;
+    v_total_cost_all   DOUBLE PRECISION := 0;
+    v_market_value     DOUBLE PRECISION := 0;
+    v_lot_cost         DOUBLE PRECISION;
+    v_proceeds         DOUBLE PRECISION;
+    v_trade_currency   TEXT;
+    v_fee_currency     TEXT;
+    v_sell_qty         DOUBLE PRECISION;
+    v_consume          DOUBLE PRECISION;
+    v_cost_consumed    DOUBLE PRECISION;
+    v_proceeds_share   DOUBLE PRECISION;
+    lot_rec            RECORD;
+    tx                 RECORD;
+    asset_rec           RECORD;
+BEGIN
+    v_cost_basis := 0;
+    v_realized_gain := 0;
+
+    CREATE TEMP TABLE fifo_lots (
+        id SERIAL PRIMARY KEY,
+        asset TEXT NOT NULL,
+        remaining_qty DOUBLE PRECISION NOT NULL,
+        unit_cost_usd DOUBLE PRECISION NOT NULL
+    ) ON COMMIT DROP;
+
+    CREATE INDEX IF NOT EXISTS idx_fifo_lots_asset ON fifo_lots (asset, id);
+
+    FOR tx IN
+        SELECT t.id, t.date, t.asset, upper(t.action) AS action,
+               t.quantity, t.price, t.fees,
+               COALESCE(NULLIF(t.currency, ''), 'USD') AS currency,
+               COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency
+        FROM transactions t
+        WHERE upper(t.action) IN ('BUY', 'SELL')
+          AND NOT is_cash_like_sql(t.asset)
+          AND t.date <= p_as_of_date
+        ORDER BY t.date ASC, t.id ASC
+    LOOP
+        IF tx.action = 'BUY' THEN
+            v_lot_cost := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
+                        + cash_amount_to_usd_sql(tx.fee_currency, COALESCE(tx.fees, 0), tx.date);
+
+            INSERT INTO fifo_lots (asset, remaining_qty, unit_cost_usd)
+            VALUES (tx.asset, tx.quantity,
+                    CASE WHEN tx.quantity > 0 THEN v_lot_cost / tx.quantity ELSE 0 END);
+        ELSIF tx.action = 'SELL' THEN
+            v_sell_qty := tx.quantity;
+            v_proceeds := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
+                        - cash_amount_to_usd_sql(tx.fee_currency, COALESCE(tx.fees, 0), tx.date);
+
+            FOR lot_rec IN
+                SELECT id, remaining_qty, unit_cost_usd
+                FROM fifo_lots
+                WHERE asset = tx.asset AND remaining_qty > 0
+                ORDER BY id ASC
+            LOOP
+                EXIT WHEN v_sell_qty <= 0;
+
+                v_consume := LEAST(lot_rec.remaining_qty, v_sell_qty);
+                v_cost_consumed := v_consume * lot_rec.unit_cost_usd;
+                v_proceeds_share := v_proceeds * (v_consume / tx.quantity);
+
+                v_realized_gain := v_realized_gain + v_proceeds_share - v_cost_consumed;
+
+                UPDATE fifo_lots
+                SET remaining_qty = remaining_qty - v_consume
+                WHERE id = lot_rec.id;
+
+                v_sell_qty := v_sell_qty - v_consume;
+            END LOOP;
+        END IF;
+    END LOOP;
+
+    -- cost_basis = sum of remaining lot costs
+    SELECT COALESCE(SUM(remaining_qty * unit_cost_usd), 0) INTO v_cost_basis
+    FROM fifo_lots
+    WHERE remaining_qty > 0;
+
+    -- market value of remaining holdings
+    SELECT COALESCE(SUM(asset_market_value_usd_sql(asset, remaining_qty, p_as_of_date)), 0)
+    INTO v_market_value
+    FROM fifo_lots
+    WHERE remaining_qty > 0;
+
+    v_cost_basis := ROUND(v_cost_basis::numeric, 2);
+    v_realized_gain := ROUND(v_realized_gain::numeric, 2);
+    v_market_value := ROUND(v_market_value::numeric, 2);
+    RETURN QUERY
+    SELECT
+        v_cost_basis,
+        v_realized_gain,
+        v_market_value - v_cost_basis,
+        v_realized_gain + (v_market_value - v_cost_basis);
+END;
+$$;
+
 -- Portfolio status snapshot: all fields owned by PostgreSQL.
 -- Called by `portfolio-ts status` so TypeScript never computes financial metrics.
 -- Deposits/withdrawals/income/fees/taxes are FX-converted to USD via cash_amount_to_usd_sql().
@@ -330,6 +443,10 @@ RETURNS TABLE (
     taxes                 DOUBLE PRECISION,
     total_gain            DOUBLE PRECISION,
     total_gain_pct        DOUBLE PRECISION,
+    cost_basis            DOUBLE PRECISION,
+    realized_gain         DOUBLE PRECISION,
+    unrealized_gain       DOUBLE PRECISION,
+    total_profit          DOUBLE PRECISION,
     as_of_date            TEXT
 )
 LANGUAGE sql
@@ -360,10 +477,16 @@ AS $$
         FROM transactions t
     ),
     latest_dr AS (
-        SELECT portfolio_value, date::TEXT AS as_of_date
+        SELECT portfolio_value, date, date::TEXT AS as_of_date
         FROM daily_returns
         ORDER BY date DESC
         LIMIT 1
+    ),
+    fifo AS (
+        SELECT cost_basis, realized_gain, unrealized_gain, total_profit
+        FROM portfolio_fifo_metrics_sql(
+            COALESCE((SELECT date FROM latest_dr), CURRENT_DATE)
+        )
     )
     SELECT
         a.transactions_count,
@@ -386,9 +509,14 @@ AS $$
              THEN (dr.portfolio_value - (a.deposits - a.withdrawals))
                    / (a.deposits - a.withdrawals) * 100.0
              ELSE NULL END                                              AS total_gain_pct,
+        f.cost_basis,
+        f.realized_gain,
+        f.unrealized_gain,
+        f.total_profit,
         dr.as_of_date
     FROM agg a
     LEFT JOIN latest_dr dr ON TRUE
+    CROSS JOIN fifo f
 $$;
 
 -- Cash balances snapshot: FX-converted cash balances as of a given date.
