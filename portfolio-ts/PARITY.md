@@ -25,8 +25,8 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio allocation` | `portfolio-ts allocation` | **accepted behavior change** | Calls `portfolio_allocation_sql(as_of_date)` — PostgreSQL owns all calculations. Returns FX-converted per-asset USD values with allocation percentages. TypeScript only sums `value_usd` for `portfolio_value` and formats rows. Supports `--as-of-date`. |
 | `portfolio cash` | `portfolio-ts cash` | **accepted behavior change** | Calls `portfolio_cash_sql(as_of_date)` — PostgreSQL owns all calculations. Returns per-currency cash buckets with FX-converted USD values. TypeScript only sums `usd_value` to compute `total_usd` (aggregation only, no financial calculation). Supports `--as-of-date` for historical snapshots. |
 | `portfolio summary` | `portfolio-ts summary` | **accepted behavior change** | Calls `portfolio_summary_sql(as_of_date)` — PostgreSQL owns all calculations. Returns holding count, total cash, portfolio value, transaction metadata. Supports `--as-of-date`. |
-| `portfolio performance` | — | **intentionally deferred** | Requires TWR/Sharpe/MDD/benchmark. PostgreSQL work needed: extract `get_performance_stats_sql()` CTE from Python into a standalone `portfolio_performance_sql(as_of_date, benchmark, from_date)` PG function. |
-| `portfolio mwr` | `portfolio-ts mwr` | **implemented (#32)** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as decimal. |
+| `portfolio performance` | `portfolio-ts performance` | **implemented** | Calls `portfolio_performance_sql(as_of_date, benchmark, from_date)` — PostgreSQL owns all TWR/Sharpe/MDD/benchmark calculations. Returns total_gain (investment returns only, reconciled with TWR), median_monthly_return via PERCENTILE_CONT, CAGR, risk metrics, benchmark comparison. Supports `--as-of-date`, `--benchmark`, `--from-date`, `--period` (ytd/1y/6m/3m). |
+| `portfolio mwr` | `portfolio-ts mwr` | **implemented** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as percentage. Supports `--as-of-date`. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
 | `portfolio migrate-duckdb-to-postgres` | — | **intentionally dropped** | DuckDB has been removed from the project. No DuckDB source files exist. Replacing DuckDB with PostgreSQL was the purpose of this migration. |
 
@@ -81,8 +81,4 @@ Files preserved in `portfolio_db/sql/`:
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
 
-## Deferred commands — PG work required before TS implementation
 
-| Command | PG function/view needed |
-|---|---|
-| performance | `portfolio_performance_sql(as_of_date, benchmark, from_date)` — TWR/risk metrics |
