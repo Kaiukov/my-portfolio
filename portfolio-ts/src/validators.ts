@@ -14,14 +14,21 @@ export class NotFoundError extends Error {
   }
 }
 
-export function parseWriteDate(dateStr: string, flagName: string): string {
-  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(dateStr);
-  if (!m) {
-    throw new ValidationError(
-      `${flagName}: expected DD-MM-YYYY format, got ${JSON.stringify(dateStr)}`,
-    );
+export function parseDate(dateStr: string, flagName: string): string {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (iso) {
+    return dateStr;
   }
-  return `${m[3]}-${m[2]}-${m[1]}`;
+  const legacy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(dateStr);
+  if (legacy) {
+    console.warn(
+      `[deprecated] ${flagName}: DD-MM-YYYY format is deprecated, use YYYY-MM-DD instead`,
+    );
+    return `${legacy[3]}-${legacy[2]}-${legacy[1]}`;
+  }
+  throw new ValidationError(
+    `${flagName}: expected ISO 8601 format YYYY-MM-DD, got ${JSON.stringify(dateStr)}`,
+  );
 }
 
 export function validatePositiveFloat(

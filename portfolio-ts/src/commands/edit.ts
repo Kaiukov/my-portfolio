@@ -3,7 +3,7 @@ import { runTx } from "../tx.js";
 import {
   ValidationError,
   NotFoundError,
-  parseWriteDate,
+  parseDate,
   validatePositiveFloat,
   validateNonNegativeFloat,
   validatePositiveInt,
@@ -99,7 +99,7 @@ export async function editTransaction(
   }
 
   const before = existing;
-  const newDate = changes.dateStr ? parseWriteDate(changes.dateStr, "--date") : existing.date;
+  const newDate = changes.dateStr ? parseDate(changes.dateStr, "--date") : existing.date;
   const newAction = (changes.action ?? existing.action).toUpperCase();
   const newQuantity = changes.quantity ?? existing.quantity;
   const newAsset = changes.asset ?? existing.asset;

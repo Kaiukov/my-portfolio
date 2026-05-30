@@ -1,22 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import {
-  parseWriteDate,
+  parseDate,
   validatePositiveFloat,
   validateNonNegativeFloat,
   validatePositiveInt,
   ValidationError,
 } from "../src/validators.js";
 
-describe("parseWriteDate", () => {
-  test("converts DD-MM-YYYY to YYYY-MM-DD", () => {
-    expect(parseWriteDate("15-01-2026", "--date")).toBe("2026-01-15");
-    expect(parseWriteDate("01-12-2025", "--date")).toBe("2025-12-01");
+describe("parseDate", () => {
+  test("accepts ISO YYYY-MM-DD (primary format)", () => {
+    expect(parseDate("2026-01-15", "--date")).toBe("2026-01-15");
+    expect(parseDate("2025-12-01", "--date")).toBe("2025-12-01");
+  });
+
+  test("still accepts legacy DD-MM-YYYY (deprecated)", () => {
+    expect(parseDate("15-01-2026", "--date")).toBe("2026-01-15");
+    expect(parseDate("01-12-2025", "--date")).toBe("2025-12-01");
   });
 
   test("throws on wrong format", () => {
-    expect(() => parseWriteDate("2026-01-15", "--date")).toThrow(ValidationError);
-    expect(() => parseWriteDate("15/01/2026", "--date")).toThrow(ValidationError);
-    expect(() => parseWriteDate("", "--date")).toThrow(ValidationError);
+    expect(() => parseDate("15/01/2026", "--date")).toThrow(ValidationError);
+    expect(() => parseDate("", "--date")).toThrow(ValidationError);
+    expect(() => parseDate("not-a-date", "--date")).toThrow(ValidationError);
   });
 });
 
