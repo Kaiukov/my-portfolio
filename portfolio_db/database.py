@@ -770,6 +770,75 @@ class PortfolioDatabase:
             $$;
         """)
 
+        self.con.execute("""
+            CREATE OR REPLACE FUNCTION get_required_price_checkpoints_sql(p_end_date DATE)
+            RETURNS TABLE(ticker TEXT, checkpoint_date DATE)
+            LANGUAGE sql
+            STABLE
+            AS $$
+                -- BUY/SELL of non-cash assets: need price on trade date AND end date
+                SELECT DISTINCT t.asset::TEXT, t.date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+                  AND t.asset NOT LIKE 'CASH %'
+
+                UNION
+
+                SELECT DISTINCT t.asset::TEXT, p_end_date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+                  AND t.asset NOT LIKE 'CASH %'
+
+                UNION
+
+                -- FX for non-USD stocks: need FX rate on trade date AND end date
+                SELECT DISTINCT
+                    cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
+                    t.date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) IN (
+                      'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                      'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                  )
+
+                UNION
+
+                SELECT DISTINCT
+                    cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
+                    p_end_date
+                FROM transactions t
+                WHERE t.action IN ('BUY', 'SELL')
+                  AND get_asset_type_sql(t.asset) IN (
+                      'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+                      'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+                  )
+
+                UNION
+
+                -- Cash FX assets: need FX rate on transaction dates AND end date
+                SELECT DISTINCT
+                    normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
+                    t.date
+                FROM transactions t
+                WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+                   OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+                  AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+
+                UNION
+
+                SELECT DISTINCT
+                    normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
+                    p_end_date
+                FROM transactions t
+                WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+                   OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+                  AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+            $$;
+        """)
+
     def migrate_from_csv(self, csv_path: str):
         """Migrate transactions from CSV file."""
         # Read CSV with pandas to handle date parsing
@@ -2790,6 +2859,21 @@ class PortfolioDatabase:
             else:
                 fx_currencies.append(ticker)
         return {'assets': sorted(assets), 'fx_currencies': sorted(fx_currencies)}
+
+    def get_required_price_checkpoints(self, end_date) -> dict:
+        """Return per-ticker required price checkpoint dates up to end_date.
+
+        Returns dict mapping ticker → sorted list of dates that must have
+        cached price coverage for a valid valuation.
+        """
+        rows = self.con.execute(
+            "SELECT ticker, checkpoint_date FROM get_required_price_checkpoints_sql(%s)",
+            [end_date],
+        ).fetchall()
+        result: dict = {}
+        for ticker, checkpoint_date in rows:
+            result.setdefault(ticker, set()).add(checkpoint_date)
+        return {ticker: sorted(dates) for ticker, dates in result.items()}
 
     def close(self):
         """Close database connection."""

@@ -1,0 +1,1750 @@
+"""CLI interface for portfolio_db."""
+
+import click
+import os
+import subprocess
+from datetime import datetime, date
+from pathlib import Path
+import json
+import sys
+import importlib.metadata
+import requests
+import threading
+
+from portfolio_db.database import resolve_db_target
+from portfolio_db.portfolio_service import PortfolioService, PriceDataUnavailableError
+from portfolio_db.response import success, error, build_pagination
+from portfolio_db.validators import (
+    validate_pagination,
+    validate_date_range,
+    validate_positive_float,
+    validate_non_negative_float,
+    validate_positive_int,
+    validate_file_exists,
+)
+import portfolio_db.logger as log
+
+USER_ACTION_CHOICES = [
+    "BUY",
+    "SELL",
+    "DEPOSIT",
+    "WITHDRAW",
+    "DIVIDEND",
+    "INTEREST",
+    "FEE",
+    "TAX",
+    "TRANSFER",
+]
+
+REPORT_LIMIT_HELP = "Max rows to return (default: 50; max: 10,000)"
+REPORT_OFFSET_HELP = "Rows to skip (default: 0)"
+REPORT_DATE_HELP = "YYYY-MM-DD"
+SNAPSHOT_DATE_HELP = "Snapshot date in YYYY-MM-DD; if omitted, uses the latest reporting snapshot"
+WRITE_DATE_HELP = "Transaction date in DD-MM-YYYY"
+MIGRATE_CSV_HELP = "Source CSV file (semicolon-separated; destructive import)"
+BENCHMARK_HELP = (
+    "Benchmark ticker; if omitted, uses the first entry from PORTFOLIO_BENCHMARK_TICKERS "
+    "(SPY if the variable is unset)"
+)
+TOP_LEVEL_HELP = """Portfolio tracking with PostgreSQL.
+
+All commands emit JSON only.
+PORTFOLIO_DB_URL environment variable configures the database connection.
+Read/report commands use YYYY-MM-DD dates.
+Write and recalc commands use DD-MM-YYYY dates where a date is accepted.
+
+Read-only commands:
+  report          Paginated daily returns.
+  transactions    Paginated transaction list.
+  status          Current portfolio status snapshot.
+  allocation      Asset/cash allocation summary.
+  cash            Cash balances converted to USD.
+  summary         Position summary with gains/losses.
+  performance     Full return/risk report.
+  mwr             Money-weighted return (XIRR).
+  verify_prices   Price cache schema and coverage diagnostics.
+  health          High-level DB and data health.
+
+Write / maintenance commands:
+  add             Insert a transaction and recalculate.
+  edit            Update a transaction and recalculate.
+  delete          Remove a transaction and recalculate.
+  exchange        Record a currency exchange as two legs.
+  migrate         Import transactions from CSV and rebuild reporting data.
+  repair_prices   Fetch and cache missing or stale prices.
+  recalculate     Rebuild daily returns from cached data.
+  backup          Copy the PostgreSQL database to a backup.
+  init            Initialize the PostgreSQL schema (idempotent).
+  sync            Check and auto-repair fresh state (fetch prices, recalculate).
+
+Scheduling commands:
+  cron install      Install portfolio sync in macOS crontab.
+  cron uninstall    Remove portfolio entries from macOS crontab.
+  cron status       Show crontab entries and pg_cron jobs.
+  cron db-install   Register daily_maintenance_check() in pg_cron.
+  cron db-uninstall Remove portfolio jobs from pg_cron.
+
+Use `portfolio COMMAND --help` for command-specific details."""
+
+
+def _check_yfinance_version_background():
+    """Fetch latest yfinance version from PyPI and warn if outdated."""
+    try:
+        cache_dir = Path.home() / ".cache" / "portfolio"
+        cache_file = cache_dir / "yfinance_version_check"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        current_time = datetime.now().timestamp()
+        cache_data = {}
+
+        if cache_file.exists():
+            try:
+                cache_data = json.loads(cache_file.read_text())
+                cached_time = cache_data.get("timestamp", 0)
+                if current_time - cached_time < 86400:
+                    latest_version = cache_data.get("latest_version")
+                    if latest_version:
+                        _warn_if_outdated(latest_version)
+                    return
+            except Exception:
+                pass
+
+        response = requests.get("https://pypi.org/pypi/yfinance/json", timeout=2)
+        response.raise_for_status()
+        latest_version = response.json()["info"]["version"]
+
+        cache_data = {"timestamp": current_time, "latest_version": latest_version}
+        cache_file.write_text(json.dumps(cache_data))
+
+        _warn_if_outdated(latest_version)
+    except Exception:
+        pass
+
+
+def _warn_if_outdated(latest_version: str):
+    """Warn if current yfinance version is outdated."""
+    try:
+        current_version = importlib.metadata.version("yfinance")
+        if current_version != latest_version:
+            def _parse_version(v: str) -> tuple:
+                return tuple(int(x) for x in v.split("."))
+            if _parse_version(current_version) < _parse_version(latest_version):
+                msg = f"Note: yfinance {current_version} is out of date (latest: {latest_version}). Run: uv add yfinance>={latest_version}\n"
+                sys.stderr.write(msg)
+                sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def _parse_date(value: str, flag: str) -> date:
+    """Parse YYYY-MM-DD string; call error() and exit on failure."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        error("_", "VALIDATION_ERROR", f"{flag} must be YYYY-MM-DD, got: {value!r}")
+
+
+def _parse_legacy_date(value: str, flag: str) -> date:
+    """Parse DD-MM-YYYY string (used by add / exchange / recalculate)."""
+    try:
+        return datetime.strptime(value, "%d-%m-%Y").date()
+    except ValueError:
+        error("_", "VALIDATION_ERROR", f"{flag} must be DD-MM-YYYY, got: {value!r}")
+
+
+
+
+@click.group(help=TOP_LEVEL_HELP)
+def cli():
+    """Portfolio tracking CLI."""
+    pass
+
+
+@cli.result_callback()
+def _check_version_after_command(result, **kwargs):
+    """Check yfinance version in background after command completes."""
+    thread = threading.Thread(target=_check_yfinance_version_background, daemon=True)
+    thread.start()
+
+
+# ─── migrate ──────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Warning:
+  This command is destructive. It clears existing transactions and daily_returns
+  before importing the CSV, then fetches prices and rebuilds reporting data.
+
+Notes:
+  The CSV must be semicolon-separated and use DD-MM-YYYY dates.
+
+Examples:
+
+  portfolio migrate --csv ./transactions.csv
+
+  portfolio migrate --csv ./exports/q1-transactions.csv
+""")
+@click.option("--csv", default="yfiance-transactions/transactions.csv", show_default=True, help=MIGRATE_CSV_HELP)
+def migrate(csv):
+    """Import transactions from CSV, fetch prices, and rebuild reporting data."""
+    validate_file_exists(csv, "--csv", "migrate")
+    service = None
+    try:
+        service = PortfolioService()
+        service.setup_from_csv(csv)
+        count = service.get_transaction_count()
+        success("migrate", {"rows_imported": count, "source": csv})
+    except Exception as e:
+        error("migrate", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── report ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--limit", default=50, type=int, show_default=True, help=REPORT_LIMIT_HELP)
+@click.option("--offset", default=0, type=int, show_default=True, help=REPORT_OFFSET_HELP)
+@click.option("--start-date", default=None, help=f"Filter from date ({REPORT_DATE_HELP})")
+@click.option("--end-date", default=None, help=f"Filter to date ({REPORT_DATE_HELP})")
+def report(limit, offset, start_date, end_date):
+    """List daily returns in a paginated report."""
+    validate_pagination(limit, offset, "report")
+    sd = _parse_date(start_date, "--start-date") if start_date else None
+    ed = _parse_date(end_date, "--end-date") if end_date else None
+    validate_date_range(sd, ed, "report")
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+        data, total = service.get_daily_returns_paginated(limit, offset, sd, ed)
+        pagination = build_pagination(limit, offset, total)
+        success("report", data, count=len(data), pagination=pagination)
+    except Exception as e:
+        error("report", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── transactions ─────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  Pagination is inclusive on the date filters.
+  `--limit` is capped at 10,000 rows.
+
+Examples:
+
+  portfolio transactions
+
+  portfolio transactions --limit 20 --offset 40
+
+  portfolio transactions --start-date 2026-01-01 --end-date 2026-03-31
+""")
+@click.option("--limit", default=50, type=int, show_default=True, help=REPORT_LIMIT_HELP)
+@click.option("--offset", default=0, type=int, show_default=True, help=REPORT_OFFSET_HELP)
+@click.option("--start-date", default=None, help=f"Filter from date ({REPORT_DATE_HELP})")
+@click.option("--end-date", default=None, help=f"Filter to date ({REPORT_DATE_HELP})")
+def transactions(limit, offset, start_date, end_date):
+    """List transactions in chronological order with pagination."""
+    validate_pagination(limit, offset, "transactions")
+    sd = _parse_date(start_date, "--start-date") if start_date else None
+    ed = _parse_date(end_date, "--end-date") if end_date else None
+    validate_date_range(sd, ed, "transactions")
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+        data, total = service.get_transactions_paginated(limit, offset, sd, ed)
+        pagination = build_pagination(limit, offset, total)
+        success("transactions", data, count=len(data), pagination=pagination)
+    except Exception as e:
+        error("transactions", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── status ───────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  If `--as-of-date` is omitted, the latest reporting snapshot is used.
+
+Examples:
+
+  portfolio status
+
+  portfolio status --as-of-date 2026-01-01
+""")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+def status(as_of_date):
+    """Show a compact portfolio snapshot."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    service = None
+    try:
+        service = PortfolioService()
+        recalculated = service.ensure_fresh()
+        trans_count = service.get_transaction_count()
+        stats = service.get_performance_stats(as_of_date=as_of)
+        data = {
+            "transactions": trans_count,
+            "start_date": stats["start_date"],
+            "end_date": stats["end_date"],
+            "portfolio_value": stats["end_value"],
+            "total_invested": stats["net_contributions"],
+            "deposits": stats["deposits"],
+            "withdrawals": stats["withdrawals"],
+            "income": stats["income"],
+            "fees": stats["fees"],
+            "taxes": stats["taxes"],
+            "total_gain": stats["net_gain"],
+            "total_gain_pct": stats["total_return_pct"],
+            "as_of_date": stats["end_date"],
+        }
+        success("status", data, extra_meta={"recalculated": recalculated} if recalculated else None)
+    except PriceDataUnavailableError as e:
+        error("status", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("status", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── add ──────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
+Notes:
+  `--exchange` is required.
+  `--account` is required for TRANSFER transactions.
+
+Examples:
+
+  portfolio add --date 01-01-2026 --asset AAPL --action buy --quantity 10 --price 150 --exchange Interactive
+
+  portfolio add --date 01-01-2026 --asset USD --action deposit --quantity 10000 --exchange Interactive
+
+  portfolio add --date 01-01-2026 --asset AAPL --action sell --quantity 5 --price 180 --fees 1.5 --exchange Interactive
+""")
+@click.option("--date", "date_str", required=True, help=WRITE_DATE_HELP)
+@click.option("--asset", required=True, help="Asset or cash ticker")
+@click.option("--action", required=True,
+              type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False),
+              help="Transaction action")
+@click.option("--quantity", required=True, type=float, help="Positive quantity")
+@click.option("--price", type=float, default=None, help="Positive price; required for BUY/SELL")
+@click.option("--currency", default="USD", show_default=True, help="Currency code for the transaction")
+@click.option("--fees", type=float, default=None, help="Non-negative fee amount")
+@click.option("--fee-currency", default=None, help="Currency code for fees; defaults to --currency")
+@click.option("--exchange", default="", help="Broker or exchange label; required for all add operations")
+@click.option("--account", default=None, help="Account label; required for TRANSFER (e.g. broker_a)")
+def add(date_str, asset, action, quantity, price, currency, fees, fee_currency, exchange, account):
+    """Add a transaction and recalculate reporting data.
+
+Dates use DD-MM-YYYY format (e.g. 01-01-2026).
+"""
+    date_obj = _parse_legacy_date(date_str, "--date")
+
+    # --exchange is required for all transactions
+    if not exchange or not exchange.strip():
+        error(
+            "add",
+            "VALIDATION_ERROR",
+            "--exchange is required.\n"
+            "Expected: --exchange <broker or exchange name>\n"
+            "Example:  portfolio add --date 01-01-2026 --asset AAPL --action BUY "
+            "--quantity 10 --price 150 --exchange Interactive",
+        )
+
+    action_upper = action.upper()
+
+    # --quantity must be positive for user-facing actions
+    validate_positive_float(quantity, "--quantity", "add")
+
+    # --price must be positive when provided
+    if price is not None:
+        validate_positive_float(price, "--price", "add")
+
+    # --fees must be non-negative when provided
+    if fees is not None:
+        validate_non_negative_float(fees, "--fees", "add")
+
+    # TRANSFER requires --account
+    if action_upper == "TRANSFER" and not account:
+        error(
+            "add",
+            "VALIDATION_ERROR",
+            "--account is required for TRANSFER transactions.\n"
+            "Expected: --account <account label>\n"
+            "Example:  portfolio add --date 01-01-2026 --asset USD --action TRANSFER "
+            "--quantity 500 --exchange MyBroker --account broker_b",
+        )
+
+    service = None
+    try:
+        service = PortfolioService()
+        result = service.add_transaction(
+            date_obj=date_obj,
+            asset=asset,
+            action=action_upper,
+            quantity=quantity,
+            price=price,
+            currency=currency,
+            fees=fees,
+            fee_currency=fee_currency,
+            exchange=exchange,
+            account=account,
+        )
+        trans = service.get_transaction_by_id(result["transaction_id"])
+        success("add", {"transaction": trans, "recalculated": True})
+    except PriceDataUnavailableError as e:
+        error("add", "PRICE_DATA_ERROR", str(e))
+    except ValueError as e:
+        error("add", "VALIDATION_ERROR", str(e))
+    except Exception as e:
+        error("add", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── edit ─────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
+Notes:
+  `--dry-run` validates and previews changes without writing to the DB.
+
+Examples:
+
+  portfolio edit --id 42 --price 155.50
+
+  portfolio edit --id 42 --quantity 8 --dry-run
+
+  portfolio edit --id 42 --date 15-01-2026 --fees 2.0
+""")
+@click.option("--id", "trans_id", required=True, type=int, help="Transaction ID to edit")
+@click.option("--date", "date_str", default=None, help=WRITE_DATE_HELP)
+@click.option("--asset", default=None, help="Asset or cash ticker")
+@click.option("--action", default=None, type=click.Choice(USER_ACTION_CHOICES, case_sensitive=False), help="Replacement transaction action")
+@click.option("--quantity", default=None, type=float, help="Positive quantity")
+@click.option("--price", default=None, type=float, help="Positive price")
+@click.option("--currency", default=None, help="Replacement currency code")
+@click.option("--fees", default=None, type=float, help="Non-negative fee amount")
+@click.option("--exchange", default=None, help="Replacement broker or exchange label")
+@click.option("--data-source", default=None, help="Replacement data source label")
+@click.option("--account", default=None, help="Account label; required for TRANSFER")
+@click.option("--dry-run", is_flag=True, help="Show what would change without applying")
+def edit(trans_id, date_str, asset, action, quantity, price, currency, fees, exchange, data_source, account, dry_run):
+    """Edit an existing transaction and recalculate reporting data.
+
+Dates use DD-MM-YYYY format (e.g. 15-01-2026).
+"""
+    validate_positive_int(trans_id, "--id", "edit")
+
+    # Validate numeric fields when provided
+    if quantity is not None:
+        validate_positive_float(quantity, "--quantity", "edit")
+    if price is not None:
+        validate_positive_float(price, "--price", "edit")
+    if fees is not None:
+        validate_non_negative_float(fees, "--fees", "edit")
+
+    changes = {
+        "date": _parse_legacy_date(date_str, "--date") if date_str else None,
+        "asset": asset,
+        "action": action.upper() if action else None,
+        "quantity": quantity,
+        "price": price,
+        "currency": currency,
+        "fees": fees,
+        "exchange": exchange,
+        "data_source": data_source,
+        "account": account,
+    }
+    if not any(value is not None for value in changes.values()):
+        error(
+            "edit",
+            "VALIDATION_ERROR",
+            "Provide at least one field to update.\n"
+            "Expected: portfolio edit --id <id> [--date DD-MM-YYYY] [--asset SYMBOL] "
+            "[--action ACTION] [--quantity N] [--price N] [--fees N] [--exchange NAME]\n"
+            "Example:  portfolio edit --id 42 --price 155.50",
+        )
+
+    if dry_run:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            if not service.get_transaction_by_id(trans_id):
+                error("edit", "NOT_FOUND", f"Transaction ID {trans_id} not found")
+            preview = service.preview_edit_transaction(trans_id, **changes)
+            proposed = {k: (str(v) if v is not None else None) for k, v in changes.items() if v is not None}
+            success("edit", {"dry_run": True, "transaction_id": trans_id, "current": preview["current"], "proposed_changes": proposed})
+        except ValueError as e:
+            error("edit", "VALIDATION_ERROR", str(e))
+        except SystemExit:
+            raise
+        except Exception as e:
+            error("edit", "DB_ERROR", str(e))
+        finally:
+            if service:
+                service.close()
+        return
+
+    service = None
+    try:
+        service = PortfolioService()
+        if not service.get_transaction_by_id(trans_id):
+            error(
+                "edit",
+                "NOT_FOUND",
+                f"Transaction ID {trans_id} not found.\n"
+                f"Expected: --id <existing transaction id>\n"
+                f"Hint:     run `portfolio transactions` to list available IDs",
+            )
+        result = service.edit_transaction(trans_id, **changes)
+        success("edit", {
+            "before": result["before"],
+            "transaction": result["transaction"],
+            "recalculated": True,
+            "from_date": result["from_date"],
+        })
+    except PriceDataUnavailableError as e:
+        error("edit", "PRICE_DATA_ERROR", str(e))
+    except ValueError as e:
+        error("edit", "VALIDATION_ERROR", str(e))
+    except Exception as e:
+        error("edit", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── verify_prices ────────────────────────────────────────────────────────────
+
+@cli.command(name="verify_prices", epilog="""
+Notes:
+  Diagnostic only. No prices are fetched or repaired.
+  Coverage gaps are reported in `coverage_issues`.
+
+Examples:
+
+  portfolio verify_prices
+""")
+def verify_prices():
+    """Inspect price-cache schema, coverage, and repair history."""
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+        info = service.verify_prices_storage()
+        stats = info.get("statistics", {})
+        tickers = info.get("ticker_breakdown", [])
+        data = {
+            "total_rows": stats.get("total_records", 0),
+            "unique_tickers": len(tickers),
+            "date_range": {
+                "start": str(stats.get("min_date", "")),
+                "end": str(stats.get("max_date", "")),
+            },
+            "required_range": info.get("coverage", {}).get("required_range", {}),
+            "coverage_issues": info.get("coverage", {}).get("issues", []),
+            "coverage": info.get("coverage", {}).get("coverage", []),
+            "refresh_state": info.get("refresh_state", {}),
+            "repair_log": info.get("repair_log", []),
+            "issues": info.get("optimization_notes", []),
+        }
+        success("verify_prices", data)
+    except Exception as e:
+        error("verify_prices", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── repair_prices ────────────────────────────────────────────────────────────
+
+@cli.command(name="repair_prices", epilog="""
+Notes:
+  Without `--ticker`, this refreshes all required portfolio tickers plus
+  benchmark tickers and extends the end date to today.
+
+Examples:
+
+  portfolio repair_prices
+
+  portfolio repair_prices --ticker AAPL --ticker MSFT
+
+  portfolio repair_prices --start-date 2026-01-01 --dry-run
+""")
+@click.option("--ticker", "tickers", multiple=True, help="Specific ticker to refresh; repeat to target multiple tickers")
+@click.option("--start-date", default=None, help=f"Refresh from date ({REPORT_DATE_HELP})")
+@click.option("--end-date", default=None, help=f"Refresh to date ({REPORT_DATE_HELP})")
+@click.option("--dry-run", is_flag=True, help="Show what would be repaired without fetching")
+def repair_prices(tickers, start_date, end_date, dry_run):
+    """Fetch and cache missing or stale price series."""
+    sd = _parse_date(start_date, "--start-date") if start_date else None
+    ed = _parse_date(end_date, "--end-date") if end_date else None
+    validate_date_range(sd, ed, "repair_prices")
+    if dry_run:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            coverage = service.analyze_price_coverage(start_date=sd, end_date=ed)
+            issues = coverage.get("issues", [])
+            target = [i["ticker"] for i in issues] if not tickers else list(tickers)
+            success("repair_prices", {
+                "dry_run": True,
+                "would_repair": target,
+                "issues_found": len(issues),
+                "coverage": coverage,
+            })
+        except Exception as e:
+            error("repair_prices", "PRICE_DATA_ERROR", str(e))
+        finally:
+            service.close()
+        return
+    service = None
+    try:
+        service = PortfolioService()
+        result = service.repair_prices(tickers=list(tickers) or None, start_date=sd, end_date=ed)
+        success("repair_prices", result)
+    except PriceDataUnavailableError as e:
+        error("repair_prices", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("repair_prices", "PRICE_FETCH_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── recalculate ──────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
+Notes:
+  Uses cached prices only.
+  May return a cached result unless `--force` is set.
+
+Examples:
+
+  portfolio recalculate
+
+  portfolio recalculate --from-date 01-01-2026
+
+  portfolio recalculate --force --dry-run
+""")
+@click.option("--force", is_flag=True, help="Ignore cache checks and recompute everything")
+@click.option("--from-date", default=None, help=WRITE_DATE_HELP)
+@click.option("--dry-run", is_flag=True, help="Show what would be recalculated without executing")
+def recalculate(force, from_date, dry_run):
+    """Recalculate daily returns from cached prices.
+
+Dates use DD-MM-YYYY format (e.g. 01-01-2026).
+"""
+    from_date_obj = _parse_legacy_date(from_date, "--from-date") if from_date else None
+    if dry_run:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            state = service.get_refresh_state()
+            coverage = service.analyze_price_coverage()
+            success("recalculate", {
+                "dry_run": True,
+                "from_date": str(from_date_obj) if from_date_obj else "beginning",
+                "forced": force,
+                "last_recalc": state.get("last_successful_recalc"),
+                "stale_data": state.get("stale_data"),
+                "price_issues": len(coverage.get("issues", [])),
+            })
+        except Exception as e:
+            error("recalculate", "INTERNAL_ERROR", str(e))
+        finally:
+            service.close()
+        return
+    service = None
+    try:
+        service = PortfolioService()
+        result = service.recalculate(from_date=from_date_obj, force=force)
+        if result.get("status") == "success":
+            data = {
+                "rows_affected": result.get("rows_affected", 0),
+                "from_date": str(result.get("from_date", "")),
+                "forced": force,
+                "recalc_type": result.get("recalc_type", ""),
+            }
+            success("recalculate", data)
+        else:
+            error("recalculate", "INTERNAL_ERROR", result.get("message", "Unknown error"))
+    except PriceDataUnavailableError as e:
+        error("recalculate", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("recalculate", "INTERNAL_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── allocation ───────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  `--type assets` and `--type cash` return percentages within that slice.
+  `--type all` uses total portfolio value as the denominator.
+
+Examples:
+
+  portfolio allocation
+
+  portfolio allocation --type assets
+
+  portfolio allocation --type cash --as-of-date 2026-01-01
+""")
+@click.option("--type", "allocation_type",
+              type=click.Choice(["assets", "cash", "all"]),
+              default="all",
+              show_default=True,
+              help="Allocation slice to return")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+def allocation(allocation_type, as_of_date):
+    """Show portfolio allocation breakdown."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    service = None
+    try:
+        service = PortfolioService()
+        recalculated = service.ensure_fresh()
+        data = service.get_allocation(allocation_type=allocation_type, as_of_date=as_of)
+        success("allocation", data, extra_meta={"recalculated": recalculated} if recalculated else None)
+    except PriceDataUnavailableError as e:
+        error("allocation", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("allocation", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── cash ─────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  The `balance` field is in the original currency; `usd_value` is converted.
+
+Examples:
+
+  portfolio cash
+
+  portfolio cash --as-of-date 2026-01-01
+""")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+def cash(as_of_date):
+    """Show actual cash balances converted to USD."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    service = None
+    try:
+        service = PortfolioService()
+        recalculated = service.ensure_fresh()
+        snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=True)
+        cash_balances = snapshot["cash_balances"]
+        result = []
+        for bal_data in cash_balances:
+            balance = bal_data["balance"]
+            deposits = bal_data["deposits"]
+            spent = bal_data["spent"]
+            received = bal_data["received"]
+            withdrawals = bal_data["withdrawals"]
+            dividends = bal_data["dividends"]
+            interest = bal_data["interest"]
+            fees = bal_data["fees"]
+            taxes = bal_data["taxes"]
+
+            if balance == 0 and deposits == 0 and withdrawals == 0 and spent == 0 and received == 0 and dividends == 0 and interest == 0 and fees == 0 and taxes == 0:
+                continue
+
+            result.append({
+                "currency": bal_data["currency"],
+                "balance": round(balance, 6),
+                "usd_value": round(bal_data["usd_value"], 2),
+                "fx_rate": bal_data["fx_rate"],
+                "deposits": round(deposits * bal_data["fx_rate"], 2),
+                "withdrawals": round(withdrawals * bal_data["fx_rate"], 2),
+                "dividends": round(dividends * bal_data["fx_rate"], 2),
+                "interest": round(interest * bal_data["fx_rate"], 2),
+                "fees": round(fees * bal_data["fx_rate"], 2),
+                "taxes": round(taxes * bal_data["fx_rate"], 2),
+                "spent": round(spent * bal_data["fx_rate"], 2),
+                "received": round(received * bal_data["fx_rate"], 2),
+            })
+
+        meta = {"as_of_date": snapshot["as_of_date"]}
+        if recalculated:
+            meta["recalculated"] = True
+        success("cash", result, count=len(result), extra_meta=meta)
+    except PriceDataUnavailableError as e:
+        error("cash", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("cash", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── delete ───────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  `--confirm` is required for real deletions.
+  `--dry-run` does not require confirmation.
+
+Examples:
+
+  portfolio delete --id 42 --dry-run
+
+  portfolio delete --id 42 --confirm
+
+  portfolio delete --id 42 --confirm --backup
+""")
+@click.option("--id", "trans_id", required=True, type=int, help="Transaction ID to delete")
+@click.option("--confirm", is_flag=True, help="Skip the confirmation prompt and delete immediately")
+@click.option("--dry-run", is_flag=True, help="Show what would be deleted without executing")
+@click.option("--backup", is_flag=True, help="Create a DB backup before deleting")
+def delete(trans_id, confirm, dry_run, backup):
+    """Delete a transaction by ID and recalculate reporting data."""
+    validate_positive_int(trans_id, "--id", "delete")
+    if dry_run:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            preview = service.preview_delete_transaction(trans_id)
+            if not preview:
+                error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
+            success("delete", {
+                "dry_run": True,
+                "transaction_id": trans_id,
+                "would_delete": {
+                    "date": preview["date"],
+                    "asset": preview["asset"],
+                    "action": preview["action"],
+                    "quantity": preview["quantity"],
+                },
+            })
+        except SystemExit:
+            raise
+        except Exception as e:
+            error("delete", "DB_ERROR", str(e))
+        finally:
+            if service:
+                service.close()
+        return
+
+    service = None
+    try:
+        service = PortfolioService()
+        if not service.get_transaction_by_id(trans_id):
+            error("delete", "NOT_FOUND", f"Transaction ID {trans_id} not found")
+
+        if not confirm:
+            error(
+                "delete",
+                "VALIDATION_ERROR",
+                f"Deletion of transaction ID {trans_id} requires explicit confirmation.\n"
+                "Problem: --confirm flag was not provided.\n"
+                "Expected: portfolio delete --id <id> --confirm\n"
+                f"Example:  portfolio delete --id {trans_id} --confirm\n"
+                f"Tip:      use --dry-run first to preview what will be deleted",
+            )
+            return  # Never reached; kept for linter clarity
+
+        result = service.delete_transaction(trans_id)
+        success("delete", {"deleted_id": result["transaction_id"], "recalculated": True})
+    except SystemExit:
+        raise
+    except Exception as e:
+        error("delete", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── performance ──────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  If `--benchmark` is omitted, the first value from PORTFOLIO_BENCHMARK_TICKERS
+  is used, falling back to SPY when the variable is unset.
+
+Examples:
+
+  portfolio performance
+
+  portfolio performance --as-of-date 2026-01-01
+
+  portfolio performance --benchmark QQQ
+
+  portfolio performance --from-date 2025-01-01
+
+  portfolio performance --period 1y
+
+  portfolio performance --period ytd
+""")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+@click.option("--benchmark", default=None, help=BENCHMARK_HELP)
+@click.option("--from-date", default=None, help="Filter returns from this date (YYYY-MM-DD)")
+@click.option("--period", default=None, type=click.Choice(["1y", "6m", "3m", "1m", "ytd"]), help="Filter to a period: 1y, 6m, 3m, 1m, ytd")
+def performance(as_of_date, benchmark, from_date, period):
+    """Show performance, risk, and benchmark metrics."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    today = date.today()
+
+    if period:
+        if period == "ytd":
+            resolved_from = date(today.year, 1, 1)
+        elif period == "1y":
+            resolved_from = date(today.year - 1, today.month, today.day)
+        elif period == "6m":
+            m = today.month - 6
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+        elif period == "3m":
+            m = today.month - 3
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+        elif period == "1m":
+            m = today.month - 1
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            try:
+                resolved_from = date(y, m, today.day)
+            except ValueError:
+                resolved_from = date(y, m, 1)
+    elif from_date:
+        resolved_from = _parse_date(from_date, "--from-date")
+    else:
+        resolved_from = None
+
+    service = None
+    try:
+        service = PortfolioService()
+        recalculated = service.ensure_fresh()
+        stats = service.get_performance_stats(as_of_date=as_of, benchmark_ticker=benchmark, from_date=resolved_from)
+        concentration = service.get_concentration_metrics(as_of_date=as_of)
+
+        def m(name, value):
+            return service.evaluate_metric(name, value)
+
+        result = {
+            "period": {
+                "start_date": stats["start_date"],
+                "end_date": stats["end_date"],
+                "total_days": stats["total_days"],
+            },
+            "values": {
+                "start_value": stats["start_value"],
+                "end_value": stats["end_value"],
+                "total_gain": stats["total_gain"],
+                "net_gain": stats["net_gain"],
+                "deposits": stats["deposits"],
+                "withdrawals": stats["withdrawals"],
+                "net_contributions": stats["net_contributions"],
+                "income": stats["income"],
+                "dividends": stats["dividends"],
+                "interest": stats["interest"],
+                "fees": stats["fees"],
+                "taxes": stats["taxes"],
+                "realized_gain": stats["realized_gain"],
+                "unrealized_gain": stats["unrealized_gain"],
+            },
+            "returns": {
+                "time_weighted_return_pct": m("total_return_pct", stats["time_weighted_return_pct"]),
+                "total_return_pct": m("total_return_pct", stats["total_return_pct"]),
+                "cagr_pct": m("cagr", stats["cagr"]),
+                "avg_daily_return_pct": m("avg_daily_return", stats["avg_daily_return"]),
+                "median_monthly_return_pct": m("median_monthly_return", stats["median_monthly_return"]),
+            },
+            "risk_metrics": {
+                "std_dev_pct": m("std_dev", stats["std_dev"]),
+                "hist_volatility_pct": m("hist_volatility", stats["hist_volatility"]),
+                "beta": m("beta", stats["beta"]),
+                "sharpe_ratio": m("sharpe_ratio", stats["sharpe_ratio"]),
+                "sortino_ratio": m("sortino_ratio", stats["sortino_ratio"]),
+                "treynor_ratio": m("treynor_ratio", stats["treynor_ratio"]),
+                "information_ratio": m("information_ratio", stats["information_ratio"]),
+                "jensens_alpha": m("jensens_alpha", stats["jensens_alpha"]),
+                "relative_return": m("relative_return", stats["relative_return"]),
+                "tracking_error": m("tracking_error", stats["tracking_error"]),
+            },
+            "risk_of_loss": {
+                "var_95_pct": m("var_95", stats["var_95"]),
+                "var_99_pct": m("var_99", stats["var_99"]),
+                "cvar_95_pct": m("cvar_95", stats["cvar_95"]),
+                "cvar_99_pct": m("cvar_99", stats["cvar_99"]),
+            },
+            "drawdowns": {
+                "max_drawdown_pct": m("max_drawdown", stats["max_drawdown"]),
+                "avg_drawdown_pct": m("avg_drawdown", stats["avg_drawdown"]),
+                "avg_drawdown_duration_days": m("avg_drawdown_duration", stats["avg_drawdown_duration"]),
+            },
+            "concentration": {
+                "hhi": m("hhi", concentration["hhi"]),
+                "weighted_avg_exposure": m("weighted_avg_exposure", concentration["weighted_avg_exposure"]),
+                "num_positions": concentration["num_positions"],
+            },
+            "benchmark": {
+                "ticker": benchmark or service.BENCHMARK_TICKERS[0],
+                "benchmark_twr_pct": stats["spy_twr_pct"],
+                "benchmark_cagr_pct": stats["spy_cagr_pct"],
+                "relative_return_pct": m("relative_return", stats["relative_return"]),
+                "tracking_error_pct": m("tracking_error", stats["tracking_error"]),
+                "information_ratio": m("information_ratio", stats["information_ratio"]),
+                "jensens_alpha": m("jensens_alpha", stats["jensens_alpha"]),
+                "up_capture_ratio": stats["up_capture_ratio"],
+                "down_capture_ratio": stats["down_capture_ratio"],
+            },
+        }
+        mwr = service.get_mwr_irr(as_of_date=as_of)
+        result["mwr_irr"] = {
+            "mwr_pct": round(mwr * 100, 4),
+            "note": "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
+        }
+        contributions = service.get_contribution_by_position(as_of_date=as_of)
+        result["contribution_by_position"] = contributions
+        success("performance", result, extra_meta={"recalculated": recalculated} if recalculated else None)
+    except PriceDataUnavailableError as e:
+        error("performance", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("performance", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── mwr ──────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  Returns MWR as a percent value. If no date is provided, the latest reporting
+  snapshot is used.
+
+Examples:
+
+  portfolio mwr
+
+  portfolio mwr --as-of-date 2026-01-01
+
+  portfolio mwr --as-of-date 2025-12-31
+""")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+def mwr(as_of_date):
+    """Show money-weighted return (XIRR / IRR)."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+        mwr_val = service.get_mwr_irr(as_of_date=as_of)
+        snap = service.build_reporting_snapshot(as_of_date=as_of)
+        success("mwr", {
+            "mwr_pct": round(mwr_val * 100, 4),
+            "as_of_date": str(snap["as_of_date"]) if snap.get("as_of_date") else None,
+            "portfolio_value": snap.get("portfolio_value", 0.0),
+            "net_contributions": snap.get("net_contributions", 0.0),
+            "note": "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
+        })
+    except PriceDataUnavailableError as e:
+        error("mwr", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("mwr", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── summary ──────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  `--filter open` suppresses closed positions; `--filter all` keeps them.
+
+Examples:
+
+  portfolio summary
+
+  portfolio summary --filter open
+
+  portfolio summary --as-of-date 2026-01-01
+""")
+@click.option("--filter", "position_filter",
+              type=click.Choice(["open", "all"]),
+              default="all",
+              show_default=True,
+              help="Limit to open positions or include closed positions too")
+@click.option("--as-of-date", default=None, help=SNAPSHOT_DATE_HELP)
+def summary(position_filter, as_of_date):
+    """Show portfolio position summary with gains and losses."""
+    as_of = _parse_date(as_of_date, "--as-of-date") if as_of_date else None
+    service = None
+    try:
+        service = PortfolioService()
+        recalculated = service.ensure_fresh()
+        include_closed = position_filter == "all"
+        snapshot = service.build_reporting_snapshot(as_of_date=as_of, include_closed=include_closed)
+        positions = snapshot["positions"]
+        meta = {"as_of_date": snapshot["as_of_date"]}
+        if recalculated:
+            meta["recalculated"] = True
+        success("summary", positions, count=len(positions), extra_meta=meta)
+    except PriceDataUnavailableError as e:
+        error("summary", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("summary", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── exchange ─────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+\b
+Date format: DD-MM-YYYY
+
+Notes:
+  `--from` and `--to` must be different.
+  The command creates EXCHANGE_FROM and EXCHANGE_TO legs internally.
+
+Examples:
+
+  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
+
+  portfolio exchange --date 01-01-2026 --from EURUSD=X --to USD --quantity 500 --rate 1.09
+""")
+@click.option("--date", "date_str", required=True, help=WRITE_DATE_HELP)
+@click.option("--from", "from_asset", required=True, help="Source asset or cash-like symbol")
+@click.option("--to", "to_asset", required=True, help="Different target asset or cash-like symbol")
+@click.option("--quantity", required=True, type=float, help="Positive quantity to convert")
+@click.option("--rate", required=True, type=float, help="Positive exchange rate")
+def exchange(date_str, from_asset, to_asset, quantity, rate):
+    """Record a currency exchange as two linked transactions.
+
+Dates use DD-MM-YYYY format (e.g. 01-01-2026).
+"""
+    date_obj = _parse_legacy_date(date_str, "--date")
+    validate_positive_float(quantity, "--quantity", "exchange")
+    validate_positive_float(rate, "--rate", "exchange")
+
+    # CONFLICT check: exchanging a currency with itself makes no sense
+    if from_asset.upper() == to_asset.upper():
+        error(
+            "exchange",
+            "CONFLICT",
+            f"--from and --to must be different assets; both are '{from_asset}'.\n"
+            "Expected: --from <currency> --to <different currency>\n"
+            "Example:  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92",
+        )
+
+    service = None
+    try:
+        service = PortfolioService()
+        result = service.exchange_currency(
+            date_obj=date_obj,
+            from_asset=from_asset,
+            to_asset=to_asset,
+            quantity=quantity,
+            rate=rate,
+        )
+        data = {
+            "from": {"asset": from_asset, "quantity": quantity},
+            "to": {"asset": to_asset, "quantity": round(quantity * rate, 6)},
+            "rate": rate,
+            "date": str(date_obj),
+            "transaction_ids": [result["from_trans_id"], result["to_trans_id"]],
+        }
+        success("exchange", data)
+    except Exception as e:
+        error("exchange", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── backup ───────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Examples:
+
+  portfolio backup
+
+  portfolio backup --out /backups/portfolio-2026-01-01.sql
+""")
+@click.argument("legacy_path", required=False, default=None, metavar="[LEGACY_PATH]")
+@click.option("--out", default=None, help="Backup file path (default: <db>.backup-<YYYYMMDD-HHMMSS>.sql)")
+def backup(legacy_path, out):
+    """Create a timestamped backup of the PostgreSQL database."""
+    try:
+        target = resolve_db_target()
+    except RuntimeError as e:
+        error("backup", "CONFIG_ERROR", str(e))
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst = Path(out) if out else Path(f"portfolio.backup-{timestamp}.sql")
+    cmd = ["pg_dump", target, "-f", str(dst)]
+    try:
+        subprocess.run(cmd, check=True)
+        size_bytes = dst.stat().st_size
+        log.backup_created(target, str(dst), size_bytes)
+        success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes})
+    except FileNotFoundError:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            service.sql_backup(dst)
+            size_bytes = dst.stat().st_size
+            log.backup_created(target, str(dst), size_bytes)
+            success("backup", {"source": "postgresql", "backup": str(dst), "size_bytes": size_bytes, "mode": "sql_dump"})
+        except Exception as e:
+            error("backup", "IO_ERROR", str(e))
+        finally:
+            if service:
+                service.close()
+    except Exception as e:
+        error("backup", "IO_ERROR", str(e))
+
+
+# ─── init ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+def init():
+    """Initialize or verify the portfolio database schema."""
+    try:
+        target = resolve_db_target()
+        service = PortfolioService(target)
+        service.close()
+        success("init", {"db_target": "postgresql", "status": "ready"})
+    except Exception as e:
+        error("init", "DB_ERROR", str(e))
+
+
+# ─── health ───────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  Read-only diagnostic. Returns `ok` or `degraded` in JSON.
+
+Examples:
+
+  portfolio health
+""")
+def health():
+    """Show DB reachability, stale data, and price coverage health."""
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+    except Exception as e:
+        error("health", "DB_ERROR", f"Cannot open database: {e}")
+        return
+    try:
+        state = service.get_refresh_state()
+        coverage = service.analyze_price_coverage()
+        issues = coverage.get("issues", [])
+        stale_tickers = [i["ticker"] for i in issues]
+        ok = not state.get("stale_data") and not issues
+        success("health", {
+            "status": "ok" if ok else "degraded",
+            "db_reachable": True,
+            "stale_data": state.get("stale_data", False),
+            "last_successful_price_refresh": state.get("last_successful_price_refresh"),
+            "last_successful_recalc": state.get("last_successful_recalc"),
+            "price_coverage_issues": len(issues),
+            "stale_tickers": stale_tickers,
+        })
+    except Exception as e:
+        error("health", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── cron ─────────────────────────────────────────────────────────────────────
+
+_DB_JOB_NAMES = [
+    "portfolio_daily_check",
+]
+
+_CRONTAB_MARKER = "# portfolio auto-refresh (managed by `portfolio cron`)"
+
+
+def _read_crontab() -> str:
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if result.returncode != 0:
+            return ""
+        return result.stdout
+    except FileNotFoundError:
+        return ""
+
+
+def _write_crontab(content: str) -> None:
+    subprocess.run(["crontab", "-"], input=content, text=True, check=True)
+
+
+@cli.group(epilog="""
+Manage scheduled portfolio maintenance.
+
+Two schedulers:
+  macOS crontab — runs `portfolio sync` (needs Python for yfinance)
+  PostgreSQL pg_cron — runs `daily_maintenance_check()` (SQL-only flag setter)
+
+Examples:
+
+  portfolio cron install --time 19:00 --weekdays-only
+  portfolio cron uninstall
+  portfolio cron status
+  portfolio cron db-install --time 06:00
+  portfolio cron db-uninstall
+""")
+def cron():
+    """Manage scheduled jobs (macOS crontab + pg_cron)."""
+    pass
+
+
+@cron.command(name="install", epilog="""
+Notes:
+  Adds a crontab entry that runs `portfolio sync` on the configured schedule.
+  Uses PORTFOLIO_DB_URL from the current environment.
+  Idempotent — replaces existing portfolio crontab entries.
+
+Examples:
+
+  portfolio cron install
+  portfolio cron install --time 19:00 --weekdays-only
+  portfolio cron install --time 08:00 --log-file ~/logs/sync.log --dry-run
+""")
+@click.option("--time", "run_time", default="19:00", show_default=True,
+              help="HH:MM (24-hour) to run portfolio sync")
+@click.option("--weekdays-only", is_flag=True,
+              help="Run Mon-Fri only (default: every day)")
+@click.option("--log-file", default="~/portfolio-logs/sync.log", show_default=True,
+              help="Path to append sync output")
+@click.option("--dry-run", is_flag=True, help="Show what would be installed without writing")
+def cron_install(run_time, weekdays_only, log_file, dry_run):
+    """Install portfolio sync in macOS crontab."""
+    try:
+        parts = run_time.split(":")
+        minute = int(parts[1])
+        hour = int(parts[0])
+    except (ValueError, IndexError):
+        error("cron", "VALIDATION_ERROR", f"--time must be HH:MM, got: {run_time!r}")
+
+    dow = "1-5" if weekdays_only else "*"
+    log_dir = str(Path(log_file).expanduser().parent)
+    db_url = os.environ.get("PORTFOLIO_DB_URL", "")
+
+    crontab_line = (
+        f"{minute} {hour} * * {dow}"
+        f"  mkdir -p {log_dir} && "
+        f"cd {Path.cwd()} && "
+        f"PORTFOLIO_DB_URL='{db_url}' "
+        f"uv run portfolio sync >> {Path(log_file).expanduser()} 2>&1"
+    )
+
+    current = _read_crontab()
+
+    if dry_run:
+        success("cron", {
+            "action": "install",
+            "dry_run": True,
+            "would_add": crontab_line,
+            "schedule": f"{minute} {hour} * * {dow}",
+            "weekdays_only": weekdays_only,
+            "log_file": str(Path(log_file).expanduser()),
+        })
+        return
+
+    lines = current.splitlines()
+    new_lines = []
+    skip = False
+    for line in lines:
+        if _CRONTAB_MARKER in line:
+            skip = True
+            continue
+        if skip and line.strip().startswith("#"):
+            skip = False
+            continue
+        if skip and ("portfolio sync" in line or "portfolio" in line):
+            continue
+        skip = False
+        new_lines.append(line)
+
+    new_lines.append(_CRONTAB_MARKER)
+    new_lines.append(crontab_line)
+
+    _write_crontab("\n".join(new_lines) + "\n")
+
+    success("cron", {
+        "action": "install",
+        "entry": crontab_line,
+        "schedule": f"{minute} {hour} * * {dow}",
+        "weekdays_only": weekdays_only,
+        "log_file": str(Path(log_file).expanduser()),
+    })
+
+
+@cron.command(name="uninstall", epilog="""
+Notes:
+  Removes crontab entries marked with the portfolio auto-refresh marker.
+  Does not touch pg_cron jobs — use `cron db-uninstall` for that.
+
+Examples:
+
+  portfolio cron uninstall
+  portfolio cron uninstall --dry-run
+""")
+@click.option("--dry-run", is_flag=True, help="Show what would be removed without writing")
+def cron_uninstall(dry_run):
+    """Remove portfolio entries from macOS crontab."""
+    current = _read_crontab()
+
+    lines = current.splitlines()
+    removed = []
+    new_lines = []
+    in_block = False
+    for line in lines:
+        if _CRONTAB_MARKER in line:
+            removed.append(line)
+            in_block = True
+            continue
+        if in_block:
+            # Collect all lines until next empty line (block terminator)
+            removed.append(line)
+            if not line.strip():
+                in_block = False
+            continue
+        new_lines.append(line)
+
+    if dry_run:
+        success("cron", {
+            "action": "uninstall",
+            "dry_run": True,
+            "would_remove": removed,
+            "would_remove_count": len(removed),
+        })
+        return
+
+    _write_crontab("\n".join(new_lines) + "\n")
+
+    success("cron", {
+        "action": "uninstall",
+        "removed": removed,
+        "removed_count": len(removed),
+    })
+
+
+@cron.command(name="status", epilog="""
+Notes:
+  Shows macOS crontab portfolio entries AND pg_cron registered jobs.
+  Returns two sections: crontab and pg_cron.
+
+Examples:
+
+  portfolio cron status
+""")
+def cron_status():
+    """Show crontab entries and pg_cron jobs."""
+    crontab_entries = []
+    current = _read_crontab()
+    capture = False
+    for line in current.splitlines():
+        if _CRONTAB_MARKER in line:
+            capture = True
+            continue
+        if capture and line.strip():
+            crontab_entries.append(line.strip())
+
+    pg_cron_jobs = []
+    service = None
+    try:
+        service = PortfolioService(read_only=True)
+        pg_cron_jobs = service.get_pg_cron_jobs()
+    except Exception:
+        pass
+    finally:
+        if service:
+            service.close()
+
+    success("cron", {
+        "crontab": {
+            "installed": len(crontab_entries) > 0,
+            "entries": crontab_entries,
+        },
+        "pg_cron": {
+            "available": pg_cron_jobs is not None,
+            "jobs": pg_cron_jobs if pg_cron_jobs is not None else [],
+        },
+    })
+
+
+@cron.command(name="db-install", epilog="""
+Notes:
+  Registers daily_maintenance_check() in pg_cron.
+  Requires the pg_cron extension to be installed in PostgreSQL.
+  On Supabase, enable pg_cron via Dashboard > Extensions (Pro tier and above).
+
+Examples:
+
+  portfolio cron db-install
+  portfolio cron db-install --time 06:00
+  portfolio cron db-install --job-name portfolio_daily_check --dry-run
+""")
+@click.option("--time", "run_time", default="06:00", show_default=True,
+              help="HH:MM UTC to run daily_maintenance_check()")
+@click.option("--job-name", "job_names", multiple=True,
+              help="pg_cron job name(s) to register (default: portfolio_daily_check)")
+@click.option("--dry-run", is_flag=True, help="Show SQL without executing")
+def cron_db_install(run_time, job_names, dry_run):
+    """Register daily_maintenance_check() in pg_cron."""
+    try:
+        parts = run_time.split(":")
+        minute = int(parts[1])
+        hour = int(parts[0])
+    except (ValueError, IndexError):
+        error("cron", "VALIDATION_ERROR", f"--time must be HH:MM, got: {run_time!r}")
+
+    names = list(job_names) if job_names else _DB_JOB_NAMES
+    schedule = f"{minute} {hour} * * *"
+    sql_statements = []
+    for name in names:
+        sql_statements.append(
+            f"SELECT cron.schedule('{name}', '{schedule}', $$SELECT daily_maintenance_check();$$)"
+        )
+
+    if dry_run:
+        success("cron", {
+            "action": "db-install",
+            "dry_run": True,
+            "would_execute": sql_statements,
+            "schedule": schedule,
+            "job_names": names,
+        })
+        return
+
+    service = None
+    try:
+        service = PortfolioService()
+    except Exception as e:
+        error("cron", "DB_ERROR", f"Cannot connect to database: {e}")
+        return
+
+    try:
+        installed = []
+        skipped = []
+        for name in names:
+            try:
+                service.pg_cron_schedule(name, schedule, "SELECT daily_maintenance_check();")
+                installed.append(name)
+            except Exception as e:
+                error_msg = str(e)
+                if "already" in error_msg.lower() or "duplicate" in error_msg.lower():
+                    skipped.append(name)
+                else:
+                    raise
+
+        success("cron", {
+            "action": "db-install",
+            "schedule": schedule,
+            "installed": installed,
+            "skipped": skipped,
+        })
+    except Exception as e:
+        error("cron", "PG_CRON_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+@cron.command(name="db-uninstall", epilog="""
+Notes:
+  Removes portfolio jobs from pg_cron via cron.unschedule().
+  Does not delete scheduled_job_log or scheduled_job_backup tables.
+  Safe to run if jobs are already removed.
+
+Examples:
+
+  portfolio cron db-uninstall
+  portfolio cron db-uninstall --job-name portfolio_daily_check --dry-run
+""")
+@click.option("--job-name", "job_names", multiple=True,
+              help="pg_cron job name(s) to remove (default: all portfolio_* jobs)")
+@click.option("--dry-run", is_flag=True, help="Show what would be unregistered without executing")
+def cron_db_uninstall(job_names, dry_run):
+    """Remove portfolio jobs from pg_cron."""
+    names = list(job_names) if job_names else _DB_JOB_NAMES
+
+    if dry_run:
+        success("cron", {
+            "action": "db-uninstall",
+            "dry_run": True,
+            "would_remove": names,
+        })
+        return
+
+    service = None
+    try:
+        service = PortfolioService()
+    except Exception as e:
+        error("cron", "DB_ERROR", f"Cannot connect to database: {e}")
+        return
+
+    try:
+        removed = []
+        not_found = []
+        for name in names:
+            try:
+                service.pg_cron_unschedule(name)
+                removed.append(name)
+            except Exception as e:
+                error_msg = str(e)
+                if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+                    not_found.append(name)
+                else:
+                    raise
+
+        success("cron", {
+            "action": "db-uninstall",
+            "removed": removed,
+            "not_found": not_found,
+        })
+    except Exception as e:
+        error("cron", "PG_CRON_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+# ─── sync ─────────────────────────────────────────────────────────────────────
+
+@cli.command(epilog="""
+Notes:
+  Reads service_state flags to determine what needs attention.
+  If prices_need_fetch is true: fetches missing prices via yfinance.
+  If needs_recalc is true: rebuilds daily_returns from cached prices.
+  Clears each flag after successful execution.
+  Safe to run on a cron schedule — no-op when everything is fresh.
+
+Examples:
+
+  portfolio sync
+  portfolio sync --dry-run
+""")
+@click.option("--dry-run", is_flag=True, help="Show what would be done without executing")
+def sync(dry_run):
+    """Check and auto-repair fresh state: fetch stale prices, recalculate if needed."""
+    if dry_run:
+        service = None
+        try:
+            service = PortfolioService(read_only=True)
+            state = service.get_all_service_state()
+            prices_need_fetch = state.get("prices_need_fetch", {}).get("value") == "true"
+            needs_recalc_flag = state.get("needs_recalc", {}).get("value") == "true"
+            needs_recalc_sql = service.needs_recalc()
+            success("sync", {
+                "dry_run": True,
+                "would_repair_prices": prices_need_fetch,
+                "would_recalculate": needs_recalc_flag,
+                "needs_recalc_sql": needs_recalc_sql,
+            })
+        except Exception as e:
+            error("sync", "DB_ERROR", str(e))
+        finally:
+            if service:
+                service.close()
+        return
+
+    service = None
+    try:
+        service = PortfolioService()
+        state = service.get_all_service_state()
+        prices_need_fetch = state.get("prices_need_fetch", {}).get("value") == "true"
+        needs_recalc_flag = state.get("needs_recalc", {}).get("value") == "true"
+
+        actions = []
+        if prices_need_fetch:
+            service.repair_prices()
+            service.set_service_state("prices_need_fetch", "false")
+            actions.append("repair_prices")
+        if needs_recalc_flag:
+            service.recalculate()
+            service.set_service_state("needs_recalc", "false")
+            actions.append("recalculate")
+
+        success("sync", {"actions": actions, "synced": len(actions) > 0})
+    except PriceDataUnavailableError as e:
+        error("sync", "PRICE_DATA_ERROR", str(e))
+    except Exception as e:
+        error("sync", "DB_ERROR", str(e))
+    finally:
+        if service:
+            service.close()
+
+
+@cli.command()
+@click.option("--from", "duckdb_path", required=True, help="Path to DuckDB file (e.g., ~/portfolio.duckdb)")
+@click.option("--to", "postgres_url", envvar="PORTFOLIO_DB_URL", help="PostgreSQL URL (default: PORTFOLIO_DB_URL env var)")
+@click.option("--dry-run", is_flag=True, help="Validate without inserting data")
+def migrate_duckdb_to_postgres(duckdb_path: str, postgres_url: str, dry_run: bool):
+    """Migrate data from DuckDB to PostgreSQL.
+
+  Copies transactions, daily_returns, prices, and audit tables.
+  Validates row counts match after copy.
+  Resets PostgreSQL sequences for safe future inserts.
+
+  Example:
+    # Dry run (validate only)
+    portfolio migrate-duckdb-to-postgres --from ~/portfolio.duckdb --dry-run
+
+    # Live migration
+    export PORTFOLIO_DB_URL="postgresql://user:pass@localhost:5432/portfolio"
+    portfolio migrate-duckdb-to-postgres --from ~/portfolio.duckdb
+  """
+    if not postgres_url:
+        error("migrate-duckdb-to-postgres", "ENV_ERROR", "PORTFOLIO_DB_URL not set and --to not provided")
+        return
+
+    from portfolio_db.migration_service import migrate_duckdb_to_postgres as do_migrate
+
+    try:
+        result = do_migrate(duckdb_path, postgres_url, dry_run=dry_run)
+        if result.get("ok"):
+            success("migrate-duckdb-to-postgres", {
+                "status": "completed",
+                "dry_run": dry_run,
+                "rows_migrated": result.get("rows_migrated", {}),
+            })
+        else:
+            error_msg = result.get("error", "Migration failed")
+            error("migrate-duckdb-to-postgres", "MIGRATION_ERROR", error_msg)
+    except Exception as e:
+        error("migrate-duckdb-to-postgres", "MIGRATION_ERROR", str(e))
+
+
+if __name__ == "__main__":
+    cli()
