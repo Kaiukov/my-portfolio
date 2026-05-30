@@ -34,10 +34,9 @@ export async function querySingle<T = Record<string, unknown>>(
   return rows.length > 0 ? rows[0] : null;
 }
 
-// deno-lint-ignore no-explicit-any
-export async function runTx(fn: any) {
+export async function runTx(fn: any): Promise<any> {
   if (!sql) connect();
-  return (sql as any).begin(fn);
+  return sql!.begin(fn);
 }
 
 export async function close(): Promise<void> {
