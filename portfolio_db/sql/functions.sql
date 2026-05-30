@@ -767,6 +767,7 @@ AS $$
         CROSS JOIN params prm
         WHERE p.ticker = prm.benchmark_ticker
           AND (prm.as_of_date IS NULL OR p.date <= prm.as_of_date)
+          AND (prm.from_date IS NULL OR p.date >= prm.from_date)
         ORDER BY p.date
     ),
     bench_returns AS (
