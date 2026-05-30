@@ -13,6 +13,10 @@ export interface StatusData {
   taxes: number;
   total_gain: number | null;
   total_gain_pct: number | null;
+  cost_basis: number | null;
+  realized_gain: number | null;
+  unrealized_gain: number | null;
+  total_profit: number | null;
   as_of_date: string | null;
 }
 
@@ -48,6 +52,10 @@ export async function getStatus(): Promise<StatusData> {
       taxes: 0,
       total_gain: null,
       total_gain_pct: null,
+      cost_basis: null,
+      realized_gain: null,
+      unrealized_gain: null,
+      total_profit: null,
       as_of_date: null,
     };
   }
@@ -65,6 +73,10 @@ export async function getStatus(): Promise<StatusData> {
     taxes: num(row["taxes"]),
     total_gain: numOrNull(row["total_gain"]),
     total_gain_pct: numOrNull(row["total_gain_pct"]),
+    cost_basis: numOrNull(row["cost_basis"]),
+    realized_gain: numOrNull(row["realized_gain"]),
+    unrealized_gain: numOrNull(row["unrealized_gain"]),
+    total_profit: numOrNull(row["total_profit"]),
     as_of_date: row["as_of_date"] != null ? String(row["as_of_date"]) : null,
   };
 }
