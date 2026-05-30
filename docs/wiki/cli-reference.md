@@ -26,8 +26,8 @@ portfolio-ts status
 | `income` | number | Total DIVIDEND + INTEREST income |
 | `fees` | number | Total fees paid |
 | `taxes` | number | Total taxes paid |
-| `total_gain` | number \| null | portfolio_value − total_invested |
-| `total_gain_pct` | number \| null | total_gain / total_invested × 100 |
+| `total_gain` | number \| null | portfolio_value − total_invested (NULL when net contributed capital ≤ 0) |
+| `total_gain_pct` | number \| null | total_gain / total_invested × 100 (NULL when net contributed capital ≤ 0) |
 | `cost_basis` | number \| null | Aggregate cost basis of current holdings (FIFO) |
 | `realized_gain` | number \| null | Cumulative realized gains from closed positions (FIFO) |
 | `unrealized_gain` | number \| null | Current holdings market value − cost_basis |

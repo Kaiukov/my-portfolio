@@ -5,6 +5,7 @@ export interface StatusData {
   start_date: string | null;
   end_date: string | null;
   portfolio_value: number | null;
+  /** Net contributed capital (deposits − withdrawals), NOT gross invested */
   total_invested: number | null;
   deposits: number;
   withdrawals: number;
