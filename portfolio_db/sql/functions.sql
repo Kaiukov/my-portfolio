@@ -972,6 +972,225 @@ AS $$
     FROM derived d
 $$;
 
+-- XIRR (Extended Internal Rate of Return) solver using Newton-Raphson with bisection fallback.
+-- amounts: cash flow amounts (negative = outflow, positive = inflow, investor perspective)
+-- dates: corresponding dates for each amount
+-- Returns annualized rate as decimal (e.g. 0.10 = 10%). Returns 0.0 on failure.
+CREATE OR REPLACE FUNCTION xirr_sql(
+    amounts DOUBLE PRECISION[],
+    dates DATE[]
+)
+RETURNS DOUBLE PRECISION
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+    n INTEGER;
+    ref_date DATE;
+    t DOUBLE PRECISION[];
+    i INTEGER;
+    rate DOUBLE PRECISION := 0.1;
+    prev_rate DOUBLE PRECISION;
+    f_val DOUBLE PRECISION;
+    f_deriv DOUBLE PRECISION;
+    term DOUBLE PRECISION;
+    delta DOUBLE PRECISION;
+    iter_count INTEGER := 0;
+    max_iter INTEGER := 200;
+    tol DOUBLE PRECISION := 1e-7;
+    low DOUBLE PRECISION;
+    high DOUBLE PRECISION;
+    mid DOUBLE PRECISION;
+    f_low DOUBLE PRECISION;
+    f_mid DOUBLE PRECISION;
+    all_pos BOOLEAN := TRUE;
+    all_neg BOOLEAN := TRUE;
+    j INTEGER;
+BEGIN
+    n := array_length(amounts, 1);
+    IF n IS NULL OR n < 2 OR array_length(dates, 1) != n THEN
+        RETURN 0.0;
+    END IF;
+
+    FOR j IN 1..n LOOP
+        IF amounts[j] > 0 THEN
+            all_neg := FALSE;
+        ELSIF amounts[j] < 0 THEN
+            all_pos := FALSE;
+        END IF;
+    END LOOP;
+
+    IF all_pos OR all_neg THEN
+        RETURN 0.0;
+    END IF;
+
+    ref_date := dates[1];
+    t := ARRAY[]::DOUBLE PRECISION[];
+    FOR i IN 1..n LOOP
+        t[i] := (dates[i] - ref_date)::DOUBLE PRECISION / 365.0;
+    END LOOP;
+
+    <<newton>>
+    WHILE iter_count < max_iter LOOP
+        f_val := 0.0;
+        f_deriv := 0.0;
+        FOR i IN 1..n LOOP
+            term := (1.0 + rate) ^ t[i];
+            IF term <= 0.0 THEN
+                rate := -0.9999;
+                EXIT newton;
+            END IF;
+            f_val := f_val + amounts[i] / term;
+            f_deriv := f_deriv - t[i] * amounts[i] / (term * (1.0 + rate));
+        END LOOP;
+
+        IF abs(f_val) < tol THEN
+            RETURN rate;
+        END IF;
+
+        IF abs(f_deriv) < 1e-12 THEN
+            EXIT newton;
+        END IF;
+
+        prev_rate := rate;
+        rate := rate - f_val / f_deriv;
+
+        IF rate <= -1.0 THEN
+            rate := -0.9999;
+        END IF;
+
+        IF abs(rate - prev_rate) < tol THEN
+            RETURN rate;
+        END IF;
+
+        iter_count := iter_count + 1;
+    END LOOP;
+
+    IF abs(f_val) < tol THEN
+        RETURN rate;
+    END IF;
+
+    low := -0.9999;
+    high := 10.0;
+
+    f_low := 0.0;
+    FOR i IN 1..n LOOP
+        term := (1.0 + low) ^ t[i];
+        IF term > 0.0 THEN
+            f_low := f_low + amounts[i] / term;
+        END IF;
+    END LOOP;
+
+    WHILE high <= 1000.0 LOOP
+        f_mid := 0.0;
+        FOR i IN 1..n LOOP
+            term := (1.0 + high) ^ t[i];
+            IF term > 0.0 THEN
+                f_mid := f_mid + amounts[i] / term;
+            END IF;
+        END LOOP;
+
+        IF f_low * f_mid <= 0.0 THEN
+            EXIT;
+        END IF;
+
+        high := high * 2.0;
+    END LOOP;
+
+    IF f_low * f_mid > 0.0 THEN
+        RETURN 0.0;
+    END IF;
+
+    iter_count := 0;
+    WHILE iter_count < max_iter LOOP
+        mid := (low + high) / 2.0;
+        f_mid := 0.0;
+        FOR i IN 1..n LOOP
+            term := (1.0 + mid) ^ t[i];
+            IF term > 0.0 THEN
+                f_mid := f_mid + amounts[i] / term;
+            END IF;
+        END LOOP;
+
+        IF abs(f_mid) < tol OR (high - low) < tol THEN
+            RETURN mid;
+        END IF;
+
+        IF f_low * f_mid <= 0.0 THEN
+            high := mid;
+        ELSE
+            low := mid;
+            f_low := f_mid;
+        END IF;
+
+        iter_count := iter_count + 1;
+    END LOOP;
+
+    RETURN (low + high) / 2.0;
+END;
+$$;
+
+-- Portfolio Money-Weighted Return (MWR / XIRR).
+-- Builds external cash-flow series from DEPOSIT/WITHDRAW transactions
+-- plus terminal portfolio market value, then solves for the annualized
+-- internal rate of return using xirr_sql().
+-- External flows (investor perspective):
+--   DEPOSIT   → negative (money leaves investor)
+--   WITHDRAW  → positive (money returns to investor)
+-- Terminal portfolio value → positive (could be liquidated)
+-- Returns annualized MWR as decimal. Returns NULL if insufficient data.
+CREATE OR REPLACE FUNCTION portfolio_mwr_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
+RETURNS DOUBLE PRECISION
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    flow_amounts DOUBLE PRECISION[];
+    flow_dates DATE[];
+    flow_count INTEGER;
+    term_value DOUBLE PRECISION;
+    rec RECORD;
+    i INTEGER := 0;
+BEGIN
+    flow_amounts := ARRAY[]::DOUBLE PRECISION[];
+    flow_dates := ARRAY[]::DATE[];
+
+    FOR rec IN
+        SELECT
+            t.date AS flow_date,
+            CASE
+                WHEN upper(t.action) = 'DEPOSIT'
+                    THEN -cash_amount_to_usd_sql(t.asset, t.quantity, t.date)
+                ELSE cash_amount_to_usd_sql(t.asset, t.quantity, t.date)
+            END AS flow_amount
+        FROM transactions t
+        WHERE t.date <= p_as_of_date
+          AND upper(t.action) IN ('DEPOSIT', 'WITHDRAW')
+        ORDER BY t.date
+    LOOP
+        i := i + 1;
+        flow_amounts[i] := rec.flow_amount;
+        flow_dates[i] := rec.flow_date;
+    END LOOP;
+
+    SELECT portfolio_value INTO term_value
+    FROM daily_returns
+    WHERE date <= p_as_of_date
+    ORDER BY date DESC
+    LIMIT 1;
+
+    IF term_value IS NULL OR term_value <= 0 OR i = 0 THEN
+        RETURN NULL;
+    END IF;
+
+    i := i + 1;
+    flow_amounts[i] := term_value;
+    flow_dates[i] := p_as_of_date;
+
+    RETURN xirr_sql(flow_amounts, flow_dates);
+END;
+$$;
+
 -- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on.
 -- p_max_age_days: when set, also checks per-ticker staleness (any ticker with no price
 -- within p_max_age_days triggers prices_need_fetch).
