@@ -165,3 +165,51 @@ describe("getCash — CLI integration", () => {
     exitSpy.mockRestore();
   });
 });
+
+describe("getCash — stock trade cash impact regression (#66)", () => {
+  test("stock BUY reduces USD cash by quantity*price+fees, not share count", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: 8995, usd_value: 8995 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.total_usd).toBe(8995);
+    expect(result.rows[0].cash_key).toBe("USD");
+    expect(result.rows[0].balance).toBe(8995);
+    expect(result.rows[0].usd_value).toBe(8995);
+  });
+
+  test("stock SELL increases USD cash by quantity*price-fees", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: 10438, usd_value: 10438 }),
+      makeRow({ cash_key: "EURUSD=X", currency: "EUR", display_bucket: "CASH EUR", balance: -2000, usd_value: -2160 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.total_usd).toBe(8278);
+    expect(result.rows[0].cash_key).toBe("USD");
+    expect(result.rows[0].balance).toBe(10438);
+  });
+
+  test("stock trade cash deltas are in correct currency buckets", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: 5000, usd_value: 5000 }),
+      makeRow({ cash_key: "EURUSD=X", currency: "EUR", display_bucket: "CASH EUR", balance: 800, usd_value: 864 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows[0].cash_key).toBe("USD");
+    expect(result.rows[1].cash_key).toBe("EURUSD=X");
+    expect(result.rows[0].usd_value).toBe(5000);
+    expect(result.rows[1].usd_value).toBe(864);
+    expect(result.total_usd).toBe(5864);
+  });
+});
