@@ -25,9 +25,11 @@ function str(val: unknown): string {
 }
 
 export async function getCash(asOfDate?: string): Promise<CashResult> {
+  const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
+
   const rows = await query<Record<string, unknown>>(
     "SELECT cash_key, currency, display_bucket, balance, usd_value FROM portfolio_cash_sql($1)",
-    asOfDate ? [asOfDate] : [],
+    [actualDate],
   );
 
   const cashRows: CashRow[] = rows.map((r) => ({
@@ -39,7 +41,6 @@ export async function getCash(asOfDate?: string): Promise<CashResult> {
   }));
 
   const total_usd = cashRows.reduce((sum, r) => sum + r.usd_value, 0);
-  const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
 
   return { as_of_date: actualDate, total_usd, rows: cashRows };
 }
