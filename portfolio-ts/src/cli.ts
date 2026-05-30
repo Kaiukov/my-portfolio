@@ -10,6 +10,10 @@ import { recalculate, recalculateDryRun } from "./commands/recalculate.js";
 import { verifyPrices } from "./commands/verify_prices.js";
 import { repairPrices, repairPricesDryRun } from "./commands/repair_prices.js";
 import { fetchPrices } from "./providers/yahoo.js";
+import { getReport } from "./commands/report.js";
+import { getHealth } from "./commands/health.js";
+import { initDb } from "./commands/init.js";
+import { backupDb } from "./commands/backup.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -30,6 +34,10 @@ Commands:
   verify_prices   Show price coverage diagnostics (read-only)
   repair_prices   Fetch missing prices from Yahoo Finance
   sync            repair_prices + recalculate (daily maintenance)
+  report          Paginated daily portfolio returns
+  health          DB reachability and price coverage diagnostic
+  init            Verify database schema is ready
+  backup          Create a pg_dump backup
   --help          Show this help message
 
 Read command dates: YYYY-MM-DD
@@ -302,6 +310,41 @@ export async function dispatch(argv: string[]): Promise<void> {
           ),
         );
       }
+      return;
+    }
+
+    case "report": {
+      const limit = (() => { const v = int(flags, "limit"); return v && v > 0 ? v : 50; })();
+      const offset = (() => { const v = int(flags, "offset"); return v != null && v >= 0 ? v : 0; })();
+      const startDate = str(flags, "start-date") ?? str(flags, "start_date");
+      const endDate = str(flags, "end-date") ?? str(flags, "end_date");
+      const { data, total } = await getReport(limit, offset, startDate, endDate);
+      const pagination = buildPagination(limit, offset, total);
+      console.log(JSON.stringify(success("report", data, data.length, pagination), null, 2));
+      return;
+    }
+
+    case "health": {
+      const result = await getHealth();
+      console.log(JSON.stringify(success("health", result), null, 2));
+      return;
+    }
+
+    case "init": {
+      const result = await initDb();
+      console.log(JSON.stringify(success("init", result), null, 2));
+      return;
+    }
+
+    case "backup": {
+      const dbUrl = process.env.PORTFOLIO_DB_URL;
+      if (!dbUrl) {
+        console.log(JSON.stringify(error("backup", "CONFIG_ERROR", "PORTFOLIO_DB_URL is not set"), null, 2));
+        process.exit(1);
+        return;
+      }
+      const result = await backupDb({ dbUrl, outPath: str(flags, "out") });
+      console.log(JSON.stringify(success("backup", result), null, 2));
       return;
     }
 
