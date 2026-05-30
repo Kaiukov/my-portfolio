@@ -408,9 +408,13 @@ AS $$
                 ELSE NULL
             END AS display_bucket,
             CASE
-                WHEN t.action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN t.quantity
-                WHEN t.action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -t.quantity
-                WHEN t.action = 'EXCHANGE_FROM' THEN t.quantity
+                WHEN upper(t.action) = 'BUY' AND NOT is_cash_like_sql(t.asset) AND t.price IS NOT NULL
+                    THEN -(t.quantity * t.price + COALESCE(t.fees, 0))
+                WHEN upper(t.action) = 'SELL' AND NOT is_cash_like_sql(t.asset) AND t.price IS NOT NULL
+                    THEN (t.quantity * t.price - COALESCE(t.fees, 0))
+                WHEN upper(t.action) IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN t.quantity
+                WHEN upper(t.action) IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -t.quantity
+                WHEN upper(t.action) = 'EXCHANGE_FROM' THEN t.quantity
                 ELSE 0
             END AS cash_delta
         FROM transactions t
