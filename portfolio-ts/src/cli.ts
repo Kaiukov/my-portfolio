@@ -16,6 +16,7 @@ import { getAllocation } from "./commands/allocation.js";
 import { getSummary } from "./commands/summary.js";
 import { getConcentration } from "./commands/concentration.js";
 import { getPerformance } from "./commands/performance.js";
+import { getMwr } from "./commands/mwr.js";
 import { getHealth } from "./commands/health.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
@@ -43,6 +44,7 @@ Commands:
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
+  mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   sync            repair_prices + recalculate (daily maintenance)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
@@ -420,6 +422,13 @@ export async function dispatch(argv: string[]): Promise<void> {
       const period = str(flags, "period");
       const result = await getPerformance({ asOfDate, benchmark, fromDate, period });
       console.log(JSON.stringify(success("performance", result), null, 2));
+      return;
+    }
+
+    case "mwr": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getMwr(asOfDate);
+      console.log(JSON.stringify(success("mwr", result), null, 2));
       return;
     }
 
