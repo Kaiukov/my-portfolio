@@ -753,7 +753,7 @@ class PortfolioDatabase:
             LANGUAGE plpgsql
             AS $$
             BEGIN
-                IF (SELECT MAX(date) FROM prices) < CURRENT_DATE - 1 THEN
+                IF COALESCE((SELECT MAX(date) FROM prices), DATE '1900-01-01') < CURRENT_DATE - 1 THEN
                     INSERT INTO service_state (state_key, state_value, updated_at)
                     VALUES ('prices_need_fetch', 'true', CURRENT_TIMESTAMP)
                     ON CONFLICT (state_key)
@@ -2679,18 +2679,18 @@ class PortfolioDatabase:
 
         trans is the full tuple returned by get_transaction_by_id:
         (id, date, asset, action, quantity, asset_type, price, currency,
-         fees, exchange, data_source, account, created_at, updated_at)
+         fees, fee_currency, exchange, data_source, account, created_at, updated_at)
         """
         self.con.execute(
             """
             INSERT INTO transactions
             (id, date, asset, action, quantity, asset_type, price, currency,
-             fees, exchange, data_source, account, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             fees, fee_currency, exchange, data_source, account, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [trans[0], trans[1], trans[2], trans[3], trans[4],
              trans[5], trans[6], trans[7], trans[8], trans[9],
-             trans[10], trans[11], trans[12], trans[13]],
+             trans[10], trans[11], trans[12], trans[13], trans[14]],
         )
         self.con.commit()
 

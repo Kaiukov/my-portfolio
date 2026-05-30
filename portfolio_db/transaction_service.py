@@ -231,6 +231,7 @@ class TransactionService:
             price=updated.get('price'),
             currency=updated.get('currency', 'USD'),
             fees=updated.get('fees'),
+            fee_currency=updated.get('fee_currency', ''),
             exchange=updated.get('exchange', ''),
             data_source=updated.get('data_source', ''),
             account=updated.get('account'),
@@ -242,6 +243,9 @@ class TransactionService:
         )
         mark_price_data_stale_fn()
         # Perform recalculation — restore original row if it fails
+        # Tuple indices: 0=id,1=date,2=asset,3=action,4=quantity,5=asset_type,
+        #                6=price,7=currency,8=fees,9=fee_currency,10=exchange,
+        #                11=data_source,12=account,13=created_at,14=updated_at
         try:
             recalc_result = recalculate_fn(from_date=recalc_from, force=True)
         except Exception:
@@ -255,9 +259,10 @@ class TransactionService:
                 price=existing[6],
                 currency=existing[7] or 'USD',
                 fees=existing[8],
-                exchange=existing[9] or '',
-                data_source=existing[10] or '',
-                account=existing[11],
+                fee_currency=existing[9] or '',
+                exchange=existing[10] or '',
+                data_source=existing[11] or '',
+                account=existing[12],
             )
             self._restore_rollback_snapshot(rollback_snapshot)
             raise
