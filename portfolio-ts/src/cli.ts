@@ -202,6 +202,7 @@ export async function dispatch(argv: string[]): Promise<void> {
         price: float(flags, "price"),
         currency: str(flags, "currency"),
         fees: float(flags, "fees"),
+        feeCurrency: str(flags, "fee-currency") ?? str(flags, "fee_currency"),
         exchange: str(flags, "exchange"),
         dataSource: str(flags, "data-source") ?? str(flags, "data_source"),
         account: str(flags, "account"),

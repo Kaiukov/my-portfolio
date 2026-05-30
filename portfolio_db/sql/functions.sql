@@ -278,6 +278,35 @@ AS $$
         END, 'fx'::TEXT
         FROM transactions t
         WHERE t.asset IN ('CASH EUR', 'CASH GBP', 'CASH UAH')
+
+        UNION
+
+        -- FX pairs needed for fee_currency values
+        SELECT CASE
+            WHEN t.fee_currency = 'EUR' THEN 'EURUSD=X'
+            WHEN t.fee_currency = 'GBP' THEN 'GBPUSD=X'
+            WHEN t.fee_currency = 'UAH' THEN 'UAHUSD=X'
+            WHEN t.fee_currency = 'JPY' THEN 'JPYUSD=X'
+            WHEN t.fee_currency = 'CHF' THEN 'CHFUSD=X'
+            WHEN t.fee_currency = 'CAD' THEN 'CADUSD=X'
+            WHEN t.fee_currency = 'AUD' THEN 'AUDUSD=X'
+            WHEN t.fee_currency = 'HKD' THEN 'HKDUSD=X'
+            WHEN t.fee_currency = 'SGD' THEN 'SGDUSD=X'
+        END, 'fx'::TEXT
+        FROM transactions t
+        WHERE t.fee_currency IS NOT NULL
+          AND t.fee_currency NOT IN ('', 'USD', 'BTC', 'ETH')
+          AND get_asset_type_sql(t.fee_currency) = 'cash_fx'
+
+        UNION
+
+        -- Asset tickers needed for non-fiat fee currencies (e.g. BTC -> BTC-USD)
+        SELECT DISTINCT t.fee_currency || '-USD', 'asset'::TEXT
+        FROM transactions t
+        WHERE t.fee_currency IS NOT NULL
+          AND t.fee_currency NOT IN ('', 'USD', 'EUR', 'GBP', 'UAH', 'JPY',
+                                      'CHF', 'CAD', 'AUD', 'HKD', 'SGD')
+          AND get_asset_type_sql(t.fee_currency) NOT IN ('cash_base', 'cash_fx')
     ) sub
     WHERE ticker IS NOT NULL
 $$;
@@ -567,7 +596,10 @@ RETURNS TABLE (
 LANGUAGE sql
 STABLE
 AS $$
-    WITH cash_txns AS (
+    WITH base_txns AS (
+        SELECT * FROM transactions WHERE date <= p_as_of_date
+    ),
+    trade_cash AS (
         SELECT
             get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset)) AS cash_key,
             cash_display_currency_sql(get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset))) AS currency,
@@ -580,16 +612,59 @@ AS $$
             END AS display_bucket,
             CASE
                 WHEN upper(t.action) = 'BUY' AND NOT is_cash_like_sql(t.asset) AND t.price IS NOT NULL
-                    THEN -(t.quantity * t.price + COALESCE(t.fees, 0))
+                    THEN CASE WHEN t.fee_currency IS NOT NULL AND t.fee_currency <> ''
+                               AND t.fee_currency <> COALESCE(t.currency, 'USD')
+                               AND COALESCE(t.fees, 0) > 0
+                              THEN -(t.quantity * t.price)
+                              ELSE -(t.quantity * t.price + COALESCE(t.fees, 0))
+                         END
                 WHEN upper(t.action) = 'SELL' AND NOT is_cash_like_sql(t.asset) AND t.price IS NOT NULL
-                    THEN (t.quantity * t.price - COALESCE(t.fees, 0))
+                    THEN CASE WHEN t.fee_currency IS NOT NULL AND t.fee_currency <> ''
+                               AND t.fee_currency <> COALESCE(t.currency, 'USD')
+                               AND COALESCE(t.fees, 0) > 0
+                              THEN (t.quantity * t.price)
+                              ELSE (t.quantity * t.price - COALESCE(t.fees, 0))
+                         END
                 WHEN upper(t.action) IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN t.quantity
                 WHEN upper(t.action) IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -t.quantity
                 WHEN upper(t.action) = 'EXCHANGE_FROM' THEN t.quantity
                 ELSE 0
             END AS cash_delta
-        FROM transactions t
-        WHERE t.date <= p_as_of_date
+        FROM base_txns t
+    ),
+    fee_cash AS (
+        SELECT
+            CASE
+                WHEN get_asset_type_sql(t.fee_currency) = 'cash_base' THEN 'USD'
+                WHEN get_asset_type_sql(t.fee_currency) = 'cash_fx'
+                    THEN get_cash_key_for_asset_sql(t.fee_currency, get_asset_type_sql(t.fee_currency))
+                ELSE t.fee_currency || '-USD'
+            END AS cash_key,
+            CASE
+                WHEN get_asset_type_sql(t.fee_currency) = 'cash_base' THEN 'USD'
+                ELSE t.fee_currency
+            END AS currency,
+            CASE
+                WHEN get_asset_type_sql(t.fee_currency) = 'cash_base' THEN 'CASH USD'
+                WHEN get_asset_type_sql(t.fee_currency) = 'cash_fx'
+                    THEN 'CASH ' || cash_display_currency_sql(
+                        get_cash_key_for_asset_sql(t.fee_currency, get_asset_type_sql(t.fee_currency)))
+                ELSE 'CASH ' || t.fee_currency
+            END AS display_bucket,
+            -COALESCE(t.fees, 0) AS cash_delta
+        FROM base_txns t
+        WHERE upper(t.action) IN ('BUY', 'SELL')
+          AND NOT is_cash_like_sql(t.asset)
+          AND t.price IS NOT NULL
+          AND t.fee_currency IS NOT NULL
+          AND t.fee_currency <> ''
+          AND t.fee_currency <> COALESCE(t.currency, 'USD')
+          AND COALESCE(t.fees, 0) > 0
+    ),
+    all_cash AS (
+        SELECT cash_key, currency, display_bucket, cash_delta FROM trade_cash
+        UNION ALL
+        SELECT cash_key, currency, display_bucket, cash_delta FROM fee_cash
     ),
     aggregated AS (
         SELECT
@@ -597,7 +672,7 @@ AS $$
             MAX(currency) AS currency,
             MAX(display_bucket) AS display_bucket,
             SUM(cash_delta) AS balance
-        FROM cash_txns
+        FROM all_cash
         GROUP BY cash_key
         HAVING SUM(cash_delta) <> 0
     )

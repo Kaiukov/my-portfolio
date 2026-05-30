@@ -4,6 +4,7 @@
 -- Refresh daily returns by recalculating from transaction history
 -- This procedure rebuilds the daily_returns table with accurate portfolio valuations
 -- and return metrics for each day
+DROP FUNCTION IF EXISTS refresh_daily_returns_sql(DATE);
 CREATE OR REPLACE FUNCTION refresh_daily_returns_sql(p_from_date DATE DEFAULT NULL)
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -23,6 +24,8 @@ DECLARE
     h RECORD;
     v_asset_type TEXT;
     v_cash_key TEXT;
+    v_fee_cash_key TEXT;
+    v_fee_asset_type TEXT;
     v_asset_value DOUBLE PRECISION;
 BEGIN
     IF p_from_date IS NULL THEN
@@ -62,7 +65,9 @@ BEGIN
         SELECT generate_series(v_min_date, v_max_date, interval '1 day')::date
     LOOP
         FOR tx IN
-            SELECT id, asset, action, quantity, price, fees, asset_type
+            SELECT id, asset, action, quantity, price, fees, asset_type,
+                   COALESCE(NULLIF(currency, ''), 'USD') AS currency,
+                   fee_currency
             FROM transactions
             WHERE date = v_date
             ORDER BY id
@@ -77,6 +82,17 @@ BEGIN
             VALUES (v_cash_key, 0)
             ON CONFLICT (asset) DO NOTHING;
 
+            v_fee_cash_key := NULL;
+            IF tx.fee_currency IS NOT NULL AND tx.fee_currency <> '' THEN
+                v_fee_asset_type := get_asset_type_sql(tx.fee_currency);
+                v_fee_cash_key := CASE
+                    WHEN v_fee_asset_type = 'cash_base' THEN 'USD'
+                    WHEN v_fee_asset_type = 'cash_fx'
+                        THEN get_cash_key_for_asset_sql(tx.fee_currency, v_fee_asset_type)
+                    ELSE tx.fee_currency || '-USD'
+                END;
+            END IF;
+
             CASE upper(tx.action)
                 WHEN 'BUY' THEN
                     UPDATE holdings
@@ -85,8 +101,23 @@ BEGIN
 
                     IF NOT is_cash_like_sql(tx.asset) AND tx.price IS NOT NULL THEN
                         UPDATE holdings
-                        SET qty = qty - (tx.quantity * tx.price + COALESCE(tx.fees, 0))
+                        SET qty = qty - (tx.quantity * tx.price)
                         WHERE asset = v_cash_key;
+
+                        IF v_fee_cash_key IS NOT NULL
+                           AND v_fee_cash_key <> v_cash_key
+                           AND COALESCE(tx.fees, 0) > 0 THEN
+                            INSERT INTO holdings (asset, qty)
+                            VALUES (v_fee_cash_key, 0)
+                            ON CONFLICT (asset) DO NOTHING;
+                            UPDATE holdings
+                            SET qty = qty - tx.fees
+                            WHERE asset = v_fee_cash_key;
+                        ELSIF COALESCE(tx.fees, 0) > 0 THEN
+                            UPDATE holdings
+                            SET qty = qty - tx.fees
+                            WHERE asset = v_cash_key;
+                        END IF;
                     END IF;
                 WHEN 'SELL' THEN
                     UPDATE holdings
@@ -95,8 +126,23 @@ BEGIN
 
                     IF NOT is_cash_like_sql(tx.asset) AND tx.price IS NOT NULL THEN
                         UPDATE holdings
-                        SET qty = qty + (tx.quantity * tx.price - COALESCE(tx.fees, 0))
+                        SET qty = qty + (tx.quantity * tx.price)
                         WHERE asset = v_cash_key;
+
+                        IF v_fee_cash_key IS NOT NULL
+                           AND v_fee_cash_key <> v_cash_key
+                           AND COALESCE(tx.fees, 0) > 0 THEN
+                            INSERT INTO holdings (asset, qty)
+                            VALUES (v_fee_cash_key, 0)
+                            ON CONFLICT (asset) DO NOTHING;
+                            UPDATE holdings
+                            SET qty = qty - tx.fees
+                            WHERE asset = v_fee_cash_key;
+                        ELSIF COALESCE(tx.fees, 0) > 0 THEN
+                            UPDATE holdings
+                            SET qty = qty - tx.fees
+                            WHERE asset = v_cash_key;
+                        END IF;
                     END IF;
                 WHEN 'DEPOSIT', 'TRANSFER', 'DIVIDEND', 'INTEREST', 'EXCHANGE_TO' THEN
                     UPDATE holdings
