@@ -610,6 +610,8 @@ $$;
 -- ALL financial math is owned by PostgreSQL. TypeScript must not duplicate any calculation.
 -- avg_daily_return uses portfolio_daily_return (INCLUDES cash flows).
 -- avg_investment_return and all other risk metrics use investment_return (EXCLUDES cash flows).
+-- total_gain = start_value * TWR decimal — pure market gain in USD, excludes cash flows.
+--   Reconcile: total_gain / start_value * 100 ≈ time_weighted_return_pct.
 -- Benchmark-relative metrics are joined on date, not aligned by array position.
 CREATE OR REPLACE FUNCTION portfolio_performance_sql(
     p_as_of_date DATE DEFAULT CURRENT_DATE,
@@ -872,7 +874,7 @@ AS $$
         d.end_date_val                                                                          AS end_date,
         d.start_value                                                                           AS start_value,
         d.end_value                                                                             AS end_value,
-        COALESCE(d.end_value - d.start_value, 0.0)                                              AS total_gain,
+        COALESCE(d.start_value * d.twr_decimal_val, 0.0)                                        AS total_gain,
         COALESCE(d.avg_daily_return_val, 0.0)                                                   AS avg_daily_return,
         COALESCE(d.avg_investment_return_val, 0.0)                                              AS avg_investment_return,
         COALESCE(d.std_dev_val, 0.0)                                                            AS std_dev,

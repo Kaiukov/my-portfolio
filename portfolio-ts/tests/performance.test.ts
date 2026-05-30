@@ -78,6 +78,17 @@ describe("getPerformance", () => {
     expect(result.beta).toBe(0.95);
   });
 
+  test("total_gain reconciles with TWR: total_gain ≈ start_value * twr_pct / 100", async () => {
+    mockQuery.mockResolvedValue([makeRow()]);
+
+    const { getPerformance } = await import("../src/commands/performance.js");
+    const result = await getPerformance();
+
+    const expected = result.start_value * result.time_weighted_return_pct / 100;
+    const diff = Math.abs(result.total_gain - expected);
+    expect(diff).toBeLessThan(0.01);
+  });
+
   test("passes as_of_date, benchmark, from_date as SQL parameters", async () => {
     mockQuery.mockClear();
     mockQuery.mockResolvedValue([makeRow()]);
