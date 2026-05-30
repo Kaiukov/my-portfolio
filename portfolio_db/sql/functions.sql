@@ -65,7 +65,18 @@ LANGUAGE sql
 IMMUTABLE
 AS $$
     SELECT CASE
-        WHEN asset_type = 'cash_fx' THEN asset
+        WHEN asset_type = 'cash_fx' THEN
+            CASE
+                WHEN asset = 'EUR' THEN 'EURUSD=X'
+                WHEN asset = 'GBP' THEN 'GBPUSD=X'
+                WHEN asset = 'CHF' THEN 'CHFUSD=X'
+                WHEN asset = 'CAD' THEN 'CADUSD=X'
+                WHEN asset = 'AUD' THEN 'AUDUSD=X'
+                WHEN asset = 'HKD' THEN 'HKDUSD=X'
+                WHEN asset = 'SGD' THEN 'SGDUSD=X'
+                WHEN asset = 'JPY' THEN 'JPYUSD=X'
+                ELSE asset
+            END
         WHEN asset_type = 'stock_eur' THEN 'EURUSD=X'
         WHEN asset_type = 'stock_gbp' THEN 'GBPUSD=X'
         WHEN asset_type = 'stock_jpy' THEN 'JPYUSD=X'
@@ -582,17 +593,17 @@ AS $$
     aggregated AS (
         SELECT
             cash_key,
-            currency,
-            COALESCE(display_bucket, 'CASH ' || currency) AS display_bucket,
+            MAX(currency) AS currency,
+            MAX(display_bucket) AS display_bucket,
             SUM(cash_delta) AS balance
         FROM cash_txns
-        GROUP BY cash_key, currency, display_bucket
+        GROUP BY cash_key
         HAVING SUM(cash_delta) <> 0
     )
     SELECT
         a.cash_key,
         a.currency,
-        a.display_bucket,
+        COALESCE(a.display_bucket, 'CASH ' || a.currency) AS display_bucket,
         a.balance,
         CASE
             WHEN a.cash_key = 'USD' THEN a.balance
@@ -620,32 +631,30 @@ AS $$
         SELECT asset, action, quantity
         FROM transactions
         WHERE date <= p_as_of_date
+          AND NOT is_cash_like_sql(asset)
     ),
     net_holdings AS (
         SELECT
             asset,
             SUM(CASE
-                WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
-                WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -quantity
-                WHEN action = 'EXCHANGE_FROM' THEN quantity
+                WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
+                WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
                 ELSE 0
             END) AS net_quantity
         FROM filtered_txns
         GROUP BY asset
         HAVING SUM(CASE
-            WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
-            WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX', 'EXCHANGE_FROM') THEN -quantity
+            WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
+            WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
             ELSE 0
         END) <> 0
     ),
-    valued AS (
+    non_cash_valued AS (
         SELECT
             n.asset,
             get_asset_type_sql(n.asset) AS asset_type,
             n.net_quantity,
             CASE
-                WHEN get_asset_type_sql(n.asset) = 'cash_base' THEN n.net_quantity
-                WHEN get_asset_type_sql(n.asset) = 'cash_fx' THEN n.net_quantity * COALESCE(price_asof_sql(n.asset, p_as_of_date), 0)
                 WHEN get_asset_type_sql(n.asset) IN (
                     'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
                     'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
@@ -655,8 +664,21 @@ AS $$
             END AS value_usd
         FROM net_holdings n
     ),
+    cash_valued AS (
+        SELECT
+            c.cash_key AS asset,
+            CASE WHEN c.cash_key = 'USD' THEN 'cash_base'::TEXT ELSE 'cash_fx'::TEXT END AS asset_type,
+            c.balance AS net_quantity,
+            c.usd_value AS value_usd
+        FROM portfolio_cash_sql(p_as_of_date) c
+    ),
+    all_valued AS (
+        SELECT asset, asset_type, net_quantity, value_usd FROM non_cash_valued
+        UNION ALL
+        SELECT asset, asset_type, net_quantity, value_usd FROM cash_valued
+    ),
     total AS (
-        SELECT SUM(value_usd) AS portfolio_total FROM valued
+        SELECT SUM(value_usd) AS portfolio_total FROM all_valued
     )
     SELECT
         v.asset,
@@ -667,7 +689,7 @@ AS $$
             WHEN t.portfolio_total > 0 THEN (v.value_usd / t.portfolio_total) * 100.0
             ELSE 0
         END AS allocation_pct
-    FROM valued v
+    FROM all_valued v
     CROSS JOIN total t
     WHERE v.value_usd <> 0
     ORDER BY v.value_usd DESC
