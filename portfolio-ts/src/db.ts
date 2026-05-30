@@ -41,15 +41,9 @@ export async function close(): Promise<void> {
   }
 }
 
-type TxClient = {
-  unsafe<T = Record<string, unknown>>(sqlStr: string, params?: unknown[]): PromiseLike<T[]>;
-};
-
-type WithTx = <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>;
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const runTx: WithTx = (async (fn: any): Promise<any> => {
+export const runTx = async (fn: any): Promise<any> => {
   if (!sql) connect();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (sql!.begin as any)(fn);
-}) as WithTx;
+};
