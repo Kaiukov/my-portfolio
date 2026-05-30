@@ -602,6 +602,369 @@ AS $$
     FROM alloc
 $$;
 
+-- Performance statistics: TWR, Sharpe, Sortino, Treynor, max drawdown, benchmark-relative metrics.
+-- ALL financial math is owned by PostgreSQL. TypeScript must not duplicate any calculation.
+-- Uses investment_return for risk metrics (excludes cash flows).
+-- Benchmark-relative metrics are joined on date, not aligned by array position.
+CREATE OR REPLACE FUNCTION portfolio_performance_sql(
+    p_as_of_date DATE DEFAULT CURRENT_DATE,
+    p_benchmark TEXT DEFAULT 'SPY',
+    p_from_date DATE DEFAULT NULL,
+    p_risk_free_rate DOUBLE PRECISION DEFAULT 0.02
+)
+RETURNS TABLE (
+    total_days             INTEGER,
+    start_date             TEXT,
+    end_date               TEXT,
+    start_value            DOUBLE PRECISION,
+    end_value              DOUBLE PRECISION,
+    total_gain             DOUBLE PRECISION,
+    avg_daily_return       DOUBLE PRECISION,
+    avg_investment_return  DOUBLE PRECISION,
+    std_dev                DOUBLE PRECISION,
+    hist_volatility        DOUBLE PRECISION,
+    var_95                 DOUBLE PRECISION,
+    var_99                 DOUBLE PRECISION,
+    cvar_95                DOUBLE PRECISION,
+    cvar_99                DOUBLE PRECISION,
+    max_drawdown           DOUBLE PRECISION,
+    avg_drawdown           DOUBLE PRECISION,
+    avg_drawdown_duration  DOUBLE PRECISION,
+    time_weighted_return_pct DOUBLE PRECISION,
+    total_return_pct       DOUBLE PRECISION,
+    median_monthly_return  DOUBLE PRECISION,
+    cagr                   DOUBLE PRECISION,
+    beta                   DOUBLE PRECISION,
+    sharpe_ratio           DOUBLE PRECISION,
+    sortino_ratio          DOUBLE PRECISION,
+    treynor_ratio          DOUBLE PRECISION,
+    information_ratio      DOUBLE PRECISION,
+    jensens_alpha          DOUBLE PRECISION,
+    relative_return        DOUBLE PRECISION,
+    tracking_error         DOUBLE PRECISION,
+    spy_twr_pct            DOUBLE PRECISION,
+    spy_cagr_pct           DOUBLE PRECISION,
+    up_capture_ratio       DOUBLE PRECISION,
+    down_capture_ratio     DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH params AS (
+        SELECT
+            p_as_of_date AS as_of_date,
+            p_benchmark AS benchmark_ticker,
+            p_risk_free_rate AS risk_free_rate_annual,
+            p_from_date AS from_date
+    ),
+    dr AS (
+        SELECT d.date, d.portfolio_value, d.investment_return
+        FROM daily_returns d
+        CROSS JOIN params p
+        WHERE d.portfolio_value > 0
+          AND (p.as_of_date IS NULL OR d.date <= p.as_of_date)
+          AND (p.from_date IS NULL OR d.date >= p.from_date)
+        ORDER BY d.date
+    ),
+    dr_bounds AS (
+        SELECT
+            COUNT(*)::integer                                             AS total_days,
+            MIN(date)::TEXT                                              AS start_date,
+            MAX(date)::TEXT                                              AS end_date,
+            (ARRAY_AGG(portfolio_value ORDER BY date))[1]                AS start_value,
+            (ARRAY_AGG(portfolio_value ORDER BY date DESC))[1]           AS end_value,
+            AVG(investment_return)                                       AS avg_daily_return,
+            STDDEV_POP(investment_return)                                AS std_dev,
+            PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY investment_return) AS var_95,
+            PERCENTILE_CONT(0.01) WITHIN GROUP (ORDER BY investment_return) AS var_99,
+            EXP(SUM(LN(GREATEST(1.0 + investment_return / 100.0, 1e-12)))) - 1 AS twr_decimal
+        FROM dr
+    ),
+    cvar_stats AS (
+        SELECT
+            COALESCE(AVG(dr.investment_return) FILTER (
+                WHERE dr.investment_return <= (SELECT var_95 FROM dr_bounds)
+            ), 0.0) AS cvar_95,
+            COALESCE(AVG(dr.investment_return) FILTER (
+                WHERE dr.investment_return <= (SELECT var_99 FROM dr_bounds)
+            ), 0.0) AS cvar_99
+        FROM dr
+        CROSS JOIN params p
+    ),
+    target AS (
+        SELECT (risk_free_rate_annual / 252.0) * 100.0 AS target_daily_pct
+        FROM params
+    ),
+    downside AS (
+        SELECT COALESCE(
+            SQRT(AVG(POWER(dr.investment_return - t.target_daily_pct, 2))
+                 FILTER (WHERE dr.investment_return < t.target_daily_pct)),
+            0.0
+        ) AS downside_deviation_daily
+        FROM dr
+        CROSS JOIN target t
+    ),
+    drawdowns AS (
+        SELECT
+            date,
+            portfolio_value,
+            MAX(portfolio_value) OVER (
+                ORDER BY date
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS running_max
+        FROM dr
+    ),
+    drawdown_values AS (
+        SELECT
+            date,
+            CASE
+                WHEN running_max > 0 THEN ((running_max - portfolio_value) / running_max) * 100.0
+                ELSE 0.0
+            END AS drawdown
+        FROM drawdowns
+    ),
+    drawdown_periods AS (
+        SELECT grp, COUNT(*)::double precision AS duration
+        FROM (
+            SELECT
+                date,
+                drawdown,
+                SUM(CASE WHEN drawdown = 0 THEN 1 ELSE 0 END) OVER (
+                    ORDER BY date
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS grp
+            FROM drawdown_values
+            WHERE drawdown > 0
+        ) x
+        GROUP BY grp
+    ),
+    drawdown_stats AS (
+        SELECT
+            MAX(drawdown)                                                      AS max_drawdown,
+            COALESCE(AVG(drawdown) FILTER (WHERE drawdown > 0), 0.0)           AS avg_drawdown,
+            COALESCE((SELECT AVG(duration) FROM drawdown_periods), 0.0)        AS avg_drawdown_duration
+        FROM drawdown_values
+    ),
+    monthly_returns AS (
+        SELECT
+            date_trunc('month', date)::date AS month_start,
+            EXP(SUM(LN(GREATEST(1.0 + investment_return / 100.0, 1e-12)))) - 1 AS month_return
+        FROM dr
+        GROUP BY 1
+    ),
+    monthly_median AS (
+        SELECT
+            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY month_return) * 100.0, 0.0)
+            AS median_monthly_return
+        FROM monthly_returns
+    ),
+    bench_prices AS (
+        SELECT
+            p.date,
+            p.price,
+            LAG(p.price) OVER (ORDER BY p.date) AS prev_price
+        FROM prices p
+        CROSS JOIN params prm
+        WHERE p.ticker = prm.benchmark_ticker
+          AND (prm.as_of_date IS NULL OR p.date <= prm.as_of_date)
+        ORDER BY p.date
+    ),
+    bench_returns AS (
+        SELECT
+            date,
+            CASE WHEN prev_price > 0
+                THEN ((price - prev_price) / prev_price) * 100.0
+                ELSE 0.0
+            END AS return_pct
+        FROM bench_prices
+        WHERE prev_price IS NOT NULL AND prev_price > 0
+    ),
+    bench_bounds AS (
+        SELECT
+            (ARRAY_AGG(price ORDER BY date))[1]      AS spy_start,
+            (ARRAY_AGG(price ORDER BY date DESC))[1] AS spy_end,
+            EXP(SUM(LN(GREATEST(1.0 + CASE WHEN prev_price > 0
+                THEN ((price - prev_price) / prev_price)
+                ELSE 0.0 END, 1e-12)))) - 1         AS spy_twr_decimal
+        FROM bench_prices
+        WHERE prev_price IS NOT NULL AND prev_price > 0
+    ),
+    aligned AS (
+        SELECT
+            d.date,
+            d.investment_return AS port_ret,
+            b.return_pct AS bench_ret
+        FROM dr d
+        INNER JOIN bench_returns b USING (date)
+    ),
+    aligned_avg AS (
+        SELECT
+            AVG(port_ret)  AS avg_port,
+            AVG(bench_ret) AS avg_spy
+        FROM aligned
+    ),
+    aligned_metrics AS (
+        SELECT
+            COUNT(*)::integer                                          AS aligned_days,
+            AVG((a.port_ret - avg.avg_port) * (a.bench_ret - avg.avg_spy)) AS covariance,
+            AVG(POWER(a.bench_ret - avg.avg_spy, 2))                  AS variance_market,
+            AVG(a.port_ret - a.bench_ret)                              AS avg_excess_daily,
+            SQRT(AVG(POWER(a.port_ret - a.bench_ret, 2)))              AS tracking_error_daily,
+            SUM(CASE WHEN a.bench_ret > 0 THEN a.port_ret ELSE 0 END)  AS up_port_sum,
+            SUM(CASE WHEN a.bench_ret > 0 THEN a.bench_ret ELSE 0 END) AS up_bench_sum,
+            SUM(CASE WHEN a.bench_ret < 0 THEN a.port_ret ELSE 0 END)  AS down_port_sum,
+            SUM(CASE WHEN a.bench_ret < 0 THEN a.bench_ret ELSE 0 END) AS down_bench_sum
+        FROM aligned a
+        CROSS JOIN aligned_avg avg
+    ),
+    derived AS (
+        SELECT
+            b.*,
+            cv.cvar_95                                                    AS cvar_95_val,
+            cv.cvar_99                                                    AS cvar_99_val,
+            ds.avg_daily_return                                           AS avg_daily_return_val,
+            ds.std_dev                                                    AS std_dev_val,
+            ds.var_95                                                     AS var_95_val,
+            ds.var_99                                                     AS var_99_val,
+            ds.twr_decimal                                                AS twr_decimal_val,
+            ds.start_date                                                 AS start_date_val,
+            ds.end_date                                                   AS end_date_val,
+            dd.max_drawdown                                               AS max_dd,
+            dd.avg_drawdown                                               AS avg_dd,
+            dd.avg_drawdown_duration                                      AS avg_dd_dur,
+            mm.median_monthly_return                                      AS med_monthly,
+            am.aligned_days                                               AS al_days,
+            am.covariance                                                 AS cov_val,
+            am.variance_market                                            AS var_mkt,
+            am.avg_excess_daily                                           AS avg_exc,
+            am.tracking_error_daily                                       AS te_daily,
+            am.up_port_sum                                                AS up_p,
+            am.up_bench_sum                                               AS up_b,
+            am.down_port_sum                                              AS dn_p,
+            am.down_bench_sum                                             AS dn_b,
+            bb.spy_start                                                  AS spy_s,
+            bb.spy_end                                                    AS spy_e,
+            bb.spy_twr_decimal                                            AS spy_twr,
+            t.target_daily_pct                                            AS target_daily,
+            dn.downside_deviation_daily                                   AS downside_dev_daily,
+            p.risk_free_rate_annual                                       AS rf
+        FROM dr_bounds b
+        CROSS JOIN cvar_stats cv
+        CROSS JOIN dr_bounds ds
+        CROSS JOIN drawdown_stats dd
+        CROSS JOIN monthly_median mm
+        CROSS JOIN aligned_metrics am
+        CROSS JOIN bench_bounds bb
+        CROSS JOIN target t
+        CROSS JOIN downside dn
+        CROSS JOIN params p
+    )
+    SELECT
+        d.total_days,
+        d.start_date_val                                                                        AS start_date,
+        d.end_date_val                                                                          AS end_date,
+        d.start_value                                                                           AS start_value,
+        d.end_value                                                                             AS end_value,
+        COALESCE(d.end_value - d.start_value, 0.0)                                              AS total_gain,
+        COALESCE(d.avg_daily_return_val, 0.0)                                                   AS avg_daily_return,
+        COALESCE(d.avg_daily_return_val, 0.0)                                                   AS avg_investment_return,
+        COALESCE(d.std_dev_val, 0.0)                                                            AS std_dev,
+        COALESCE(d.std_dev_val, 0.0) * SQRT(252.0)                                              AS hist_volatility,
+        COALESCE(d.var_95_val, 0.0)                                                             AS var_95,
+        COALESCE(d.var_99_val, 0.0)                                                             AS var_99,
+        COALESCE(d.cvar_95_val, 0.0)                                                            AS cvar_95,
+        COALESCE(d.cvar_99_val, 0.0)                                                            AS cvar_99,
+        COALESCE(d.max_dd, 0.0)                                                                 AS max_drawdown,
+        COALESCE(d.avg_dd, 0.0)                                                                 AS avg_drawdown,
+        COALESCE(d.avg_dd_dur, 0.0)                                                             AS avg_drawdown_duration,
+        COALESCE(d.twr_decimal_val * 100.0, 0.0)                                                AS time_weighted_return_pct,
+        COALESCE(d.twr_decimal_val * 100.0, 0.0)                                                AS total_return_pct,
+        COALESCE(d.med_monthly, 0.0)                                                            AS median_monthly_return,
+        CASE
+            WHEN d.start_date_val IS NOT NULL
+             AND d.end_date_val IS NOT NULL
+             AND (d.end_date::DATE - d.start_date::DATE) > 0
+            THEN ((d.twr_decimal_val + 1.0) ^ (1.0 / ((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25)) - 1.0) * 100.0
+            ELSE 0.0
+        END                                                                                     AS cagr,
+        CASE
+            WHEN COALESCE(d.var_mkt, 0.0) > 0 THEN COALESCE(d.cov_val, 0.0) / d.var_mkt
+            ELSE 0.0
+        END                                                                                     AS beta,
+        CASE
+            WHEN COALESCE(d.std_dev_val, 0.0) * SQRT(252.0) > 0 THEN
+                ((((d.twr_decimal_val + 1.0) ^ (1.0 / GREATEST((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25, 1.0/365.25)) - 1.0) - d.rf)
+                 / (COALESCE(d.std_dev_val, 0.0) * SQRT(252.0) / 100.0))
+            ELSE 0.0
+        END                                                                                     AS sharpe_ratio,
+        CASE
+            WHEN COALESCE(d.downside_dev_daily, 0.0) > 0 THEN
+                ((COALESCE(d.avg_daily_return_val, 0.0) - COALESCE(d.target_daily, 0.0))
+                  / d.downside_dev_daily) * SQRT(252.0)
+            ELSE 0.0
+        END                                                                                     AS sortino_ratio,
+        CASE
+            WHEN COALESCE(d.var_mkt, 0.0) > 0 AND COALESCE(d.cov_val, 0.0) <> 0 THEN
+                (((d.twr_decimal_val + 1.0) ^ (1.0 / GREATEST((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25, 1.0/365.25)) - 1.0) - d.rf)
+                 / (COALESCE(d.cov_val, 0.0) / d.var_mkt)
+            ELSE 0.0
+        END                                                                                     AS treynor_ratio,
+        CASE
+            WHEN COALESCE(d.te_daily, 0.0) > 0 THEN
+                (COALESCE(d.avg_exc, 0.0) * 252.0 / 100.0)
+                 / (COALESCE(d.te_daily, 0.0) * SQRT(252.0) / 100.0)
+            ELSE 0.0
+        END                                                                                     AS information_ratio,
+        CASE
+            WHEN d.start_date_val IS NOT NULL AND d.end_date_val IS NOT NULL
+             AND (d.end_date::DATE - d.start_date::DATE) > 0
+            THEN
+                (((d.twr_decimal_val + 1.0) ^ (1.0 / ((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25)) - 1.0)
+                  - (d.rf + COALESCE(d.cov_val / NULLIF(d.var_mkt, 0), 0.0) * (
+                      CASE WHEN COALESCE(d.spy_s, 0.0) > 0 AND COALESCE(d.spy_e, 0.0) > 0
+                           AND COALESCE(d.spy_twr, -1.0) > -1.0 AND (d.end_date::DATE - d.start_date::DATE) > 0
+                           THEN ((d.spy_twr + 1.0) ^ (1.0 / ((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25)) - 1.0)
+                           ELSE 0.0
+                      END - d.rf))) * 100.0
+            ELSE 0.0
+        END                                                                                     AS jensens_alpha,
+        CASE
+            WHEN d.start_date_val IS NOT NULL AND d.end_date_val IS NOT NULL
+             AND (d.end_date::DATE - d.start_date::DATE) > 0
+            THEN
+                (((d.twr_decimal_val + 1.0) ^ (1.0 / ((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25)) - 1.0)
+                  - CASE WHEN COALESCE(d.spy_s, 0.0) > 0 AND COALESCE(d.spy_e, 0.0) > 0
+                           AND COALESCE(d.spy_twr, -1.0) > -1.0 AND (d.end_date::DATE - d.start_date::DATE) > 0
+                           THEN ((d.spy_twr + 1.0) ^ (1.0 / ((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25)) - 1.0)
+                           ELSE 0.0
+                      END) * 100.0
+            ELSE 0.0
+        END                                                                                     AS relative_return,
+        COALESCE(d.te_daily * SQRT(252.0), 0.0)                                                AS tracking_error,
+        CASE
+            WHEN COALESCE(d.spy_s, 0.0) > 0 THEN
+                ((COALESCE(d.spy_e, 0.0) - d.spy_s) / d.spy_s) * 100.0
+            ELSE 0.0
+        END                                                                                     AS spy_twr_pct,
+        CASE
+            WHEN COALESCE(d.spy_s, 0.0) > 0 AND COALESCE(d.spy_e, 0.0) > 0
+                 AND COALESCE(d.spy_twr, -1.0) > -1.0
+                 AND d.start_date_val IS NOT NULL AND d.end_date_val IS NOT NULL
+                 AND (d.end_date::DATE - d.start_date::DATE) > 0
+            THEN (((d.spy_twr + 1.0) ^ (1.0 / ((d.end_date::DATE - d.start_date::DATE)::double precision / 365.25)) - 1.0)) * 100.0
+            ELSE 0.0
+        END                                                                                     AS spy_cagr_pct,
+        CASE
+            WHEN COALESCE(d.up_b, 0.0) <> 0 THEN COALESCE(d.up_p, 0.0) / d.up_b
+            ELSE 0.0
+        END                                                                                     AS up_capture_ratio,
+        CASE
+            WHEN COALESCE(d.dn_b, 0.0) <> 0 THEN COALESCE(d.dn_p, 0.0) / d.dn_b
+            ELSE 0.0
+        END                                                                                     AS down_capture_ratio
+    FROM derived d
+$$;
+
 -- Daily maintenance check: sets staleness flags in service_state for `portfolio sync` to act on.
 -- p_max_age_days: when set, also checks per-ticker staleness (any ticker with no price
 -- within p_max_age_days triggers prices_need_fetch).
