@@ -62,3 +62,61 @@ export function validatePositiveInt(
     throw new ValidationError(`${flagName} must be a positive integer (command: ${command})`);
   }
 }
+
+export const USER_ACTIONS = new Set([
+  "BUY", "SELL", "DEPOSIT", "WITHDRAW", "TRANSFER",
+  "DIVIDEND", "INTEREST", "FEE", "TAX",
+]);
+
+export const ALLOWED_CURRENCIES = new Set([
+  "USD", "EUR", "GBP", "UAH", "JPY", "CHF", "CAD", "AUD", "HKD", "SGD",
+]);
+
+const FX_PAIR_RE = /^[A-Z]{6}=X$/;
+const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
+
+export function validateAssetSymbol(asset: string, action: string): void {
+  if (!asset || !asset.trim()) {
+    throw new ValidationError(
+      "--asset is required.\n" +
+      "Expected: --asset <ticker symbol>\n" +
+      "Example:  portfolio-ts add --date 01-01-2026 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive",
+    );
+  }
+
+  const upper = asset.toUpperCase();
+
+  if ((action === "BUY" || action === "SELL") && ISO_CURRENCY_RE.test(upper) && !FX_PAIR_RE.test(upper)) {
+    throw new ValidationError(
+      `--asset: ${JSON.stringify(asset)} looks like an ISO currency code. ` +
+      `Use the FX pair format (e.g. EURUSD=X) instead of a bare currency code.\n` +
+      "Expected: --asset <SYMBOL> or <XXXYYY=X>\n" +
+      "Example:  portfolio-ts add --date 01-01-2026 --asset EURUSD=X --action BUY --quantity 1000 --price 1.05 --exchange Interactive",
+    );
+  }
+}
+
+export function validateAction(action: string): string {
+  if (!action || !action.trim()) {
+    throw new ValidationError("--action is required");
+  }
+  const upper = action.toUpperCase();
+  if (!USER_ACTIONS.has(upper)) {
+    throw new ValidationError(
+      `--action: unknown action ${JSON.stringify(action)}. ` +
+      `Valid: ${[...USER_ACTIONS].join(", ")}`,
+    );
+  }
+  return upper;
+}
+
+export function validateCurrency(currency: string | undefined, flagName: string): void {
+  if (currency === undefined || currency === null) return;
+  const upper = currency.toUpperCase();
+  if (!ALLOWED_CURRENCIES.has(upper)) {
+    throw new ValidationError(
+      `${flagName}: unknown currency ${JSON.stringify(currency)}. ` +
+      `Valid: ${[...ALLOWED_CURRENCIES].join(", ")}`,
+    );
+  }
+}

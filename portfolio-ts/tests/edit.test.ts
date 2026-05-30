@@ -71,6 +71,27 @@ describe("editTransaction", () => {
     await expect(editTransaction(42, { price: 155 })).rejects.toBeInstanceOf(NotFoundError);
   });
 
+  test("rejects asset='EUR' (bare currency) on edit", async () => {
+    const { editTransaction } = await import("../src/commands/edit.js");
+    await expect(
+      editTransaction(42, { asset: "EUR", action: "BUY" }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("rejects invalid action on edit", async () => {
+    const { editTransaction } = await import("../src/commands/edit.js");
+    await expect(
+      editTransaction(42, { action: "INVALID" }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("rejects invalid currency on edit", async () => {
+    const { editTransaction } = await import("../src/commands/edit.js");
+    await expect(
+      editTransaction(42, { currency: "XYZ" }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   test("succeeds: updates transaction and recalculates", async () => {
     const existing = makeDbRow();
     const updated = makeDbRow({ price: 155.5 });
