@@ -34,15 +34,15 @@ export async function querySingle<T = Record<string, unknown>>(
   return rows.length > 0 ? rows[0] : null;
 }
 
+// deno-lint-ignore no-explicit-any
+export async function runTx(fn: any) {
+  if (!sql) connect();
+  return (sql as any).begin(fn);
+}
+
 export async function close(): Promise<void> {
   if (sql) {
     await sql.end();
     sql = null;
   }
-}
-
-// deno-lint-ignore no-explicit-any
-export async function runTx(fn: any) {
-  if (!sql) connect();
-  return (sql as any).begin(fn);
 }
