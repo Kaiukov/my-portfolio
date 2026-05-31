@@ -230,10 +230,10 @@ export async function dispatch(argv: string[]): Promise<void> {
       const isDryRun = bool(flags, "dry-run");
       if (isDryRun) {
         const result = await deletePreview(transId);
-        console.log(JSON.stringify(success("delete", result), null, 2));
+        console.log(JSON.stringify(success("delete", result, result.would_delete.length), null, 2));
       } else {
         const result = await deleteTransaction(transId, bool(flags, "confirm"));
-        console.log(JSON.stringify(success("delete", result), null, 2));
+        console.log(JSON.stringify(success("delete", result, result.deleted_ids.length), null, 2));
       }
       return;
     }
