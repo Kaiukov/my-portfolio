@@ -3,6 +3,74 @@
 
 SET check_function_bodies = off;
 
+-- Detect asset kind: metadata-driven asset class detection
+-- First checks asset_metadata.yahoo_quote_type, falls back to suffix-based detection
+-- This is ORTHOGONAL to get_asset_type_sql (PRICING bucket) — asset_kind is for display/allocation
+DROP FUNCTION IF EXISTS detect_asset_kind(TEXT) CASCADE;
+CREATE OR REPLACE FUNCTION detect_asset_kind(p_ticker TEXT)
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT COALESCE(
+        (SELECT CASE
+            WHEN am.yahoo_quote_type = 'EQUITY' THEN 'stock'
+            WHEN am.yahoo_quote_type = 'ETF' THEN 'etf'
+            WHEN am.yahoo_quote_type = 'CRYPTOCURRENCY' THEN 'crypto'
+            WHEN am.yahoo_quote_type = 'MUTUALFUND' THEN 'fund'
+            WHEN am.yahoo_quote_type = 'CURRENCY' THEN 'fx'
+            WHEN am.yahoo_quote_type IS NOT NULL THEN 'unknown'
+            ELSE NULL
+        END
+        FROM asset_metadata am
+        WHERE am.ticker = p_ticker
+          AND am.yahoo_quote_type IS NOT NULL),
+        CASE
+            WHEN p_ticker = 'USD' THEN 'cash'
+            WHEN p_ticker IN ('EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'JPY') THEN 'fx'
+            WHEN RIGHT(p_ticker, 5) = 'USD=X' THEN 'fx'
+            WHEN RIGHT(p_ticker, 4) = '-USD' THEN 'crypto'
+            WHEN RIGHT(p_ticker, 2) = '.L' THEN 'stock'
+            WHEN RIGHT(p_ticker, 3) = '.DE' THEN 'stock'
+            WHEN RIGHT(p_ticker, 2) = '.T' THEN 'stock'
+            WHEN RIGHT(p_ticker, 3) = '.SW' THEN 'stock'
+            WHEN RIGHT(p_ticker, 3) = '.TO' THEN 'stock'
+            WHEN RIGHT(p_ticker, 3) = '.AX' THEN 'stock'
+            WHEN RIGHT(p_ticker, 3) = '.HK' THEN 'stock'
+            WHEN RIGHT(p_ticker, 3) = '.SG' THEN 'stock'
+            WHEN p_ticker LIKE 'CASH %' THEN 'cash'
+            ELSE 'stock'
+        END
+    )
+$$;
+
+-- Upsert asset metadata from Yahoo Finance quoteType response
+DROP FUNCTION IF EXISTS upsert_asset_metadata(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ);
+CREATE OR REPLACE FUNCTION upsert_asset_metadata(
+    p_ticker TEXT,
+    p_yahoo_quote_type TEXT,
+    p_yahoo_type_disp TEXT,
+    p_yahoo_short_name TEXT,
+    p_yahoo_long_name TEXT,
+    p_currency TEXT,
+    p_exchange TEXT,
+    p_fetched_at TIMESTAMPTZ
+)
+RETURNS VOID
+LANGUAGE sql
+AS $$
+    INSERT INTO asset_metadata (ticker, yahoo_quote_type, yahoo_type_disp, yahoo_short_name, yahoo_long_name, currency, exchange, fetched_at)
+    VALUES (p_ticker, p_yahoo_quote_type, p_yahoo_type_disp, p_yahoo_short_name, p_yahoo_long_name, p_currency, p_exchange, p_fetched_at)
+    ON CONFLICT (ticker) DO UPDATE SET
+        yahoo_quote_type = EXCLUDED.yahoo_quote_type,
+        yahoo_type_disp = EXCLUDED.yahoo_type_disp,
+        yahoo_short_name = EXCLUDED.yahoo_short_name,
+        yahoo_long_name = EXCLUDED.yahoo_long_name,
+        currency = EXCLUDED.currency,
+        exchange = EXCLUDED.exchange,
+        fetched_at = EXCLUDED.fetched_at
+$$;
+
 -- Asset type detection based on ticker symbol
 DROP FUNCTION IF EXISTS get_asset_type_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION get_asset_type_sql(ticker TEXT)
@@ -747,6 +815,7 @@ CREATE OR REPLACE FUNCTION portfolio_allocation_sql(p_as_of_date DATE DEFAULT CU
 RETURNS TABLE (
     asset           TEXT,
     asset_type      TEXT,
+    asset_kind      TEXT,
     net_quantity    DOUBLE PRECISION,
     value_usd       DOUBLE PRECISION,
     allocation_pct  DOUBLE PRECISION
@@ -810,6 +879,7 @@ AS $$
     SELECT
         v.asset,
         v.asset_type,
+        detect_asset_kind(v.asset) AS asset_kind,
         v.net_quantity,
         v.value_usd,
         CASE

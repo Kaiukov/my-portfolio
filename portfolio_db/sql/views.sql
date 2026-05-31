@@ -56,7 +56,8 @@ CREATE OR REPLACE VIEW holdings_with_value AS
 SELECT
     h.asset,
     h.net_quantity,
-    COALESCE(h.net_quantity * price_asof_sql(h.asset, CURRENT_DATE), h.net_quantity) AS market_value_usd
+    COALESCE(h.net_quantity * price_asof_sql(h.asset, CURRENT_DATE), h.net_quantity) AS market_value_usd,
+    detect_asset_kind(h.asset) AS asset_kind
 FROM current_holdings h;
 
 -- Allocation view: portfolio allocation percentages

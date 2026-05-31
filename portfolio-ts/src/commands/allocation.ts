@@ -3,6 +3,7 @@ import { query } from "../db.js";
 export interface AllocationRow {
   asset: string;
   asset_type: string;
+  asset_kind: string;
   net_quantity: number;
   value_usd: number;
   allocation_pct: number;
@@ -28,13 +29,14 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
   const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
 
   const rows = await query<Record<string, unknown>>(
-    "SELECT asset, asset_type, net_quantity, value_usd, allocation_pct FROM portfolio_allocation_sql($1)",
+    "SELECT asset, asset_type, asset_kind, net_quantity, value_usd, allocation_pct FROM portfolio_allocation_sql($1)",
     [actualDate],
   );
 
   const allocRows: AllocationRow[] = rows.map((r) => ({
     asset: str(r["asset"]),
     asset_type: str(r["asset_type"]),
+    asset_kind: str(r["asset_kind"]),
     net_quantity: num(r["net_quantity"]),
     value_usd: num(r["value_usd"]),
     allocation_pct: num(r["allocation_pct"]),
