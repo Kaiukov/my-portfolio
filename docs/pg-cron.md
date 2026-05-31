@@ -150,7 +150,7 @@ If pg_cron is unavailable (Supabase Free, no superuser access), use the OS cront
 ## Migration from Crontab to pg_cron
 
 1. Install pg_cron extension (requires superuser)
-2. Deploy SQL wrappers: `psql "$PORTFOLIO_DB_URL" -f portfolio_db/sql/job_*.sql`
+2. Deploy SQL wrappers: `for f in portfolio_db/sql/job_*.sql; do psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f "$f"; done`
 3. Deploy migration: `psql "$PORTFOLIO_DB_URL" -f portfolio_db/sql/migration_002_scheduled_job_log.sql`
 4. Register jobs: `bun src/cli.ts cron install` (or `psql -f portfolio_db/sql/cron_jobs.sql`)
 5. Verify: `bun src/cli.ts cron list`

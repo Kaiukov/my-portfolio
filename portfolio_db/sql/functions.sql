@@ -348,6 +348,21 @@ AS $$
     WHERE ticker IS NOT NULL
 $$;
 
+-- Helper: returns the most recent weekday (Mon-Fri) on or before p_date.
+-- Weekends only; holidays are out of scope.
+-- DOW: 0=Sun -> p_date-2, 6=Sat -> p_date-1, else p_date.
+CREATE OR REPLACE FUNCTION last_trading_day_sql(p_date DATE)
+RETURNS DATE
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE EXTRACT(DOW FROM p_date)
+        WHEN 0 THEN p_date - 2
+        WHEN 6 THEN p_date - 1
+        ELSE p_date
+    END;
+$$;
+
 -- Required price checkpoints per ticker: trade dates + end date
 -- Used to validate that the price cache covers all valuation points.
 DROP FUNCTION IF EXISTS get_required_price_checkpoints_sql(DATE);
