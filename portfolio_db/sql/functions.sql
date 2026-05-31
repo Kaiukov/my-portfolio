@@ -439,6 +439,7 @@ BEGIN
     v_cost_basis := 0;
     v_realized_gain := 0;
 
+    DROP TABLE IF EXISTS fifo_lots;
     CREATE TEMP TABLE fifo_lots (
         id SERIAL PRIMARY KEY,
         asset TEXT NOT NULL,
@@ -794,6 +795,64 @@ AS $$
     CROSS JOIN total t
     WHERE v.value_usd <> 0
     ORDER BY v.value_usd DESC
+$$;
+
+-- Price existence guard for daily-returns recalculation.
+-- Iterates held (non-cash, non-zero quantity) assets as-of p_as_of_date and
+-- verifies that price_asof_sql returns a non-NULL price for every one.
+-- For foreign-currency stocks also verifies the FX pair price is available.
+-- Raises an exception if any required price is missing, preventing the
+-- recalculation path from silently writing understated daily_returns values.
+-- This guard is called by refresh_daily_returns_sql ONLY; the live read-path
+-- (status/allocation/summary) does NOT use it and behaves as before.
+DROP FUNCTION IF EXISTS verify_held_prices_sql(DATE);
+CREATE OR REPLACE FUNCTION verify_held_prices_sql(p_as_of_date DATE)
+RETURNS VOID
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    h RECORD;
+    v_price DOUBLE PRECISION;
+    v_fx_price DOUBLE PRECISION;
+BEGIN
+    FOR h IN
+        SELECT
+            asset,
+            SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
+                     WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
+                     ELSE 0 END) AS net_quantity
+        FROM transactions
+        WHERE date <= p_as_of_date
+          AND NOT is_cash_like_sql(asset)
+        GROUP BY asset
+        HAVING SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
+                         WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
+                         ELSE 0 END) <> 0
+    LOOP
+        v_price := price_asof_sql(h.asset, p_as_of_date);
+        IF v_price IS NULL THEN
+            RAISE EXCEPTION USING MESSAGE =
+                'Price unavailable for ' || h.asset || ' as of ' || p_as_of_date;
+        END IF;
+
+        IF get_asset_type_sql(h.asset) IN (
+            'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+            'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+        ) THEN
+            v_fx_price := price_asof_sql(
+                cash_currency_for_asset_type_sql(get_asset_type_sql(h.asset)),
+                p_as_of_date
+            );
+            IF v_fx_price IS NULL THEN
+                RAISE EXCEPTION USING MESSAGE =
+                    'FX price unavailable for '
+                    || cash_currency_for_asset_type_sql(get_asset_type_sql(h.asset))
+                    || ' as of ' || p_as_of_date;
+            END IF;
+        END IF;
+    END LOOP;
+END;
 $$;
 
 -- Canonical as-of-date portfolio value.

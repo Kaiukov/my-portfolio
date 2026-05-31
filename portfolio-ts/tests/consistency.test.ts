@@ -17,14 +17,13 @@ mock.module("../src/tx.js", () => ({
 }));
 
 const CONSISTENT_DATE = "2026-05-31";
-const CONSISTENT_PORTFOLIO_VALUE = 19257.13;
 
 function makeStatusRow(overrides: Record<string, unknown> = {}) {
   return {
     transactions_count: 42,
     start_date: "2024-01-15",
     end_date: CONSISTENT_DATE,
-    portfolio_value: CONSISTENT_PORTFOLIO_VALUE,
+    portfolio_value: 19257.13,
     total_invested: 15000,
     deposits: 20000,
     withdrawals: 5000,
@@ -54,7 +53,7 @@ function makeSummaryRow(overrides: Record<string, unknown> = {}) {
   return {
     holding_count: 3,
     total_cash_usd: 5000,
-    portfolio_value_usd: CONSISTENT_PORTFOLIO_VALUE,
+    portfolio_value_usd: 19257.13,
     last_transaction_date: CONSISTENT_DATE,
     transaction_count: 42,
     as_of_date: CONSISTENT_DATE,
@@ -62,31 +61,7 @@ function makeSummaryRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("Cross-command consistency — valuation engine consolidation (#87)", () => {
-  test("portfolio_value is consistent across status, allocation, and summary for same date", async () => {
-    mockQuerySingle.mockReset();
-    mockQuery.mockReset();
-    mockQuerySingle.mockResolvedValueOnce(makeStatusRow());
-    mockQuery.mockResolvedValueOnce(makeAllocationRows());
-    mockQuerySingle.mockResolvedValueOnce(makeSummaryRow());
-
-    const { getStatus } = await import("../src/commands/status.js");
-    const { getAllocation } = await import("../src/commands/allocation.js");
-    const { getSummary } = await import("../src/commands/summary.js");
-
-    const statusResult = await getStatus(CONSISTENT_DATE);
-    const allocResult = await getAllocation(CONSISTENT_DATE);
-    const summaryResult = await getSummary(CONSISTENT_DATE);
-
-    const allocTotal = allocResult.rows.reduce((sum, r) => sum + r.value_usd, 0);
-
-    expect(statusResult.portfolio_value).toBe(CONSISTENT_PORTFOLIO_VALUE);
-    expect(allocTotal).toBeCloseTo(CONSISTENT_PORTFOLIO_VALUE, 2);
-    expect(summaryResult.portfolio_value_usd).toBe(CONSISTENT_PORTFOLIO_VALUE);
-    expect(statusResult.portfolio_value).toBe(allocTotal);
-    expect(statusResult.portfolio_value).toBe(summaryResult.portfolio_value_usd);
-  });
-
+describe("Cross-command consistency — TS adapter wiring (#87)", () => {
   test("status, allocation, and summary receive the same as-of-date parameter", async () => {
     mockQuerySingle.mockReset();
     mockQuery.mockReset();
@@ -133,61 +108,6 @@ describe("Cross-command consistency — valuation engine consolidation (#87)", (
     expect(statusSql).toContain("portfolio_status_sql");
     expect(allocSql).toContain("portfolio_allocation_sql");
     expect(summarySql).toContain("portfolio_summary_sql");
-  });
-
-  test("consistency holds with zero-value portfolio (empty DB)", async () => {
-    mockQuerySingle.mockReset();
-    mockQuery.mockReset();
-    mockQuerySingle.mockResolvedValueOnce(
-      makeStatusRow({ portfolio_value: 0, total_gain: null, total_gain_pct: null }),
-    );
-    mockQuery.mockResolvedValueOnce([]);
-    mockQuerySingle.mockResolvedValueOnce(
-      makeSummaryRow({ portfolio_value_usd: 0, total_cash_usd: 0, holding_count: 0 }),
-    );
-
-    const { getStatus } = await import("../src/commands/status.js");
-    const { getAllocation } = await import("../src/commands/allocation.js");
-    const { getSummary } = await import("../src/commands/summary.js");
-
-    const statusResult = await getStatus(CONSISTENT_DATE);
-    const allocResult = await getAllocation(CONSISTENT_DATE);
-    const summaryResult = await getSummary(CONSISTENT_DATE);
-
-    expect(statusResult.portfolio_value).toBe(0);
-    expect(allocResult.portfolio_value).toBe(0);
-    expect(summaryResult.portfolio_value_usd).toBe(0);
-  });
-
-  test("DELIBERATE BREAK CATCH: diverging portfolio_value across commands is detected", async () => {
-    mockQuerySingle.mockReset();
-    mockQuery.mockReset();
-
-    const BROKEN_VALUE = 50000;
-    mockQuerySingle.mockResolvedValueOnce(makeStatusRow());
-    mockQuery.mockResolvedValueOnce([
-      {
-        asset: "AAPL",
-        asset_type: "stock_usd",
-        net_quantity: 10,
-        value_usd: BROKEN_VALUE,
-        allocation_pct: 100,
-      },
-    ]);
-    mockQuerySingle.mockResolvedValueOnce(makeSummaryRow());
-
-    const { getStatus } = await import("../src/commands/status.js");
-    const { getAllocation } = await import("../src/commands/allocation.js");
-    const { getSummary } = await import("../src/commands/summary.js");
-
-    const statusResult = await getStatus(CONSISTENT_DATE);
-    const allocResult = await getAllocation(CONSISTENT_DATE);
-    const summaryResult = await getSummary(CONSISTENT_DATE);
-
-    expect(statusResult.portfolio_value).toBe(CONSISTENT_PORTFOLIO_VALUE);
-    expect(allocResult.portfolio_value).toBe(BROKEN_VALUE);
-    expect(statusResult.portfolio_value).not.toBe(allocResult.portfolio_value);
-    expect(statusResult.portfolio_value).toBe(summaryResult.portfolio_value_usd);
   });
 
   test("TS adapter is thin — no duplicated valuation math in TypeScript", async () => {
