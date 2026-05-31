@@ -162,4 +162,68 @@ describe("editTransaction", () => {
       editTransaction(42, { dateStr: "2026-01-01" }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
+
+  // ─── issue #90: income/expense actions require cash-like asset ───
+
+  test("rejects editing BUY to FEE because existing price is non-null", async () => {
+    const existing = makeDbRow({ action: "BUY", asset: "AAPL", asset_type: "stock_usd", price: 150 });
+
+    mockQuerySingle.mockResolvedValueOnce(existing); // fetchById
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    try {
+      await editTransaction(42, { action: "FEE" });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).message).toBe("FEE does not accept a price");
+    }
+  });
+
+  test("rejects editing FEE to change asset to non-cash (MSFT)", async () => {
+    const existing = makeDbRow({ action: "FEE", asset: "USD", asset_type: "cash_base", price: null });
+
+    mockQuerySingle.mockResolvedValueOnce(existing);      // fetchById
+    mockQuerySingle.mockResolvedValueOnce({ ok: false });  // is_cash_like for MSFT
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    try {
+      await editTransaction(42, { asset: "MSFT" });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).message).toBe("FEE requires a cash asset, got MSFT");
+    }
+  });
+
+  test("rejects editing FEE to add a price", async () => {
+    const existing = makeDbRow({ action: "FEE", asset: "USD", asset_type: "cash_base", price: null });
+
+    mockQuerySingle.mockResolvedValueOnce(existing); // fetchById only (throws before is_cash_like)
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    try {
+      await editTransaction(42, { price: 10 });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).message).toBe("FEE does not accept a price");
+    }
+  });
+
+  test("rejects editing DEPOSIT to FEE with non-cash asset (AAPL)", async () => {
+    const existing = makeDbRow({ action: "DEPOSIT", asset: "USD", asset_type: "cash_base", price: null });
+
+    mockQuerySingle.mockResolvedValueOnce(existing);      // fetchById
+    mockQuerySingle.mockResolvedValueOnce({ ok: false });  // is_cash_like for AAPL
+
+    const { editTransaction } = await import("../src/commands/edit.js");
+    try {
+      await editTransaction(42, { action: "FEE", asset: "AAPL" });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).message).toBe("FEE requires a cash asset, got AAPL");
+    }
+  });
 });
