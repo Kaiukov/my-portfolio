@@ -19,7 +19,7 @@ const CFG = {
   labelGray: "#8E8E93",
   green: "#16A34A",
   red: "#DC2626",
-  chartLineWidth: 3,
+  chartLineWidth: 2,
   padding: 16,
   errorColor: "#DC2626",
 }
@@ -125,6 +125,7 @@ function addValue(widget, value, currency) {
 function addBottomRow(widget, data) {
   const row = widget.addStack()
   row.layoutHorizontally()
+  row.centerAlignContent()
   row.spacing = 8
 
   addMetricsStack(row, data.today, data.total, data.currency)
@@ -157,13 +158,15 @@ function addMetricLine(stack, label, metric, currency) {
   const valueTxt = row.addText(`${formatSignedMoney(m.amount, currency)} (${formatPct(m.pct)})`)
   valueTxt.textColor = color
   valueTxt.font = Font.mediumSystemFont(13)
+  valueTxt.lineLimit = 1
+  valueTxt.minimumScaleFactor = 0.7
 }
 
 function addChart(parent, series, today) {
   const trendDown = today && today.amount != null ? today.amount < 0 : false
-  const chart = drawChart(series, 160, 58, trendDown)
+  const chart = drawChart(series, 132, 46, trendDown)
   const img = parent.addImage(chart)
-  img.imageSize = new Size(160, 58)
+  img.imageSize = new Size(132, 46)
 }
 
 // ═══════════ SPARKLINE ═══════════
@@ -184,7 +187,7 @@ function drawChart(series, width, height, trendDown) {
   const range = max - min || 1
 
   const padH = 0
-  const padV = 2
+  const padV = 3
   const chartW = width - padH * 2
   const chartH = height - padV * 2
 
@@ -228,8 +231,8 @@ function drawChart(series, width, height, trendDown) {
     return last.y
   }
   const colW = 1
-  const bands = 14
-  const maxAlpha = 0.38
+  const bands = 48
+  const maxAlpha = 0.28
   for (let x = points[0].x; x <= points[points.length - 1].x; x += colW) {
     const yCurve = yAt(x)
     const stripH = baseline - yCurve
@@ -237,7 +240,7 @@ function drawChart(series, width, height, trendDown) {
     for (let b = 0; b < bands; b++) {
       const yTop = yCurve + (stripH * b) / bands
       const bandH = stripH / bands + 0.8
-      const alpha = maxAlpha * (1 - b / bands)
+      const alpha = maxAlpha * Math.pow(1 - b / bands, 1.3)
       ctx.setFillColor(new Color(fillHex, alpha))
       ctx.fillRect(new Rect(x, yTop, colW + 0.6, bandH))
     }
