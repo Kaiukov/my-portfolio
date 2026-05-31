@@ -48,15 +48,20 @@ Repeat steps 1-3 on the other device with the same script URL. Scriptable script
 
 ## Widget layout
 
+Visual style matches the Yahoo Finance "My holdings" light-theme widget.
+
 | Element | Description |
 |---|---|
-| Dark background | `#111111` |
-| Title | `"Portfolio"` |
-| Large value | Current portfolio value with currency |
-| Today line | Daily change (green/red) |
-| Total line | Total gain/loss (green/red) |
-| Sparkline | 30-day value trend with gradient fill |
-| Footer | Last refresh timestamp |
+| White background | `#FFFFFF` (OS draws rounded corners) |
+| Title | Bold near-black `#1A1A1A`, ~22pt, top-left |
+| Subtitle | `"Last refresh: 3 hr ago"` in gray `#8E8E93`, ~13pt (relative time) |
+| Value | Bold near-black `#1A1A1A`, ~40pt, currency with grouped thousands |
+| Bottom row | Horizontal: Today/Total metrics (left) + sparkline (right) |
+| Today line | `Today  +$125.50 (0.65%)` — label gray, number green/red |
+| Total line | `Total  +$4,257.13 (28.30%)` — label gray, number green/red |
+| Sparkline | Filled area chart, green if today.amount ≥ 0, red if down |
+
+Color key: positive `#16A34A` (green), negative `#DC2626` (red).
 
 ## JSON contract
 
