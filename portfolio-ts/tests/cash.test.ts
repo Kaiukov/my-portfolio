@@ -164,6 +164,37 @@ describe("getCash — CLI integration", () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  test("CLI JSON snapshot: crypto fee_currency cash bucket appears in envelope (#88)", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: 45000, usd_value: 45000 }),
+      makeRow({ cash_key: "BTC-USD", currency: "BTC", display_bucket: "CASH BTC", balance: -0.0001, usd_value: -5.21 }),
+    ]);
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cash"]);
+
+    expect(logSpy).toHaveBeenCalled();
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cash");
+    expect(output.data.total_usd).toBeCloseTo(44994.79, 2);
+    expect(output.data.rows).toHaveLength(2);
+
+    const btcRow = output.data.rows.find((r: any) => r.cash_key === "BTC-USD");
+    expect(btcRow).toBeDefined();
+    expect(btcRow.currency).toBe("BTC");
+    expect(btcRow.display_bucket).toBe("CASH BTC");
+    expect(btcRow.balance).toBe(-0.0001);
+    expect(btcRow.usd_value).toBeCloseTo(-5.21, 2);
+    expect(output.meta.count).toBe(2);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe("getCash — stock trade cash impact regression (#66)", () => {
@@ -269,5 +300,115 @@ describe("getCash — regression: cash netting per currency", () => {
     expect(result.rows[0].cash_key).toBe("USD");
     expect(result.rows[0].balance).toBe(3500);
     expect(result.total_usd).toBe(3500);
+  });
+});
+
+describe("getCash — crypto fee_currency regression (#88)", () => {
+  test("crypto fee_currency creates separate cash bucket with correct usd_value", async () => {
+    // BUY BTC-USD qty=0.1 @50000 fees=0.0001 fee_currency=BTC
+    // Trade cash: USD -5000 (qty*price, sans fees because fee_currency differs)
+    // Fee cash: BTC -0.0001 → usd_value = -0.0001 * 52100 = -5.21
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: 45000, usd_value: 45000 }),
+      makeRow({ cash_key: "BTC-USD", currency: "BTC", display_bucket: "CASH BTC", balance: -0.0001, usd_value: -5.21 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.total_usd).toBeCloseTo(44994.79, 2);
+
+    const btcRow = result.rows.find((r: any) => r.cash_key === "BTC-USD");
+    expect(btcRow).toBeDefined();
+    expect(btcRow!.currency).toBe("BTC");
+    expect(btcRow!.display_bucket).toBe("CASH BTC");
+    expect(btcRow!.balance).toBe(-0.0001);
+    expect(btcRow!.usd_value).toBeCloseTo(-5.21, 2);
+  });
+
+  test("crypto fee_currency cash row fields are complete", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "BTC-USD", currency: "BTC", display_bucket: "CASH BTC", balance: -0.00005, usd_value: -3.12 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].cash_key).toBe("BTC-USD");
+    expect(result.rows[0].currency).toBe("BTC");
+    expect(result.rows[0].display_bucket).toBe("CASH BTC");
+    expect(result.rows[0].balance).toBe(-0.00005);
+    expect(result.rows[0].usd_value).toBeCloseTo(-3.12, 2);
+    expect(result.as_of_date).toBeDefined();
+    expect(result.total_usd).toBeCloseTo(-3.12, 2);
+  });
+});
+
+describe("getCash — crypto fee regression (#88)", () => {
+  test("BTC fee_currency on stock BUY creates BTC-USD cash bucket with correct USD value", async () => {
+    // Hand-calculated fixture:
+    // BUY 1 AAPL @ $100, fee = 0.0001 BTC, BTC-USD price = $50,000
+    // Trade cash: USD = -100 (qty*price, fee excluded because fee_currency differs)
+    // Fee cash: BTC-USD = -0.0001 BTC
+    // BTC-USD usd_value = -0.0001 * 50000 = -5 USD
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: -100, usd_value: -100 }),
+      makeRow({ cash_key: "BTC-USD", currency: "BTC", display_bucket: "CASH BTC", balance: -0.0001, usd_value: -5 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].cash_key).toBe("USD");
+    expect(result.rows[0].balance).toBe(-100);
+    expect(result.rows[0].usd_value).toBe(-100);
+
+    expect(result.rows[1].cash_key).toBe("BTC-USD");
+    expect(result.rows[1].currency).toBe("BTC");
+    expect(result.rows[1].display_bucket).toBe("CASH BTC");
+    expect(result.rows[1].balance).toBe(-0.0001);
+    expect(result.rows[1].usd_value).toBe(-5);
+
+    expect(result.total_usd).toBe(-105);
+  });
+
+  test("fiat EUR fee regression: EURUSD=X bucket still works (#88)", async () => {
+    // BUY 1 AAPL @ $100, fee = 10 EUR, EURUSD=X = 1.10
+    // Trade cash: USD = -100 (fee excluded because fee_currency differs)
+    // Fee cash: EURUSD=X = -10 EUR, usd_value = -10 * 1.10 = -11
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: -100, usd_value: -100 }),
+      makeRow({ cash_key: "EURUSD=X", currency: "EUR", display_bucket: "CASH EUR", balance: -10, usd_value: -11 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].cash_key).toBe("USD");
+    expect(result.rows[1].cash_key).toBe("EURUSD=X");
+    expect(result.rows[1].balance).toBe(-10);
+    expect(result.rows[1].usd_value).toBe(-11);
+    expect(result.total_usd).toBe(-111);
+  });
+
+  test("NULL fee_currency regression: fee stays in trade currency bucket (#88)", async () => {
+    // BUY 1 AAPL @ $100, fee = $5, fee_currency = NULL
+    // Trade cash: USD = -(100 + 5) = -105 (fee included because no separate fee_currency)
+    mockQuery.mockResolvedValue([
+      makeRow({ cash_key: "USD", currency: "USD", display_bucket: "CASH USD", balance: -105, usd_value: -105 }),
+    ]);
+
+    const { getCash } = await import("../src/commands/cash.js");
+    const result = await getCash();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].cash_key).toBe("USD");
+    expect(result.rows[0].balance).toBe(-105);
+    expect(result.rows[0].usd_value).toBe(-105);
+    expect(result.total_usd).toBe(-105);
   });
 });

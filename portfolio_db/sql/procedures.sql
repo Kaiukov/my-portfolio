@@ -25,7 +25,6 @@ DECLARE
     v_asset_type TEXT;
     v_cash_key TEXT;
     v_fee_cash_key TEXT;
-    v_fee_asset_type TEXT;
     v_asset_value DOUBLE PRECISION;
 BEGIN
     IF p_from_date IS NULL THEN
@@ -84,13 +83,7 @@ BEGIN
 
             v_fee_cash_key := NULL;
             IF tx.fee_currency IS NOT NULL AND tx.fee_currency <> '' THEN
-                v_fee_asset_type := get_asset_type_sql(tx.fee_currency);
-                v_fee_cash_key := CASE
-                    WHEN v_fee_asset_type = 'cash_base' THEN 'USD'
-                    WHEN v_fee_asset_type = 'cash_fx'
-                        THEN get_cash_key_for_asset_sql(tx.fee_currency, v_fee_asset_type)
-                    ELSE tx.fee_currency || '-USD'
-                END;
+                v_fee_cash_key := fee_currency_ticker_sql(tx.fee_currency);
             END IF;
 
             CASE upper(tx.action)
