@@ -21,11 +21,9 @@ DECLARE
     v_adjusted_base DOUBLE PRECISION := 0;
     v_rows INTEGER := 0;
     tx RECORD;
-    h RECORD;
     v_asset_type TEXT;
     v_cash_key TEXT;
     v_fee_cash_key TEXT;
-    v_asset_value DOUBLE PRECISION;
 BEGIN
     IF p_from_date IS NULL THEN
         DELETE FROM daily_returns;
@@ -154,19 +152,7 @@ BEGIN
             END CASE;
         END LOOP;
 
-        v_portfolio_value := 0;
-        FOR h IN
-            SELECT asset, qty
-            FROM holdings
-            WHERE qty <> 0
-            ORDER BY asset
-        LOOP
-            v_asset_value := asset_market_value_usd_sql(h.asset, h.qty, v_date);
-            IF h.qty <> 0 AND v_asset_value IS NULL THEN
-                RAISE EXCEPTION USING MESSAGE = 'Price unavailable for ' || h.asset || ' as of ' || v_date;
-            END IF;
-            v_portfolio_value := v_portfolio_value + COALESCE(v_asset_value, 0);
-        END LOOP;
+        v_portfolio_value := COALESCE(portfolio_value_asof_sql(v_date), 0);
 
         v_cash_flow_impact := 0;
         FOR tx IN

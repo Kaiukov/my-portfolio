@@ -65,16 +65,7 @@ WITH valued_holdings AS (
     SELECT
         asset,
         net_quantity,
-        CASE
-            WHEN get_asset_type_sql(asset) = 'cash_base' THEN net_quantity
-            WHEN get_asset_type_sql(asset) = 'cash_fx' THEN net_quantity * price_asof_sql(asset, CURRENT_DATE)
-            WHEN get_asset_type_sql(asset) IN (
-                'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
-                'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
-            ) THEN net_quantity * price_asof_sql(asset, CURRENT_DATE) *
-                price_asof_sql(cash_currency_for_asset_type_sql(get_asset_type_sql(asset)), CURRENT_DATE)
-            ELSE net_quantity * price_asof_sql(asset, CURRENT_DATE)
-        END AS value_usd
+        asset_market_value_usd_sql(asset, net_quantity, CURRENT_DATE) AS value_usd
     FROM current_holdings
 ),
 total_value AS (

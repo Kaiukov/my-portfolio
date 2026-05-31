@@ -32,11 +32,14 @@ function numOrNull(val: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function getStatus(): Promise<StatusData> {
+export async function getStatus(asOfDate?: string): Promise<StatusData> {
+  const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
+
   // All financial metrics are owned by PostgreSQL via portfolio_status_sql().
   // TypeScript does not compute any financial values — it only formats the output.
   const row = await querySingle<Record<string, unknown>>(
-    "SELECT * FROM portfolio_status_sql()",
+    "SELECT * FROM portfolio_status_sql($1)",
+    [actualDate],
   );
 
   if (!row) {
