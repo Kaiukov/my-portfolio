@@ -151,8 +151,12 @@ If pg_cron is unavailable (Supabase Free, no superuser access), use the OS cront
 
 1. Install pg_cron extension (requires superuser)
 2. Deploy base functions: `psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/functions.sql`
-3. Deploy SQL wrappers: `for f in portfolio_db/sql/job_*.sql; do psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f "$f"; done`
-4. Deploy migration: `psql "$PORTFOLIO_DB_URL" -f portfolio_db/sql/migration_002_scheduled_job_log.sql`
-5. Register jobs: `bun src/cli.ts cron install` (or `psql -f portfolio_db/sql/cron_jobs.sql`)
-6. Verify: `bun src/cli.ts cron list`
-7. Remove crontab entries: `crontab -l | grep -v "portfolio" | crontab -`
+3. Deploy views: `psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/views.sql`
+4. Deploy triggers: `psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/triggers.sql`
+5. Deploy SQL wrappers: `for f in portfolio_db/sql/job_*.sql; do psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f "$f"; done`
+6. Deploy migration: `psql "$PORTFOLIO_DB_URL" -f portfolio_db/sql/migration_002_scheduled_job_log.sql`
+7. Register jobs: `bun src/cli.ts cron install` (or `psql -f portfolio_db/sql/cron_jobs.sql`)
+8. Verify: `bun src/cli.ts cron list`
+9. Remove crontab entries: `crontab -l | grep -v "portfolio" | crontab -`
+
+> **Note:** `functions.sql` starts with `DROP FUNCTION ... CASCADE` statements that cascade-drop dependent views (e.g. `cash_balances`, `portfolio_allocation`, `portfolio_summary`), which is why views and triggers must be redeployed immediately after functions.
