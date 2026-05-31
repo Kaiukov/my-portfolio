@@ -13,6 +13,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1057.0",
     "yahoo-finance2": "^3.14.3"
   }
 }
