@@ -650,6 +650,7 @@ export async function dispatch(argv: string[]): Promise<void> {
           const result = await cloudflareInit({
             projectName: str(flags, "project-name") ?? str(flags, "project_name"),
             accountId: str(flags, "account-id") ?? str(flags, "account_id"),
+            kvNamespaceId: str(flags, "kv-namespace-id") ?? str(flags, "kv_namespace_id"),
             force: bool(flags, "force"),
           });
 
