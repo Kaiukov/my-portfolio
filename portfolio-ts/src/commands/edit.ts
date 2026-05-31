@@ -111,6 +111,22 @@ export async function editTransaction(
   const newQuantity = changes.quantity ?? existing.quantity;
   const newAsset = changes.asset ?? existing.asset;
 
+  if (newAction === "FEE" || newAction === "TAX" || newAction === "DIVIDEND" || newAction === "INTEREST") {
+    const finalPrice = changes.price !== undefined ? changes.price : existing.price;
+    if (finalPrice != null) {
+      throw new ValidationError(`${newAction} does not accept a price`);
+    }
+    const cashRow = await querySingle<{ ok: boolean }>(
+      "SELECT is_cash_like_sql($1) AS ok",
+      [newAsset],
+    );
+    if (!cashRow?.ok) {
+      throw new ValidationError(
+        `${newAction} requires a cash asset, got ${newAsset}`,
+      );
+    }
+  }
+
   if (newAction === "SELL") {
     const row = await querySingle<{ net: string }>(
       `SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN quantity
