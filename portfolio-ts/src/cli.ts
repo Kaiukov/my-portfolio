@@ -18,6 +18,7 @@ import { getConcentration } from "./commands/concentration.js";
 import { getPerformance } from "./commands/performance.js";
 import { getMwr } from "./commands/mwr.js";
 import { getHealth } from "./commands/health.js";
+import { getWidget } from "./commands/widget.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import { ValidationError, NotFoundError } from "./validators.js";
@@ -45,6 +46,7 @@ Commands:
   concentration   Portfolio concentration metrics (HHI + top holdings)
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
+  widget          Compact portfolio widget JSON for dashboards
   sync            repair_prices + recalculate (daily maintenance)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
@@ -435,6 +437,22 @@ export async function dispatch(argv: string[]): Promise<void> {
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       const result = await getMwr(asOfDate);
       console.log(JSON.stringify(success("mwr", result), null, 2));
+      return;
+    }
+
+    case "widget": {
+      const days = (() => {
+        const v = int(flags, "days");
+        if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
+          console.log(JSON.stringify(error("widget", "VALIDATION_ERROR", "--days must be a positive number"), null, 2));
+          process.exit(1);
+          return 30;
+        }
+        return v ?? 30;
+      })();
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getWidget(days, asOfDate);
+      console.log(JSON.stringify(success("widget", result, result.series.length), null, 2));
       return;
     }
 
