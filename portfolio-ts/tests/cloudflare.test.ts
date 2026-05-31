@@ -1775,3 +1775,516 @@ describe("cloudflare init — preserves and wires kv_namespace_id (#107 live fix
     expect(cfg.kv_namespace_id).toBe("real-kv-9999");
   });
 });
+
+// ─── parseInterval ──────────────────────────────────────────────
+
+describe("parseInterval", () => {
+  test("parses milliseconds", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("500ms")).toBe(500);
+  });
+
+  test("parses seconds to ms", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("90s")).toBe(90000);
+  });
+
+  test("parses minutes to ms", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("30m")).toBe(1800000);
+  });
+
+  test("parses hours to ms", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("1h")).toBe(3600000);
+  });
+
+  test("parses days to ms", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("1d")).toBe(86400000);
+  });
+
+  test("parses with leading/trailing whitespace", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("  2h  ")).toBe(7200000);
+  });
+
+  test("throws on invalid format (no unit)", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(() => parseInterval("100")).toThrow("Invalid interval");
+  });
+
+  test("throws on invalid format (wrong suffix)", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(() => parseInterval("10x")).toThrow("Invalid interval");
+  });
+
+  test("throws on empty string", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(() => parseInterval("")).toThrow("Invalid interval");
+  });
+
+  test("throws on negative number", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(() => parseInterval("-1h")).toThrow("Invalid interval");
+  });
+
+  test("throws on zero", () => {
+    const { parseInterval } = require("../src/cloudflare/sync.js");
+    expect(parseInterval("0h")).toBe(0);
+  });
+});
+
+// ─── syncOnce ───────────────────────────────────────────────────
+
+describe("syncOnce", () => {
+  test("delegates to publishToKv and returns its result", async () => {
+    const snapshot = {
+      portfolio_value_usd: 15424.58,
+      today: { abs: -174.83, pct: -1.12 },
+      total: { abs: 369.03, pct: 2.91 },
+      history: [{ date: "2026-05-30", value: 15123.40 }],
+      prices_as_of: "2026-05-30",
+      as_of_date: "2026-05-31",
+      updatedAt: "2026-05-31T12:00:00.000Z",
+    };
+
+    const mockPublish = mock().mockResolvedValue({
+      success: true,
+      key: "portfolio",
+      namespaceId: "kv-123",
+      snapshot,
+    });
+
+    mock.module("../src/cloudflare/publish.js", () => ({
+      publishToKv: mockPublish,
+      buildSnapshot: require("../src/cloudflare/publish.js").buildSnapshot,
+      validateSnapshot: require("../src/cloudflare/publish.js").validateSnapshot,
+    }));
+
+    const { syncOnce } = await import("../src/cloudflare/sync.js");
+    const result = await syncOnce("/some/project");
+
+    expect(mockPublish).toHaveBeenCalledWith("/some/project");
+    expect(result.success).toBe(true);
+    expect(result.key).toBe("portfolio");
+    expect(result.namespaceId).toBe("kv-123");
+    expect(result.snapshot).toEqual(snapshot);
+
+    mock.module("../src/cloudflare/publish.js", () => require("../src/cloudflare/publish.js"));
+  });
+
+  test("syncOnce without projectRoot calls publishToKv with undefined", async () => {
+    const mockPublish = mock().mockResolvedValue({
+      success: false,
+      key: "portfolio",
+      namespaceId: null,
+      snapshot: null,
+      error: "Not initialized",
+    });
+
+    mock.module("../src/cloudflare/publish.js", () => ({
+      publishToKv: mockPublish,
+      buildSnapshot: require("../src/cloudflare/publish.js").buildSnapshot,
+      validateSnapshot: require("../src/cloudflare/publish.js").validateSnapshot,
+    }));
+
+    const { syncOnce } = await import("../src/cloudflare/sync.js");
+    await syncOnce();
+
+    expect(mockPublish).toHaveBeenCalledWith(undefined);
+
+    mock.module("../src/cloudflare/publish.js", () => require("../src/cloudflare/publish.js"));
+  });
+});
+
+// ─── syncLoop — tick driving (no real timers) ───────────────────
+
+describe("syncLoop — tick driving (no real timers)", () => {
+  let capturedCb: (() => void) | null = null;
+  let cleared = false;
+
+  function makeSchedule() {
+    cleared = false;
+    capturedCb = null;
+    return (cb: () => void, _ms: number) => {
+      capturedCb = cb;
+      return { clear: () => { cleared = true; capturedCb = null; } };
+    };
+  }
+
+  afterEach(() => {
+    process.removeAllListeners("SIGINT");
+  });
+
+  test("syncLoop calls injectable tick immediately (first tick)", async () => {
+    const tickCalls: string[] = [];
+    const mockTick = mock().mockImplementation(async () => {
+      tickCalls.push("ticked");
+      console.log(JSON.stringify({ event: "sync_tick", success: true }));
+    });
+
+    const { syncLoop } = await import("../src/cloudflare/sync.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    const fakeNow = () => new Date("2026-05-31T12:00:00.000Z");
+    const { stop } = syncLoop({
+      intervalMs: 5000,
+      now: fakeNow,
+      scheduleTick: makeSchedule(),
+      tick: mockTick,
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockTick).toHaveBeenCalledTimes(1);
+    expect(tickCalls).toEqual(["ticked"]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+
+    const logEntry = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(logEntry.success).toBe(true);
+
+    stop();
+    logSpy.mockRestore();
+  });
+
+  test("syncLoop continues after a failed tick via injected tick", async () => {
+    let callCount = 0;
+    const mockTick = mock().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        console.log(
+          JSON.stringify({
+            event: "sync_tick",
+            timestamp: "2026-05-31T12:00:00.000Z",
+            success: false,
+            error: "publish failed",
+          }),
+        );
+      } else {
+        console.log(
+          JSON.stringify({
+            event: "sync_tick",
+            timestamp: "2026-05-31T12:00:01.000Z",
+            success: true,
+            key: "portfolio",
+          }),
+        );
+      }
+    });
+
+    const { syncLoop } = await import("../src/cloudflare/sync.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    const fakeNow = () => new Date("2026-05-31T12:00:00.000Z");
+    const { stop } = syncLoop({
+      intervalMs: 5000,
+      now: fakeNow,
+      scheduleTick: makeSchedule(),
+      tick: mockTick,
+    });
+
+    expect(callCount).toBe(1);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const firstEnvelope = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(firstEnvelope.success).toBe(false);
+
+    // Drive the next tick via captured callback (simulates interval)
+    expect(capturedCb).not.toBeNull();
+    await capturedCb!();
+
+    expect(callCount).toBe(2);
+    expect(logSpy).toHaveBeenCalledTimes(2);
+    const secondEnvelope = JSON.parse(logSpy.mock.calls[1][0]);
+    expect(secondEnvelope.success).toBe(true);
+
+    stop();
+    logSpy.mockRestore();
+  });
+
+  test("stop() logs summary envelope and clears timer", async () => {
+    const mockTick = mock().mockImplementation(async () => {
+      console.log(JSON.stringify({ event: "sync_tick", success: true }));
+    });
+
+    const { syncLoop } = await import("../src/cloudflare/sync.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    const fakeNow = () => new Date("2026-05-31T12:00:00.000Z");
+    const { stop } = syncLoop({
+      intervalMs: 5000,
+      now: fakeNow,
+      scheduleTick: makeSchedule(),
+      tick: mockTick,
+    });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+
+    stop();
+
+    expect(cleared).toBe(true);
+    expect(logSpy).toHaveBeenCalledTimes(2);
+
+    const summaryEnvelope = JSON.parse(logSpy.mock.calls[1][0]);
+    expect(summaryEnvelope.event).toBe("sync_stopped");
+    expect(summaryEnvelope.timestamp).toBe("2026-05-31T12:00:00.000Z");
+    expect(summaryEnvelope.ticks).toBe(1);
+    expect(typeof summaryEnvelope.elapsed_ms).toBe("number");
+
+    logSpy.mockRestore();
+  });
+
+  test("double stop() is safe (idempotent)", async () => {
+    const mockTick = mock().mockImplementation(async () => {
+      console.log(JSON.stringify({ event: "sync_tick", success: true }));
+    });
+
+    const { syncLoop } = await import("../src/cloudflare/sync.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    const { stop } = syncLoop({
+      intervalMs: 5000,
+      now: () => new Date("2026-05-31T12:00:00.000Z"),
+      scheduleTick: makeSchedule(),
+      tick: mockTick,
+    });
+
+    stop();
+    expect(() => stop()).not.toThrow();
+
+    logSpy.mockRestore();
+  });
+});
+
+// ─── CLI integration — cloudflare sync one-shot ──────────────────
+
+describe("cloudflare sync CLI — mocked syncOnce", () => {
+  afterEach(() => {
+    mock.module("../src/cloudflare/sync.js", () => require("../src/cloudflare/sync.js"));
+  });
+
+  test("returns success envelope on sync one-shot", async () => {
+    const snapshot = {
+      portfolio_value_usd: 15424.58,
+      today: { abs: -174.83, pct: -1.12 },
+      total: { abs: 369.03, pct: 2.91 },
+      history: [{ date: "2026-05-30", value: 15123.40 }],
+      prices_as_of: "2026-05-30",
+      as_of_date: "2026-05-31",
+      updatedAt: "2026-05-31T12:00:00.000Z",
+    };
+
+    const mockSyncOnce = mock().mockResolvedValue({
+      success: true,
+      key: "portfolio",
+      namespaceId: "kv-namespace-12345",
+      snapshot,
+    });
+
+    mock.module("../src/cloudflare/sync.js", () => ({
+      syncOnce: mockSyncOnce,
+      syncLoop: () => ({ stop: () => {} }),
+      parseInterval: require("../src/cloudflare/sync.js").parseInterval,
+      DEFAULT_SYNC_INTERVAL_MS: 3600000,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "sync"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:sync");
+    expect(output.data.key).toBe("portfolio");
+    expect(output.data.namespace_id).toBe("kv-namespace-12345");
+    expect(output.data.snapshot).toEqual(snapshot);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns KV_NOT_CONFIGURED error on sync when namespace missing", async () => {
+    const mockSyncOnce = mock().mockResolvedValue({
+      success: false,
+      key: "portfolio",
+      namespaceId: null,
+      snapshot: null,
+      error: "Not initialized. Run `portfolio cloudflare init` and `portfolio cloudflare deploy` first.",
+    });
+
+    mock.module("../src/cloudflare/sync.js", () => ({
+      syncOnce: mockSyncOnce,
+      syncLoop: () => ({ stop: () => {} }),
+      parseInterval: require("../src/cloudflare/sync.js").parseInterval,
+      DEFAULT_SYNC_INTERVAL_MS: 3600000,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "sync"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:sync");
+    expect(output.error.code).toBe("KV_NOT_CONFIGURED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns KV_SYNC_FAILED error when publish fails", async () => {
+    const mockSyncOnce = mock().mockResolvedValue({
+      success: false,
+      key: "portfolio",
+      namespaceId: "kv-namespace-12345",
+      snapshot: null,
+      error: "wrangler kv key put failed (exit code 1): auth error",
+    });
+
+    mock.module("../src/cloudflare/sync.js", () => ({
+      syncOnce: mockSyncOnce,
+      syncLoop: () => ({ stop: () => {} }),
+      parseInterval: require("../src/cloudflare/sync.js").parseInterval,
+      DEFAULT_SYNC_INTERVAL_MS: 3600000,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "sync"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:sync");
+    expect(output.error.code).toBe("KV_SYNC_FAILED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("--interval triggers syncLoop (not one-shot)", async () => {
+    const mockSyncLoop = mock().mockReturnValue({ stop: () => {} });
+
+    mock.module("../src/cloudflare/sync.js", () => ({
+      syncOnce: mock().mockResolvedValue({}),
+      syncLoop: mockSyncLoop,
+      parseInterval: require("../src/cloudflare/sync.js").parseInterval,
+      DEFAULT_SYNC_INTERVAL_MS: 3600000,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "sync", "--interval", "2h"]);
+
+    expect(mockSyncLoop).toHaveBeenCalledTimes(1);
+    const opts = mockSyncLoop.mock.calls[0][0];
+    expect(opts.intervalMs).toBe(7200000);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("--watch triggers syncLoop with default interval", async () => {
+    const mockSyncLoop = mock().mockReturnValue({ stop: () => {} });
+
+    mock.module("../src/cloudflare/sync.js", () => ({
+      syncOnce: mock().mockResolvedValue({}),
+      syncLoop: mockSyncLoop,
+      parseInterval: require("../src/cloudflare/sync.js").parseInterval,
+      DEFAULT_SYNC_INTERVAL_MS: 3600000,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "sync", "--watch"]);
+
+    expect(mockSyncLoop).toHaveBeenCalledTimes(1);
+    const opts = mockSyncLoop.mock.calls[0][0];
+    expect(opts.intervalMs).toBe(3600000);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("invalid interval returns error envelope", async () => {
+    mock.module("../src/cloudflare/sync.js", () => ({
+      syncOnce: mock().mockResolvedValue({}),
+      syncLoop: () => ({ stop: () => {} }),
+      parseInterval: require("../src/cloudflare/sync.js").parseInterval,
+      DEFAULT_SYNC_INTERVAL_MS: 3600000,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "sync", "--interval", "invalid"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:sync");
+    expect(output.error.code).toBe("INVALID_INTERVAL");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── help text and error messages include sync ───────────────────
+
+describe("cloudflare help and error messages after #111", () => {
+  test("lists updated subcommands with sync in help text", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "--help"]);
+
+    const output = logSpy.mock.calls[0][0];
+    expect(output).toContain("cloudflare");
+    expect(output).toContain("sync");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("lists updated subcommands with sync in missing-sub error", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.error.message).toContain("sync");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("lists updated subcommands with sync in unknown-sub error", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "fake"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.error.message).toContain("sync");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
