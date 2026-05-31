@@ -1,4 +1,12 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import type { CloudflareConfig } from "./types.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf-8"));
+export const API_VERSION: string = pkg.version;
 
 export function generateWranglerJsonc(config: CloudflareConfig): string {
   const lines = [
@@ -30,29 +38,51 @@ export function generateWorkerJs(): string {
 // CLI generates and uploads portfolio.json; this Worker only serves it.
 // No DB access, no financial logic — pure static KV serving.
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+function json(data, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders, ...extraHeaders },
+  });
+}
+
+const routes = {
+  "/portfolio": async (_request, env) => {
+    const data = await env.PORTFOLIO_KV.get("portfolio", "json");
+    if (!data) {
+      return json({ error: "portfolio not published" }, 404);
+    }
+    return json(data, 200, { "Cache-Control": "public, max-age=300" });
+  },
+
+  "/health": async () => {
+    return json({ ok: true });
+  },
+
+  "/version": async () => {
+    return json({ version: "${API_VERSION}" });
+  },
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/portfolio") {
-      const data = await env.PORTFOLIO_KV.get("portfolio", "json");
-      if (!data) {
-        return new Response(JSON.stringify({ error: "portfolio not published" }), {
-          status: 404,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        });
-      }
-      return new Response(JSON.stringify(data), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=300",
-        },
-      });
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    return new Response("Not Found", { status: 404 });
+    const handler = routes[url.pathname];
+    if (handler) {
+      return handler(request, env);
+    }
+
+    return json({ error: "not found" }, 404);
   },
 };
 `;

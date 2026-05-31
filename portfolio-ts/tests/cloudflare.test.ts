@@ -66,6 +66,19 @@ describe("worker.js template", () => {
     expect(output).toContain("PORTFOLIO_KV");
     expect(output).toContain("/portfolio");
     expect(output).toContain("Access-Control-Allow-Origin");
+    expect(output).toContain("corsHeaders");
+    expect(output).toContain("/health");
+    expect(output).toContain("/version");
+    expect(output).toContain("not found");
+    expect(output).toContain("OPTIONS");
+  });
+
+  test("injects package.json version into /version route", () => {
+    const { generateWorkerJs, API_VERSION } = require("../src/cloudflare/templates.js");
+    expect(API_VERSION).toBeDefined();
+    expect(typeof API_VERSION).toBe("string");
+    const output = generateWorkerJs();
+    expect(output).toContain(`{ version: "${API_VERSION}" }`);
   });
 });
 
