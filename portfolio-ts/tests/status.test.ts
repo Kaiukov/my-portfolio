@@ -381,6 +381,7 @@ describe("getStatus — CLI integration crypto fee_currency (#88)", () => {
       total_profit: 0,
       as_of_date: "2026-01-15",
     });
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -423,6 +424,7 @@ describe("getStatus — CLI integration", () => {
       total_profit: 40000.50,
       as_of_date: "2026-03-20",
     });
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -443,7 +445,6 @@ describe("getStatus — CLI integration", () => {
   });
 
   test("status JSON envelope shows crypto fee USD-converted (#88)", async () => {
-    // BTC fee_currency on stock BUY: fees = $5 (0.0001 BTC * $50,000)
     mockQuerySingle.mockResolvedValue({
       transactions_count: 1,
       start_date: "2026-01-02",
@@ -463,6 +464,7 @@ describe("getStatus — CLI integration", () => {
       total_profit: -5,
       as_of_date: "2026-01-02",
     });
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});

@@ -83,6 +83,7 @@ describe("getSummary", () => {
 describe("getSummary — CLI integration", () => {
   test("dispatches summary command and returns success envelope", async () => {
     mockQuerySingle.mockResolvedValue(makeSummaryRow());
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -103,6 +104,7 @@ describe("getSummary — CLI integration", () => {
 
   test("dispatches summary with --as-of-date", async () => {
     mockQuerySingle.mockResolvedValue(makeSummaryRow());
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});

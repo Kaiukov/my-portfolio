@@ -61,6 +61,7 @@ describe("getMwr", () => {
 describe("getMwr — CLI integration", () => {
   test("dispatches mwr command and returns success envelope", async () => {
     mockQuerySingle.mockResolvedValue({ mwr: 0.085 });
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -81,6 +82,7 @@ describe("getMwr — CLI integration", () => {
 
   test("dispatches mwr with --as-of-date", async () => {
     mockQuerySingle.mockResolvedValue({ mwr: 0.12 });
+    mockQuery.mockResolvedValue([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
