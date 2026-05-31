@@ -21,6 +21,12 @@ import { getHealth } from "./commands/health.js";
 import { getWidget } from "./commands/widget.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
+import {
+  loadS3Config,
+  createS3Client,
+  pushBackupToS3,
+  pullBackupFromS3,
+} from "./commands/backup_s3.js";
 import { cronInstall, cronList, cronRemove } from "./commands/cron.js";
 import { getPriceFreshness } from "./commands/freshness.js";
 import { refreshPortfolio, refreshPortfolioDryRun } from "./commands/refresh.js";
@@ -60,6 +66,8 @@ Commands:
   health          DB reachability and price coverage diagnostic
   init            Verify database schema is ready
   backup          Create a pg_dump backup
+  backup push     Upload portfolio snapshot to S3-compatible storage
+  backup pull     Restore latest snapshot from S3-compatible storage
   cron            Manage pg_cron scheduled jobs (install / list / remove)
   --help          Show this help message
 
@@ -78,6 +86,8 @@ Examples:
   portfolio-ts schedule emit
   portfolio-ts schedule install / schedule remove
   portfolio-ts refresh
+  portfolio-ts backup push
+  portfolio-ts backup pull
   portfolio-ts --help
 `.trim();
 
@@ -396,6 +406,56 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "backup": {
+      const sub = argv[3] as string | undefined;
+      if (sub === "push") {
+        const s3Config = loadS3Config();
+        if (!s3Config.ok) {
+          console.log(JSON.stringify(error("backup:push", "CONFIG_ERROR", s3Config.error), null, 2));
+          process.exit(1);
+          return;
+        }
+
+        const dbUrl = process.env.PORTFOLIO_DB_URL;
+        if (!dbUrl) {
+          console.log(JSON.stringify(error("backup:push", "CONFIG_ERROR", "PORTFOLIO_DB_URL is not set"), null, 2));
+          process.exit(1);
+          return;
+        }
+
+        const client = createS3Client(s3Config.config);
+        try {
+          const result = await pushBackupToS3(client, s3Config.config.bucket, dbUrl);
+          console.log(JSON.stringify(success("backup:push", result, result.objects.length), null, 2));
+        } finally {
+          client.destroy();
+        }
+        return;
+      }
+      if (sub === "pull") {
+        const s3Config = loadS3Config();
+        if (!s3Config.ok) {
+          console.log(JSON.stringify(error("backup:pull", "CONFIG_ERROR", s3Config.error), null, 2));
+          process.exit(1);
+          return;
+        }
+
+        const dbUrl = process.env.PORTFOLIO_DB_URL;
+        if (!dbUrl) {
+          console.log(JSON.stringify(error("backup:pull", "CONFIG_ERROR", "PORTFOLIO_DB_URL is not set"), null, 2));
+          process.exit(1);
+          return;
+        }
+
+        const client = createS3Client(s3Config.config);
+        try {
+          const result = await pullBackupFromS3(client, s3Config.config.bucket, dbUrl, str(flags, "key"));
+          console.log(JSON.stringify(success("backup:pull", result), null, 2));
+        } finally {
+          client.destroy();
+        }
+        return;
+      }
+
       const dbUrl = process.env.PORTFOLIO_DB_URL;
       if (!dbUrl) {
         console.log(JSON.stringify(error("backup", "CONFIG_ERROR", "PORTFOLIO_DB_URL is not set"), null, 2));
