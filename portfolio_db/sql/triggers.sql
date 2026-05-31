@@ -13,6 +13,18 @@ BEGIN
 END;
 $$;
 
+-- Trigger function: set timestamp column on modification (for tables using "timestamp" column name)
+DROP FUNCTION IF EXISTS update_timestamp_col_trigger() CASCADE;
+CREATE OR REPLACE FUNCTION update_timestamp_col_trigger()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.timestamp := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
 -- Trigger on transactions table: auto-update updated_at on INSERT/UPDATE
 DROP TRIGGER IF EXISTS transactions_update_timestamp ON transactions;
 CREATE TRIGGER transactions_update_timestamp
@@ -25,7 +37,7 @@ DROP TRIGGER IF EXISTS refresh_log_update_timestamp ON refresh_log;
 CREATE TRIGGER refresh_log_update_timestamp
 BEFORE INSERT ON refresh_log
 FOR EACH ROW
-EXECUTE FUNCTION update_timestamp_trigger();
+EXECUTE FUNCTION update_timestamp_col_trigger();
 
 -- Trigger on recalc_cache table: auto-update timestamp on INSERT/UPDATE
 DROP TRIGGER IF EXISTS recalc_cache_update_timestamp ON recalc_cache;
@@ -53,4 +65,4 @@ DROP TRIGGER IF EXISTS repair_log_update_timestamp ON repair_log;
 CREATE TRIGGER repair_log_update_timestamp
 BEFORE INSERT ON repair_log
 FOR EACH ROW
-EXECUTE FUNCTION update_timestamp_trigger();
+EXECUTE FUNCTION update_timestamp_col_trigger();

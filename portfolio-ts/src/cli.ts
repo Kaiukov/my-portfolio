@@ -21,6 +21,7 @@ import { getHealth } from "./commands/health.js";
 import { getWidget } from "./commands/widget.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
+import { cronInstall, cronList, cronRemove } from "./commands/cron.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -52,6 +53,7 @@ Commands:
   health          DB reachability and price coverage diagnostic
   init            Verify database schema is ready
   backup          Create a pg_dump backup
+  cron            Manage pg_cron scheduled jobs (install / list / remove)
   --help          Show this help message
 
 Dates: ISO YYYY-MM-DD (legacy DD-MM-YYYY also accepted on write commands)
@@ -392,6 +394,55 @@ export async function dispatch(argv: string[]): Promise<void> {
       const result = await backupDb({ dbUrl, outPath: str(flags, "out") });
       console.log(JSON.stringify(success("backup", result), null, 2));
       return;
+    }
+
+    case "cron": {
+      const sub = argv[3];
+      if (!sub || sub.startsWith("--")) {
+        console.log(
+          JSON.stringify(
+            error("cron", "VALIDATION_ERROR", "Subcommand required: cron install | cron list | cron remove"),
+            null,
+            2,
+          ),
+        );
+        process.exit(1);
+        return;
+      }
+
+      switch (sub) {
+        case "install": {
+          const result = await cronInstall();
+          if (result.applied) {
+            console.log(JSON.stringify(success("cron:install", result), null, 2));
+          } else {
+            console.log(JSON.stringify(error("cron:install", result.pg_cron_available ? "CRON_REGISTRATION_FAILED" : "CRON_UNAVAILABLE", result.message), null, 2));
+            process.exit(1);
+          }
+          return;
+        }
+        case "list": {
+          const result = await cronList();
+          console.log(JSON.stringify(success("cron:list", result, result.jobs.length), null, 2));
+          return;
+        }
+        case "remove": {
+          const result = await cronRemove();
+          console.log(JSON.stringify(success("cron:remove", result, result.removed_count), null, 2));
+          return;
+        }
+        default: {
+          console.log(
+            JSON.stringify(
+              error("cron", "UNKNOWN_SUBCOMMAND", `Unknown: cron ${sub}. Use: cron install | cron list | cron remove`),
+              null,
+              2,
+            ),
+          );
+          process.exit(1);
+          return;
+        }
+      }
     }
 
     case "cash": {

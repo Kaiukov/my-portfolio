@@ -1,6 +1,6 @@
-# Portfolio Crontab Schedule
+# Portfolio Crontab Schedule (Fallback / OS-level)
 
-Automated jobs for keeping prices and portfolio calculations up to date.
+**Primary scheduling**: `pg_cron` (see `docs/pg-cron.md`). Use this crontab only as a fallback when pg_cron is unavailable (Supabase Free, no superuser access).
 
 ---
 
@@ -151,9 +151,9 @@ cat $PROJECT/logs/performance-$(date +%Y-%m).log
 - US market closes at **16:00 ET**. 18:30 local gives a 2.5 h buffer for data propagation on yfinance.
 - `recalculate` without `--force` uses the smart cache — it skips if nothing changed.
 - `recalculate --force` on Sunday rebuilds from scratch; this is the safety net for any cache drift.
-- After the response standardization plan is implemented, all log output will be pure JSON envelopes — easy to pipe into `jq` or ingest into monitoring tools.
+- All log output is pure JSON envelopes — easy to pipe into `jq` or ingest into monitoring tools.
 
 ```bash
-# Example: monitor for errors after implementation
+# Example: monitor for errors
 tail -f logs/recalc.log | jq 'select(.ok == false)'
 ```
