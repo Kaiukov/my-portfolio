@@ -470,6 +470,7 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "schedule": {
+      const projectDir = str(flags, "project-dir") ?? str(flags, "project_dir");
       const posSub = argv[3] as string | undefined;
       const sub = bool(flags, "remove") || posSub === "remove" ? "remove"
         : bool(flags, "install") || posSub === "install" ? "install"
@@ -477,22 +478,22 @@ export async function dispatch(argv: string[]): Promise<void> {
         : posSub && !posSub.startsWith("--") ? posSub
         : "emit";
       if (sub === "remove") {
-        const result = scheduleRemove();
+        const result = scheduleRemove(projectDir);
         console.log(JSON.stringify(success("schedule", result), null, 2));
         return;
       }
       if (sub === "install") {
-        const result = scheduleInstall();
+        const result = scheduleInstall(projectDir);
         if (result.installed) {
           console.log(JSON.stringify(success("schedule", result), null, 2));
         } else {
-          console.log(JSON.stringify(error("schedule", "CRON_INSTALL_FAILED", result.message), null, 2));
+          console.log(JSON.stringify(error("schedule", "SCHEDULE_INSTALL_FAILED", result.message), null, 2));
           process.exit(1);
         }
         return;
       }
-      const result = scheduleEmit();
-      console.log(JSON.stringify(success("schedule", { cron_line: result.block }), null, 2));
+      const emitResult = scheduleEmit(projectDir);
+      console.log(JSON.stringify(success("schedule", { cron_line: emitResult.block }), null, 2));
       return;
     }
 

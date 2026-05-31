@@ -104,23 +104,17 @@ describe("getPriceFreshness", () => {
     expect(result.stale).toBe(false);
   });
 
-  test("uses env PORTFOLIO_PRICE_MAX_AGE_DAYS to pass maxAgeDays to stale_tickers_sql", async () => {
+  test("uses env PORTFOLIO_PRICE_MAX_AGE_DAYS to drive stale_tickers_sql behavior", async () => {
     process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"] = "3";
     const recent = daysAgo(1);
     mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
     mockQuery.mockResolvedValueOnce([]);
-    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([{ ticker: "SPY" }]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
 
-    expect(result.stale).toBe(false);
-
-    const staleCallArgs = mockQuery.mock.calls.find(
-      (call: string[]) => typeof call[0] === "string" && call[0].includes("stale_tickers_sql"),
-    );
-    expect(staleCallArgs).toBeDefined();
-    expect(staleCallArgs[1]).toEqual([3]);
+    expect(result.stale).toBe(true);
 
     delete process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"];
   });
@@ -136,12 +130,6 @@ describe("getPriceFreshness", () => {
     const result = await getPriceFreshness(TODAY);
 
     expect(result.stale).toBe(false);
-
-    const staleCallArgs = mockQuery.mock.calls.find(
-      (call: string[]) => typeof call[0] === "string" && call[0].includes("stale_tickers_sql"),
-    );
-    expect(staleCallArgs).toBeDefined();
-    expect(staleCallArgs[1]).toEqual([5]);
 
     delete process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"];
   });

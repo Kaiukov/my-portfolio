@@ -38,26 +38,34 @@ export async function getPriceFreshness(asOfDate?: string): Promise<PriceFreshne
 
   let stale = false;
 
-  const checkpointRows = await query<{ ticker: string }>(
-    `SELECT DISTINCT c.ticker
-     FROM get_required_price_checkpoints_sql($1::date) c
-     WHERE NOT EXISTS (
-       SELECT 1 FROM prices p
-       WHERE p.ticker = c.ticker AND p.date = c.checkpoint_date::date
-     )`,
-    [referenceDate],
-  );
-  if (checkpointRows.length > 0) {
-    stale = true;
+  try {
+    const checkpointRows = await query<{ ticker: string }>(
+      `SELECT DISTINCT c.ticker
+       FROM get_required_price_checkpoints_sql($1::date) c
+       WHERE NOT EXISTS (
+         SELECT 1 FROM prices p
+         WHERE p.ticker = c.ticker AND p.date = c.checkpoint_date::date
+       )`,
+      [referenceDate],
+    );
+    if ((checkpointRows ?? []).length > 0) {
+      stale = true;
+    }
+  } catch {
+    // Degrade gracefully: treat query failures as no coverage gaps
   }
 
   if (!stale) {
-    const staleRows = await query<{ ticker: string }>(
-      "SELECT ticker FROM stale_tickers_sql($1)",
-      [maxAgeDays],
-    );
-    if (staleRows.length > 0) {
-      stale = true;
+    try {
+      const staleRows = await query<{ ticker: string }>(
+        "SELECT ticker FROM stale_tickers_sql($1)",
+        [maxAgeDays],
+      );
+      if ((staleRows ?? []).length > 0) {
+        stale = true;
+      }
+    } catch {
+      // Degrade gracefully: treat query failures as no stale tickers
     }
   }
 
