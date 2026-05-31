@@ -84,7 +84,6 @@ describe("health staleness via stale_tickers_sql", () => {
     const { getHealth } = await import("../src/commands/health.js");
     const result = await getHealth(30);
 
-    expect(result.ok !== undefined ? result : result satisfies import("../src/commands/health.js").HealthResult);
     expect(result.status).toBe("degraded");
     expect(result.stale_price_tickers[0].ticker).toBe("MSFT");
     expect(result.stale_price_tickers[0].age_days).toBe(90);

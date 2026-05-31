@@ -135,7 +135,7 @@ $$;
 -- Get price as of a given date (lookup most recent price on or before date).
 -- p_max_age_days (default NULL = disabled): when set, a price whose date is older
 -- than (p_as_of_date - p_max_age_days) is treated as stale and returns NULL.
-DROP FUNCTION IF EXISTS price_asof_sql(TEXT, DATE);
+DROP FUNCTION IF EXISTS price_asof_sql(TEXT, DATE) CASCADE;
 CREATE OR REPLACE FUNCTION price_asof_sql(p_ticker TEXT, p_as_of_date DATE, p_max_age_days INTEGER DEFAULT NULL)
 RETURNS DOUBLE PRECISION
 LANGUAGE sql
@@ -153,7 +153,7 @@ $$;
 -- Get price as of date with max-age enforcement.
 -- Returns NULL if the most recent price on or before p_as_of_date is older than p_max_age_days.
 -- Used by daily_maintenance_check for per-ticker staleness detection.
-DROP FUNCTION IF EXISTS price_asof_stale_sql(TEXT, DATE, INTEGER);
+DROP FUNCTION IF EXISTS price_asof_stale_sql(TEXT, DATE, INTEGER) CASCADE;
 CREATE OR REPLACE FUNCTION price_asof_stale_sql(p_ticker TEXT, p_as_of_date DATE, p_max_age_days INTEGER)
 RETURNS DOUBLE PRECISION
 LANGUAGE sql
