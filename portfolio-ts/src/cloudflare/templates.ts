@@ -69,7 +69,7 @@ const routes = {
       title: "My holdings",
       currency: "USD",
       as_of_date: data.as_of_date ?? null,
-      last_refresh: data.prices_as_of ?? data.updatedAt ?? null,
+      last_refresh: data.updatedAt ?? data.prices_as_of ?? null,
       value: data.portfolio_value_usd ?? null,
       today: { amount: data.today?.abs ?? 0, pct: data.today?.pct ?? 0 },
       total: { amount: data.total?.abs ?? 0, pct: data.total?.pct ?? 0 },
