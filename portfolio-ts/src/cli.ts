@@ -35,6 +35,7 @@ import { cloudflareInit } from "./cloudflare/init.js";
 import { deployWorker } from "./cloudflare/deploy.js";
 import { getWidgetUrl } from "./cloudflare/url.js";
 import { runWranglerLogin, runWranglerLogout, runWranglerWhoami } from "./cloudflare/auth.js";
+import { publishToKv } from "./cloudflare/publish.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -61,7 +62,7 @@ Commands:
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
-  cloudflare      Cloudflare Workers: init, deploy, url, login, logout, whoami
+  cloudflare      Cloudflare Workers: init, deploy, publish, url, login, logout, whoami
   sync            repair_prices + recalculate (daily maintenance)
   refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
@@ -635,7 +636,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       if (!sub || sub.startsWith("--")) {
         console.log(
           JSON.stringify(
-            error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init | deploy | url | login | logout | whoami"),
+              error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init | deploy | publish | url | login | logout | whoami"),
             null,
             2,
           ),
@@ -780,10 +781,38 @@ export async function dispatch(argv: string[]): Promise<void> {
           return;
         }
 
+        case "publish": {
+          const result = await publishToKv();
+          if (result.success && result.snapshot) {
+            console.log(
+              JSON.stringify(
+                success("cloudflare:publish", {
+                  key: result.key,
+                  namespace_id: result.namespaceId,
+                  snapshot: result.snapshot,
+                }),
+                null,
+                2,
+              ),
+            );
+          } else {
+            const errCode = result.namespaceId ? "KV_PUBLISH_FAILED" : "KV_NOT_CONFIGURED";
+            console.log(
+              JSON.stringify(
+                error("cloudflare:publish", errCode, result.error ?? "Publish failed"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
         default: {
           console.log(
             JSON.stringify(
-              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init | deploy | url | login | logout | whoami`),
+              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init | deploy | publish | url | login | logout | whoami`),
               null,
               2,
             ),

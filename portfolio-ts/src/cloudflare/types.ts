@@ -48,3 +48,36 @@ export interface WhoamiInfo {
   email?: string;
   error?: string;
 }
+
+export interface TodaySnapshot {
+  abs: number;
+  pct: number;
+}
+
+export interface TotalSnapshot {
+  abs: number;
+  pct: number;
+}
+
+export interface HistoryPoint {
+  date: string;
+  value: number;
+}
+
+export interface PortfolioSnapshot {
+  portfolio_value_usd: number;
+  today: TodaySnapshot;
+  total: TotalSnapshot;
+  history: HistoryPoint[];
+  prices_as_of: string;
+  as_of_date: string;
+  updatedAt: string;
+}
+
+export interface PublishResult {
+  success: boolean;
+  key: string;
+  namespaceId: string | null;
+  snapshot: PortfolioSnapshot | null;
+  error?: string;
+}
