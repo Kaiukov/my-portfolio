@@ -12,6 +12,7 @@ export interface ExchangeResult {
   rate: number;
   date: string;
   transaction_ids: [number, number];
+  exchange_group_id: string;
 }
 
 export async function exchangeCurrency(params: {
@@ -64,7 +65,8 @@ export async function exchangeCurrency(params: {
   }
 
   const targetAmount = params.quantity * params.rate;
-  
+  const exchangeGroupId = crypto.randomUUID();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await runTx(async (tx: any) => {
     const [fromAt] = (await tx.unsafe(
@@ -79,8 +81,8 @@ export async function exchangeCurrency(params: {
     const [fromIns] = (await tx.unsafe(
       `INSERT INTO transactions
        (date, asset, action, quantity, asset_type, price, currency,
-        fees, fee_currency, exchange, data_source, account)
-       VALUES ($1, $2, 'EXCHANGE_FROM', $3, $4, NULL, '', NULL, NULL, '', $5, NULL)
+        fees, fee_currency, exchange, data_source, account, exchange_group_id)
+       VALUES ($1, $2, 'EXCHANGE_FROM', $3, $4, NULL, '', NULL, NULL, '', $5, NULL, $6)
        RETURNING id`,
       [
         date,
@@ -88,14 +90,15 @@ export async function exchangeCurrency(params: {
         -params.quantity,
         fromAt.asset_type,
         `→ ${params.toAsset} @ ${params.rate}`,
+        exchangeGroupId,
       ],
     )) as { id: number }[];
 
     const [toIns] = (await tx.unsafe(
       `INSERT INTO transactions
        (date, asset, action, quantity, asset_type, price, currency,
-        fees, fee_currency, exchange, data_source, account)
-       VALUES ($1, $2, 'EXCHANGE_TO', $3, $4, NULL, '', NULL, NULL, '', $5, NULL)
+        fees, fee_currency, exchange, data_source, account, exchange_group_id)
+       VALUES ($1, $2, 'EXCHANGE_TO', $3, $4, NULL, '', NULL, NULL, '', $5, NULL, $6)
        RETURNING id`,
       [
         date,
@@ -103,6 +106,7 @@ export async function exchangeCurrency(params: {
         targetAmount,
         toAt.asset_type,
         `← ${params.fromAsset} @ ${params.rate}`,
+        exchangeGroupId,
       ],
     )) as { id: number }[];
 
@@ -117,5 +121,6 @@ export async function exchangeCurrency(params: {
     rate: params.rate,
     date,
     transaction_ids: [result.fromId, result.toId],
+    exchange_group_id: exchangeGroupId,
   };
 }

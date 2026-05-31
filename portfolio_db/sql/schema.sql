@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     exchange VARCHAR,
     data_source VARCHAR,
     account VARCHAR,
+    exchange_group_id TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP
 );
