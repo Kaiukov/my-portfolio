@@ -36,6 +36,7 @@ import { deployWorker } from "./cloudflare/deploy.js";
 import { getWidgetUrl } from "./cloudflare/url.js";
 import { runWranglerLogin, runWranglerLogout, runWranglerWhoami } from "./cloudflare/auth.js";
 import { publishToKv } from "./cloudflare/publish.js";
+import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -62,7 +63,7 @@ Commands:
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
-  cloudflare      Cloudflare Workers: init, deploy, publish, url, login, logout, whoami
+  cloudflare      Cloudflare Workers: init, deploy, publish, sync, url, login, logout, whoami
   sync            repair_prices + recalculate (daily maintenance)
   refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
@@ -636,7 +637,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       if (!sub || sub.startsWith("--")) {
         console.log(
           JSON.stringify(
-              error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init | deploy | publish | url | login | logout | whoami"),
+              error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init | deploy | publish | sync | url | login | logout | whoami"),
             null,
             2,
           ),
@@ -810,10 +811,86 @@ export async function dispatch(argv: string[]): Promise<void> {
           return;
         }
 
+        case "sync": {
+          const intervalArg = str(flags, "interval");
+          const watch = bool(flags, "watch");
+          const projectRoot =
+            str(flags, "project-root") ?? str(flags, "project_dir");
+
+          if (intervalArg || watch) {
+            let intervalMs: number;
+            try {
+              intervalMs = intervalArg
+                ? parseInterval(intervalArg)
+                : DEFAULT_SYNC_INTERVAL_MS;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.log(
+                JSON.stringify(
+                  error("cloudflare:sync", "INVALID_INTERVAL", msg),
+                  null,
+                  2,
+                ),
+              );
+              process.exit(1);
+              return;
+            }
+            if (intervalMs <= 0) {
+              console.log(
+                JSON.stringify(
+                  error(
+                    "cloudflare:sync",
+                    "INVALID_INTERVAL",
+                    "Interval must be a positive duration (e.g. 1h, 30m, 90s)",
+                  ),
+                  null,
+                  2,
+                ),
+              );
+              process.exit(1);
+              return;
+            }
+            syncLoop({ intervalMs, projectRoot });
+            return;
+          }
+
+          const result = await syncOnce(projectRoot);
+          if (result.success && result.snapshot) {
+            console.log(
+              JSON.stringify(
+                success("cloudflare:sync", {
+                  key: result.key,
+                  namespace_id: result.namespaceId,
+                  snapshot: result.snapshot,
+                }),
+                null,
+                2,
+              ),
+            );
+          } else {
+            const errCode = result.namespaceId
+              ? "KV_SYNC_FAILED"
+              : "KV_NOT_CONFIGURED";
+            console.log(
+              JSON.stringify(
+                error(
+                  "cloudflare:sync",
+                  errCode,
+                  result.error ?? "Sync failed",
+                ),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
         default: {
           console.log(
             JSON.stringify(
-              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init | deploy | publish | url | login | logout | whoami`),
+              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init | deploy | publish | sync | url | login | logout | whoami`),
               null,
               2,
             ),
