@@ -1,18 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSummary } from "./summary.js";
-import { getStatus } from "./status.js";
-import { getWidget } from "./widget.js";
-import { getPriceFreshness } from "./freshness.js";
-
-export interface BackupSnapshot {
-  portfolio_value_usd: number | null;
-  today: { abs: number; pct: number };
-  total: { abs: number | null; pct: number | null };
-  history: { date: string; value: number }[];
-  prices_as_of: string | null;
-  as_of_date: string;
-  updatedAt: string;
-}
+import { readFile, writeFile } from "./bun_io.js";
+import { backupDb } from "./backup.js";
 
 export interface S3Config {
   endpoint: string;
@@ -24,27 +12,36 @@ export interface S3Config {
 
 export interface PushResult {
   bucket: string;
+  dump_path: string;
+  dump_size_bytes: number;
   objects: string[];
 }
 
 export interface PullResult {
   bucket: string;
   key: string;
-  snapshot: BackupSnapshot;
+  local_path: string;
+  size_bytes: number;
+  restore_command: string;
+}
+
+function envVar(key: string): string | undefined {
+  const primary = process.env[`PORTFOLIO_${key}`];
+  return primary !== undefined ? primary : process.env[key];
 }
 
 export function loadS3Config(): { ok: true; config: S3Config } | { ok: false; error: string } {
-  const endpoint = process.env["S3_ENDPOINT"];
-  const bucket = process.env["S3_BUCKET"];
-  const accessKeyId = process.env["S3_ACCESS_KEY_ID"];
-  const secretAccessKey = process.env["S3_SECRET_ACCESS_KEY"];
-  const region = process.env["S3_REGION"] ?? "auto";
+  const endpoint = envVar("S3_ENDPOINT");
+  const bucket = envVar("S3_BUCKET");
+  const accessKeyId = envVar("S3_ACCESS_KEY_ID");
+  const secretAccessKey = envVar("S3_SECRET_ACCESS_KEY");
+  const region = envVar("S3_REGION") ?? "auto";
 
   const missing: string[] = [];
-  if (!endpoint) missing.push("S3_ENDPOINT");
-  if (!bucket) missing.push("S3_BUCKET");
-  if (!accessKeyId) missing.push("S3_ACCESS_KEY_ID");
-  if (!secretAccessKey) missing.push("S3_SECRET_ACCESS_KEY");
+  if (!endpoint) missing.push("PORTFOLIO_S3_ENDPOINT");
+  if (!bucket) missing.push("PORTFOLIO_S3_BUCKET");
+  if (!accessKeyId) missing.push("PORTFOLIO_S3_ACCESS_KEY_ID");
+  if (!secretAccessKey) missing.push("PORTFOLIO_S3_SECRET_ACCESS_KEY");
 
   if (missing.length > 0) {
     return { ok: false, error: `Missing S3 configuration: ${missing.join(", ")}` };
@@ -72,47 +69,25 @@ export function createS3Client(config: S3Config): S3Client {
   });
 }
 
-export async function buildSnapshot(asOfDate?: string): Promise<BackupSnapshot> {
-  const [summary, status, widget, freshness] = await Promise.all([
-    getSummary(asOfDate),
-    getStatus(asOfDate),
-    getWidget(90, asOfDate),
-    getPriceFreshness(asOfDate),
-  ]);
-
-  return {
-    portfolio_value_usd: summary.portfolio_value_usd,
-    today: {
-      abs: widget.today.amount,
-      pct: widget.today.pct,
-    },
-    total: {
-      abs: status.total_gain,
-      pct: status.total_gain_pct,
-    },
-    history: widget.series.map((s) => ({ date: s.date, value: s.value })),
-    prices_as_of: freshness.prices_as_of,
-    as_of_date: summary.as_of_date,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-export async function pushSnapshot(
-  snapshot: BackupSnapshot,
+export async function pushBackupToS3(
   client: S3Client,
   bucket: string,
+  dbUrl: string,
 ): Promise<PushResult> {
-  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const body = JSON.stringify(snapshot, null, 2);
-  const timestampedKey = `backup-${ts}.json`;
-  const latestKey = "latest.json";
+  const dump = await backupDb({ dbUrl });
+  const f = readFile(dump.backup);
+  const body = await f.arrayBuffer();
+
+  const baseName = dump.backup.split("/").pop() ?? dump.backup;
+  const timestampedKey = baseName;
+  const latestKey = "latest.sql";
 
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: timestampedKey,
-      Body: body,
-      ContentType: "application/json",
+      Body: new Uint8Array(body),
+      ContentType: "application/sql",
     }),
   );
 
@@ -120,33 +95,47 @@ export async function pushSnapshot(
     new PutObjectCommand({
       Bucket: bucket,
       Key: latestKey,
-      Body: body,
-      ContentType: "application/json",
+      Body: new Uint8Array(body),
+      ContentType: "application/sql",
     }),
   );
 
-  return { bucket, objects: [timestampedKey, latestKey] };
+  return {
+    bucket,
+    dump_path: dump.backup,
+    dump_size_bytes: dump.size_bytes,
+    objects: [timestampedKey, latestKey],
+  };
 }
 
-export async function pullLatest(
+export async function pullBackupFromS3(
   client: S3Client,
   bucket: string,
+  dbUrl: string,
+  key?: string,
 ): Promise<PullResult> {
-  const key = "latest.json";
+  const objectKey = key ?? "latest.sql";
 
   const response = await client.send(
     new GetObjectCommand({
       Bucket: bucket,
-      Key: key,
+      Key: objectKey,
     }),
   );
 
-  const body = await response.Body?.transformToString("utf-8");
-  if (!body) {
+  const body = await response.Body?.transformToByteArray();
+  if (!body || body.length === 0) {
     throw new Error("Empty response body from S3");
   }
 
-  const snapshot = JSON.parse(body) as BackupSnapshot;
+  const localPath = `portfolio.restored-${objectKey.replace(/[/\\]/g, "_")}`;
+  await writeFile(localPath, body);
 
-  return { bucket, key, snapshot };
+  return {
+    bucket,
+    key: objectKey,
+    local_path: localPath,
+    size_bytes: body.length,
+    restore_command: `psql "${dbUrl}" -f ${localPath}`,
+  };
 }

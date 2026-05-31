@@ -1,19 +1,24 @@
 import { describe, expect, test, mock, jest, beforeEach, afterEach } from "bun:test";
 
-const mockQuerySingle = mock();
-const mockQuery = mock();
+const mockBunFile = mock(() => ({
+  size: 1234,
+  arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+}));
+const mockBunWrite = mock(async (_path: string, _data: Uint8Array) => {});
 
-mock.module("../src/db.js", () => ({
-  query: mockQuery,
-  querySingle: mockQuerySingle,
-  connect: () => {},
-  close: () => {},
+mock.module("../src/commands/bun_io.js", () => ({
+  readFile: mockBunFile,
+  writeFile: mockBunWrite,
 }));
 
-mock.module("../src/tx.js", () => ({
-  runTx: async <T>(fn: (tx: { unsafe: (sql: string, params?: unknown[]) => Promise<unknown[]> }) => Promise<T>): Promise<T> => {
-    return fn({ unsafe: async (_sql: string, _params?: unknown[]) => [] });
-  },
+const fakeBackupDb = mock(async (_params: { dbUrl: string; outPath?: string }) => ({
+  source: "postgresql",
+  backup: "/tmp/portfolio.backup-2026-05-31.sql",
+  size_bytes: 5678,
+}));
+
+mock.module("../src/commands/backup.js", () => ({
+  backupDb: fakeBackupDb,
 }));
 
 const s3SendMock = mock();
@@ -38,59 +43,26 @@ mock.module("@aws-sdk/client-s3", () => ({
   },
 }));
 
-function makeStatusRow(overrides: Record<string, unknown> = {}) {
-  return {
-    transactions_count: 42,
-    start_date: "2025-01-01",
-    end_date: "2026-01-15",
-    portfolio_value: 25000,
-    total_invested: 20000,
-    deposits: 22000,
-    withdrawals: 2000,
-    income: 500,
-    fees: 100,
-    taxes: 50,
-    total_gain: 369.03,
-    total_gain_pct: 2.91,
-    cost_basis: 24000,
-    realized_gain: 200,
-    unrealized_gain: 800,
-    total_profit: 1000,
-    as_of_date: "2026-01-15",
-    ...overrides,
-  };
+function setS3Env(usePortfolioPrefix: boolean) {
+  const prefix = usePortfolioPrefix ? "PORTFOLIO_" : "";
+  process.env[`${prefix}S3_ENDPOINT`] = "https://r2.example.com";
+  process.env[`${prefix}S3_BUCKET`] = "my-bucket";
+  process.env[`${prefix}S3_ACCESS_KEY_ID`] = "key123";
+  process.env[`${prefix}S3_SECRET_ACCESS_KEY`] = "secret123";
+  process.env[`${prefix}S3_REGION`] = "auto";
 }
 
-function makeSummaryRow(overrides: Record<string, unknown> = {}) {
-  return {
-    holding_count: 5,
-    total_cash_usd: 5000,
-    portfolio_value_usd: 15424.58,
-    last_transaction_date: "2026-01-15",
-    transaction_count: 42,
-    as_of_date: "2026-01-15",
-    ...overrides,
-  };
-}
-
-function makePriceFreshnessRows(pricesAsOf: string | null) {
-  return pricesAsOf ? { prices_as_of: pricesAsOf } : { prices_as_of: null };
-}
-
-function makeDailyReturnsRows() {
-  return [
-    { date: "2026-01-15", portfolio_value: 15500, investment_return: -1.12 },
-    { date: "2026-01-14", portfolio_value: 15700, investment_return: 0.5 },
-    { date: "2026-01-13", portfolio_value: 15600, investment_return: -0.3 },
-  ];
-}
-
-function makeCheckpointRows() {
-  return [] as { ticker: string }[];
-}
-
-function makeStaleTickersRows() {
-  return [] as { ticker: string }[];
+function clearAllS3Env() {
+  delete process.env["PORTFOLIO_S3_ENDPOINT"];
+  delete process.env["PORTFOLIO_S3_BUCKET"];
+  delete process.env["PORTFOLIO_S3_ACCESS_KEY_ID"];
+  delete process.env["PORTFOLIO_S3_SECRET_ACCESS_KEY"];
+  delete process.env["PORTFOLIO_S3_REGION"];
+  delete process.env["S3_ENDPOINT"];
+  delete process.env["S3_BUCKET"];
+  delete process.env["S3_ACCESS_KEY_ID"];
+  delete process.env["S3_SECRET_ACCESS_KEY"];
+  delete process.env["S3_REGION"];
 }
 
 describe("loadS3Config", () => {
@@ -98,42 +70,69 @@ describe("loadS3Config", () => {
 
   beforeEach(() => {
     envBackup = { ...process.env };
-    delete process.env["S3_ENDPOINT"];
-    delete process.env["S3_BUCKET"];
-    delete process.env["S3_ACCESS_KEY_ID"];
-    delete process.env["S3_SECRET_ACCESS_KEY"];
-    delete process.env["S3_REGION"];
+    clearAllS3Env();
   });
 
   afterEach(() => {
     process.env = envBackup;
   });
 
-  test("returns ok with full config", async () => {
-    process.env["S3_ENDPOINT"] = "https://r2.cloudflarestorage.com";
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
-    process.env["S3_REGION"] = "auto";
+  test("reads PORTFOLIO_S3_* as primary", async () => {
+    setS3Env(true);
+    delete process.env["S3_ENDPOINT"];
+    delete process.env["S3_BUCKET"];
+    delete process.env["S3_ACCESS_KEY_ID"];
+    delete process.env["S3_SECRET_ACCESS_KEY"];
 
     const { loadS3Config } = await import("../src/commands/backup_s3.js");
     const result = loadS3Config();
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.config.endpoint).toBe("https://r2.cloudflarestorage.com");
+      expect(result.config.endpoint).toBe("https://r2.example.com");
       expect(result.config.bucket).toBe("my-bucket");
-      expect(result.config.accessKeyId).toBe("key123");
-      expect(result.config.secretAccessKey).toBe("secret123");
-      expect(result.config.region).toBe("auto");
+    }
+  });
+
+  test("falls back to bare S3_* when PORTFOLIO_S3_* not set", async () => {
+    setS3Env(false);
+
+    const { loadS3Config } = await import("../src/commands/backup_s3.js");
+    const result = loadS3Config();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.endpoint).toBe("https://r2.example.com");
+      expect(result.config.bucket).toBe("my-bucket");
+    }
+  });
+
+  test("PORTFOLIO_S3_* takes precedence over S3_*", async () => {
+    process.env["S3_ENDPOINT"] = "https://bare.example.com";
+    process.env["S3_BUCKET"] = "bare-bucket";
+    process.env["S3_ACCESS_KEY_ID"] = "bare-key";
+    process.env["S3_SECRET_ACCESS_KEY"] = "bare-secret";
+    process.env["PORTFOLIO_S3_ENDPOINT"] = "https://pfx.example.com";
+    process.env["PORTFOLIO_S3_BUCKET"] = "pfx-bucket";
+    process.env["PORTFOLIO_S3_ACCESS_KEY_ID"] = "pfx-key";
+    process.env["PORTFOLIO_S3_SECRET_ACCESS_KEY"] = "pfx-secret";
+
+    const { loadS3Config } = await import("../src/commands/backup_s3.js");
+    const result = loadS3Config();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.endpoint).toBe("https://pfx.example.com");
+      expect(result.config.bucket).toBe("pfx-bucket");
+      expect(result.config.accessKeyId).toBe("pfx-key");
+      expect(result.config.secretAccessKey).toBe("pfx-secret");
     }
   });
 
   test("defaults S3_REGION to auto when not set", async () => {
-    process.env["S3_ENDPOINT"] = "https://r2.cloudflarestorage.com";
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
+    setS3Env(true);
+    delete process.env["PORTFOLIO_S3_REGION"];
+    delete process.env["S3_REGION"];
 
     const { loadS3Config } = await import("../src/commands/backup_s3.js");
     const result = loadS3Config();
@@ -144,221 +143,160 @@ describe("loadS3Config", () => {
     }
   });
 
-  test("returns error when S3_ENDPOINT is missing", async () => {
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
-
+  test("error message lists PORTFOLIO_S3_* names", async () => {
     const { loadS3Config } = await import("../src/commands/backup_s3.js");
     const result = loadS3Config();
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("S3_ENDPOINT");
+      expect(result.error).toContain("PORTFOLIO_S3_ENDPOINT");
+      expect(result.error).toContain("PORTFOLIO_S3_BUCKET");
+      expect(result.error).toContain("PORTFOLIO_S3_ACCESS_KEY_ID");
+      expect(result.error).toContain("PORTFOLIO_S3_SECRET_ACCESS_KEY");
     }
   });
 
-  test("returns error when S3_BUCKET is missing", async () => {
-    process.env["S3_ENDPOINT"] = "https://r2.cloudflarestorage.com";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
+  test("error message lists specific missing vars", async () => {
+    process.env["PORTFOLIO_S3_ENDPOINT"] = "https://r2.example.com";
+    process.env["PORTFOLIO_S3_BUCKET"] = "my-bucket";
 
     const { loadS3Config } = await import("../src/commands/backup_s3.js");
     const result = loadS3Config();
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("S3_BUCKET");
-    }
-  });
-
-  test("returns error when S3_ACCESS_KEY_ID is missing", async () => {
-    process.env["S3_ENDPOINT"] = "https://r2.cloudflarestorage.com";
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
-
-    const { loadS3Config } = await import("../src/commands/backup_s3.js");
-    const result = loadS3Config();
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain("S3_ACCESS_KEY_ID");
-    }
-  });
-
-  test("returns error when S3_SECRET_ACCESS_KEY is missing", async () => {
-    process.env["S3_ENDPOINT"] = "https://r2.cloudflarestorage.com";
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-
-    const { loadS3Config } = await import("../src/commands/backup_s3.js");
-    const result = loadS3Config();
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain("S3_SECRET_ACCESS_KEY");
-    }
-  });
-
-  test("lists all missing vars in error message", async () => {
-    const { loadS3Config } = await import("../src/commands/backup_s3.js");
-    const result = loadS3Config();
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain("S3_ENDPOINT");
-      expect(result.error).toContain("S3_BUCKET");
-      expect(result.error).toContain("S3_ACCESS_KEY_ID");
-      expect(result.error).toContain("S3_SECRET_ACCESS_KEY");
+      expect(result.error).toContain("PORTFOLIO_S3_ACCESS_KEY_ID");
+      expect(result.error).toContain("PORTFOLIO_S3_SECRET_ACCESS_KEY");
+      expect(result.error).not.toContain("PORTFOLIO_S3_ENDPOINT");
+      expect(result.error).not.toContain("PORTFOLIO_S3_BUCKET");
     }
   });
 });
 
-describe("buildSnapshot", () => {
-  test("composes snapshot from shared services", async () => {
-    mockQuerySingle.mockImplementation((sql: string) => {
-      if (sql.includes("portfolio_status_sql")) return makeStatusRow();
-      if (sql.includes("portfolio_summary_sql")) return makeSummaryRow();
-      if (sql.includes("MAX(date)")) return makePriceFreshnessRows("2026-01-15");
-      if (sql.includes("SELECT COUNT(*)")) return { count: 3 };
-      return null;
-    });
-
-    mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes("daily_returns")) return makeDailyReturnsRows();
-      if (sql.includes("get_required_price_checkpoints_sql")) return makeCheckpointRows();
-      if (sql.includes("stale_tickers_sql")) return makeStaleTickersRows();
-      return [];
-    });
-
-    const { buildSnapshot } = await import("../src/commands/backup_s3.js");
-    const snapshot = await buildSnapshot();
-
-    expect(snapshot.portfolio_value_usd).toBe(15424.58);
-    expect(snapshot.today.abs).toBe(-200);
-    expect(snapshot.today.pct).toBe(-1.12);
-    expect(snapshot.total.abs).toBe(369.03);
-    expect(snapshot.total.pct).toBe(2.91);
-    expect(snapshot.history).toHaveLength(3);
-    expect(snapshot.history[0].date).toBe("2026-01-13");
-    expect(snapshot.history[0].value).toBe(15600);
-    expect(snapshot.prices_as_of).toBe("2026-01-15");
-    expect(snapshot.as_of_date).toBe("2026-01-15");
-    expect(snapshot.updatedAt).toBeDefined();
-    expect(snapshot.updatedAt).toContain("T");
-  });
-});
-
-describe("pushSnapshot", () => {
-  test("uploads timestamped and latest objects to S3", async () => {
+describe("pushBackupToS3", () => {
+  beforeEach(() => {
     s3SendMock.mockClear();
     s3SendMock.mockResolvedValue({});
+    fakeBackupDb.mockClear();
+    mockBunFile.mockClear();
+  });
 
-    const { pushSnapshot, createS3Client } = await import("../src/commands/backup_s3.js");
+  test("runs pg_dump and uploads timestamped + latest.sql to S3", async () => {
+    const { pushBackupToS3, createS3Client } = await import("../src/commands/backup_s3.js");
 
     const client = createS3Client({
-      endpoint: "https://r2.cloudflarestorage.com",
+      endpoint: "https://r2.example.com",
       bucket: "my-bucket",
       accessKeyId: "key",
       secretAccessKey: "secret",
       region: "auto",
     });
 
-    const snapshot = {
-      portfolio_value_usd: 15000,
-      today: { abs: 100, pct: 0.5 },
-      total: { abs: 500, pct: 3.0 },
-      history: [{ date: "2026-01-15", value: 15000 }],
-      prices_as_of: "2026-01-15",
-      as_of_date: "2026-01-15",
-      updatedAt: new Date().toISOString(),
-    };
+    const result = await pushBackupToS3(client, "my-bucket", "postgresql://localhost/db");
 
-    const result = await pushSnapshot(snapshot, client, "my-bucket");
-
+    expect(fakeBackupDb).toHaveBeenCalledWith({ dbUrl: "postgresql://localhost/db" });
     expect(result.bucket).toBe("my-bucket");
+    expect(result.dump_path).toContain(".sql");
+    expect(result.dump_size_bytes).toBe(5678);
     expect(result.objects).toHaveLength(2);
 
     const keys = result.objects;
-    const latestIdx = keys.findIndex((k) => k === "latest.json");
-    const timestampedIdx = keys.findIndex((k) => k.startsWith("backup-") && k.endsWith(".json"));
-    expect(latestIdx).not.toBe(-1);
-    expect(timestampedIdx).not.toBe(-1);
+    expect(keys.some((k) => k === "latest.sql")).toBe(true);
+    const timestamped = keys.find((k) => k !== "latest.sql");
+    expect(timestamped).toBeDefined();
+    expect(timestamped!.endsWith(".sql")).toBe(true);
 
     expect(s3SendMock).toHaveBeenCalledTimes(2);
 
     const firstCall = s3SendMock.mock.calls[0][0];
     expect(firstCall.input.Bucket).toBe("my-bucket");
-    expect(firstCall.input.ContentType).toBe("application/json");
-    expect(firstCall.input.Body).toContain("portfolio_value_usd");
+    expect(firstCall.input.ContentType).toBe("application/sql");
 
     const secondCall = s3SendMock.mock.calls[1][0];
-    expect(secondCall.input.Bucket).toBe("my-bucket");
-    expect(secondCall.input.ContentType).toBe("application/json");
+    expect(secondCall.input.Key).toBe("latest.sql");
   });
 });
 
-describe("pullLatest", () => {
-  test("downloads and parses latest.json from S3", async () => {
-    const snapshotData = {
-      portfolio_value_usd: 15000,
-      today: { abs: 100, pct: 0.5 },
-      total: { abs: 500, pct: 3.0 },
-      history: [{ date: "2026-01-15", value: 15000 }],
-      prices_as_of: "2026-01-15",
-      as_of_date: "2026-01-15",
-      updatedAt: "2026-01-15T12:00:00.000Z",
-    };
-
+describe("pullBackupFromS3", () => {
+  beforeEach(() => {
     s3SendMock.mockClear();
     s3SendMock.mockResolvedValue({
       Body: {
-        transformToString: async () => JSON.stringify(snapshotData),
+        transformToByteArray: async () => new Uint8Array([1, 2, 3, 4]),
       },
     });
+    mockBunWrite.mockClear();
+  });
 
-    const { pullLatest, createS3Client } = await import("../src/commands/backup_s3.js");
+  test("downloads latest.sql and returns restore path + command", async () => {
+    const { pullBackupFromS3, createS3Client } = await import("../src/commands/backup_s3.js");
 
     const client = createS3Client({
-      endpoint: "https://r2.cloudflarestorage.com",
+      endpoint: "https://r2.example.com",
       bucket: "my-bucket",
       accessKeyId: "key",
       secretAccessKey: "secret",
       region: "auto",
     });
 
-    const result = await pullLatest(client, "my-bucket");
+    const result = await pullBackupFromS3(client, "my-bucket", "postgresql://localhost/db");
 
     expect(result.bucket).toBe("my-bucket");
-    expect(result.key).toBe("latest.json");
-    expect(result.snapshot.portfolio_value_usd).toBe(15000);
-    expect(result.snapshot.total.abs).toBe(500);
+    expect(result.key).toBe("latest.sql");
+    expect(result.local_path).toContain("portfolio.restored");
+    expect(result.size_bytes).toBe(4);
+    expect(result.restore_command).toContain("psql");
+    expect(result.restore_command).toContain("postgresql://localhost/db");
 
     expect(s3SendMock).toHaveBeenCalledTimes(1);
     const call = s3SendMock.mock.calls[0][0];
     expect(call.input.Bucket).toBe("my-bucket");
-    expect(call.input.Key).toBe("latest.json");
+    expect(call.input.Key).toBe("latest.sql");
+
+    expect(mockBunWrite).toHaveBeenCalled();
   });
 
-  test("throws when response body is empty", async () => {
-    s3SendMock.mockClear();
-    s3SendMock.mockResolvedValue({
-      Body: {
-        transformToString: async () => "",
-      },
-    });
-
-    const { pullLatest, createS3Client } = await import("../src/commands/backup_s3.js");
+  test("accepts a custom key for pull", async () => {
+    const { pullBackupFromS3, createS3Client } = await import("../src/commands/backup_s3.js");
 
     const client = createS3Client({
-      endpoint: "https://r2.cloudflarestorage.com",
+      endpoint: "https://r2.example.com",
       bucket: "my-bucket",
       accessKeyId: "key",
       secretAccessKey: "secret",
       region: "auto",
     });
 
-    await expect(pullLatest(client, "my-bucket")).rejects.toThrow("Empty response body");
+    const result = await pullBackupFromS3(
+      client,
+      "my-bucket",
+      "postgresql://localhost/db",
+      "backup-2026.sql",
+    );
+
+    expect(result.key).toBe("backup-2026.sql");
+  });
+
+  test("throws when response body is empty", async () => {
+    s3SendMock.mockResolvedValue({
+      Body: {
+        transformToByteArray: async () => new Uint8Array(0),
+      },
+    });
+
+    const { pullBackupFromS3, createS3Client } = await import("../src/commands/backup_s3.js");
+
+    const client = createS3Client({
+      endpoint: "https://r2.example.com",
+      bucket: "my-bucket",
+      accessKeyId: "key",
+      secretAccessKey: "secret",
+      region: "auto",
+    });
+
+    await expect(pullBackupFromS3(client, "my-bucket", "postgresql://localhost/db")).rejects.toThrow(
+      "Empty response body",
+    );
   });
 });
 
@@ -367,11 +305,13 @@ describe("CLI integration — backup push", () => {
 
   beforeEach(() => {
     envBackup = { ...process.env };
-    process.env["S3_ENDPOINT"] = "https://r2.example.com";
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
-    process.env["S3_REGION"] = "auto";
+    setS3Env(true);
+    process.env["PORTFOLIO_DB_URL"] = "postgresql://localhost/db";
+    s3SendMock.mockClear();
+    s3SendMock.mockResolvedValue({});
+    s3DestroyMock.mockClear();
+    fakeBackupDb.mockClear();
+    mockBunFile.mockClear();
   });
 
   afterEach(() => {
@@ -379,25 +319,6 @@ describe("CLI integration — backup push", () => {
   });
 
   test("dispatches backup push and returns success envelope", async () => {
-    mockQuerySingle.mockImplementation((sql: string) => {
-      if (sql.includes("portfolio_status_sql")) return makeStatusRow();
-      if (sql.includes("portfolio_summary_sql")) return makeSummaryRow();
-      if (sql.includes("MAX(date)")) return makePriceFreshnessRows("2026-01-15");
-      if (sql.includes("SELECT COUNT(*)")) return { count: 3 };
-      return null;
-    });
-
-    mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes("daily_returns")) return makeDailyReturnsRows();
-      if (sql.includes("get_required_price_checkpoints_sql")) return makeCheckpointRows();
-      if (sql.includes("stale_tickers_sql")) return makeStaleTickersRows();
-      return [];
-    });
-
-    s3SendMock.mockClear();
-    s3SendMock.mockResolvedValue({});
-    s3DestroyMock.mockClear();
-
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
@@ -408,53 +329,16 @@ describe("CLI integration — backup push", () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.ok).toBe(true);
     expect(output.command).toBe("backup:push");
-    expect(output.data.objects).toHaveLength(2);
     expect(output.data.bucket).toBe("my-bucket");
+    expect(output.data.objects).toHaveLength(2);
     expect(s3SendMock).toHaveBeenCalledTimes(2);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  test("dispatches backup push with --as-of-date", async () => {
-    mockQuerySingle.mockImplementation((sql: string) => {
-      if (sql.includes("portfolio_status_sql")) return makeStatusRow();
-      if (sql.includes("portfolio_summary_sql")) return makeSummaryRow();
-      if (sql.includes("MAX(date)")) return makePriceFreshnessRows("2026-01-15");
-      if (sql.includes("SELECT COUNT(*)")) return { count: 3 };
-      return null;
-    });
-
-    mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes("daily_returns")) return makeDailyReturnsRows();
-      if (sql.includes("get_required_price_checkpoints_sql")) return makeCheckpointRows();
-      if (sql.includes("stale_tickers_sql")) return makeStaleTickersRows();
-      return [];
-    });
-
-    s3SendMock.mockClear();
-    s3SendMock.mockResolvedValue({});
-    s3DestroyMock.mockClear();
-
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
-
-    await mod.dispatch(["bun", "src/cli.ts", "backup", "push", "--as-of-date", "2026-01-15"]);
-
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(s3SendMock).toHaveBeenCalledTimes(2);
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  test("returns config error when S3 env vars are missing", async () => {
-    delete process.env["S3_ENDPOINT"];
-    delete process.env["S3_BUCKET"];
-    delete process.env["S3_ACCESS_KEY_ID"];
-    delete process.env["S3_SECRET_ACCESS_KEY"];
+  test("returns config error when PORTFOLIO_S3_* vars missing", async () => {
+    clearAllS3Env();
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -466,7 +350,25 @@ describe("CLI integration — backup push", () => {
     expect(output.ok).toBe(false);
     expect(output.command).toBe("backup:push");
     expect(output.error.code).toBe("CONFIG_ERROR");
-    expect(output.error.message).toContain("Missing S3 configuration");
+    expect(output.error.message).toContain("PORTFOLIO_S3_ENDPOINT");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns config error when PORTFOLIO_DB_URL missing", async () => {
+    delete process.env["PORTFOLIO_DB_URL"];
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "backup", "push"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("CONFIG_ERROR");
+    expect(output.error.message).toContain("PORTFOLIO_DB_URL");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
@@ -478,11 +380,16 @@ describe("CLI integration — backup pull", () => {
 
   beforeEach(() => {
     envBackup = { ...process.env };
-    process.env["S3_ENDPOINT"] = "https://r2.example.com";
-    process.env["S3_BUCKET"] = "my-bucket";
-    process.env["S3_ACCESS_KEY_ID"] = "key123";
-    process.env["S3_SECRET_ACCESS_KEY"] = "secret123";
-    process.env["S3_REGION"] = "auto";
+    setS3Env(true);
+    process.env["PORTFOLIO_DB_URL"] = "postgresql://localhost/db";
+    s3SendMock.mockClear();
+    s3SendMock.mockResolvedValue({
+      Body: {
+        transformToByteArray: async () => new Uint8Array([1, 2, 3, 4]),
+      },
+    });
+    s3DestroyMock.mockClear();
+    mockBunWrite.mockClear();
   });
 
   afterEach(() => {
@@ -490,23 +397,6 @@ describe("CLI integration — backup pull", () => {
   });
 
   test("dispatches backup pull and returns success envelope", async () => {
-    s3SendMock.mockClear();
-    s3SendMock.mockResolvedValue({
-      Body: {
-        transformToString: async () =>
-          JSON.stringify({
-            portfolio_value_usd: 15000,
-            today: { abs: 100, pct: 0.5 },
-            total: { abs: 500, pct: 3.0 },
-            history: [{ date: "2026-01-15", value: 15000 }],
-            prices_as_of: "2026-01-15",
-            as_of_date: "2026-01-15",
-            updatedAt: "2026-01-15T12:00:00.000Z",
-          }),
-      },
-    });
-    s3DestroyMock.mockClear();
-
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
@@ -518,19 +408,32 @@ describe("CLI integration — backup pull", () => {
     expect(output.ok).toBe(true);
     expect(output.command).toBe("backup:pull");
     expect(output.data.bucket).toBe("my-bucket");
-    expect(output.data.key).toBe("latest.json");
-    expect(output.data.snapshot.portfolio_value_usd).toBe(15000);
+    expect(output.data.key).toBe("latest.sql");
+    expect(output.data.local_path).toContain("portfolio.restored");
+    expect(output.data.restore_command).toContain("psql");
     expect(s3SendMock).toHaveBeenCalledTimes(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  test("returns config error for pull when S3 vars are missing", async () => {
-    delete process.env["S3_ENDPOINT"];
-    delete process.env["S3_BUCKET"];
-    delete process.env["S3_ACCESS_KEY_ID"];
-    delete process.env["S3_SECRET_ACCESS_KEY"];
+  test("dispatches backup pull with --key", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "backup", "pull", "--key", "backup-2026.sql"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.data.key).toBe("backup-2026.sql");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns config error for pull when S3 vars missing", async () => {
+    clearAllS3Env();
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -548,8 +451,8 @@ describe("CLI integration — backup pull", () => {
   });
 });
 
-describe("CLI integration — backup (legacy pg_dump)", () => {
-  test("backup push appears in help text", async () => {
+describe("Help text", () => {
+  test("backup push and pull appear in help", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
