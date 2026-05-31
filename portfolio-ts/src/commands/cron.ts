@@ -145,7 +145,7 @@ export async function cronRemove(): Promise<CronRemoveResult> {
   }
 
   const before = await query<{ jobid: number }>(
-    "SELECT jobid FROM cron.job WHERE jobname LIKE 'portfolio_%'",
+    "SELECT jobid FROM cron.job WHERE jobname LIKE 'portfolio\\_%' ESCAPE '\\'",
   );
 
   if (before.length === 0) {
@@ -156,7 +156,7 @@ export async function cronRemove(): Promise<CronRemoveResult> {
   }
 
   await query(
-    "SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname LIKE 'portfolio_%'",
+    "SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname LIKE 'portfolio\\_%' ESCAPE '\\'",
   );
 
   return {
