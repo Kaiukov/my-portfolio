@@ -45,8 +45,15 @@ export async function cronInstall(): Promise<CronInstallResult> {
 
   try {
     await query(
-      `DO $$
+      `DO $do$
       BEGIN
+          IF NOT EXISTS (
+              SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'
+          ) THEN
+              RAISE NOTICE 'pg_cron extension is not installed – skipping all cron job registrations.';
+              RETURN;
+          END IF;
+
           PERFORM cron.schedule(
               'portfolio_verify_prices_daily', '0 7 * * *',
               $$SELECT job_verify_prices(5)$$
@@ -80,7 +87,7 @@ export async function cronInstall(): Promise<CronInstallResult> {
               $$SELECT job_monthly_performance('SPY')$$
           );
       END;
-      $$`,
+      $do$`,
     );
 
     return {
