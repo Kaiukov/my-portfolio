@@ -66,24 +66,18 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
     }
   }
 
-  // Staleness pass: for each ticker with prices, check if the latest price is too old
-  const staleTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
+  // Staleness pass via SQL (per-ticker staleness, no masking)
+  let staleTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
   if (maxAgeDays !== undefined && maxAgeDays > 0) {
-    const allTickers = new Set([...requiredTickers, ...tickers.map((r) => r.ticker)]);
-    for (const ticker of allTickers) {
-      const latestRow = await querySingle<{ last_date: string | null }>(
-        `SELECT MAX(date)::text AS last_date FROM prices WHERE ticker = $1`,
-        [ticker],
-      );
-      if (latestRow?.last_date) {
-        const ageDays = Math.floor(
-          (new Date(today).getTime() - new Date(latestRow.last_date).getTime()) / 86400000,
-        );
-        if (ageDays > maxAgeDays) {
-          staleTickers.push({ ticker, last_price_date: latestRow.last_date, age_days: ageDays });
-        }
-      }
-    }
+    const staleRows = await query<{ ticker: string; last_price_date: string; age_days: number }>(
+      "SELECT ticker, last_price_date::text, age_days::int FROM stale_tickers_sql($1)",
+      [maxAgeDays],
+    );
+    staleTickers = staleRows.map((r) => ({
+      ticker: r.ticker,
+      last_price_date: r.last_price_date,
+      age_days: r.age_days,
+    }));
   }
 
   const needsRecalcRow = await querySingle<{ needs_recalc: boolean }>(

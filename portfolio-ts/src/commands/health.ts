@@ -39,30 +39,18 @@ export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
   );
   const coverageIssueTickers = [...new Set(checkpointRows.map((r) => r.ticker))].sort();
 
-  // Stale-price detection: tickers whose latest price exceeds max_age_days
-  const stalePriceTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
+  // Stale-price detection via SQL (per-ticker staleness, no masking)
+  let stalePriceTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
   if (maxAgeDays !== undefined && maxAgeDays > 0) {
-    const allRows = await query<{ ticker: string }>(
-      "SELECT DISTINCT ticker FROM prices ORDER BY ticker",
+    const staleRows = await query<{ ticker: string; last_price_date: string; age_days: number }>(
+      "SELECT ticker, last_price_date::text, age_days::int FROM stale_tickers_sql($1)",
+      [maxAgeDays],
     );
-    for (const row of allRows) {
-      const latestRow = await querySingle<{ last_date: string | null }>(
-        `SELECT MAX(date)::text AS last_date FROM prices WHERE ticker = $1`,
-        [row.ticker],
-      );
-      if (latestRow?.last_date) {
-        const ageDays = Math.floor(
-          (new Date(today).getTime() - new Date(latestRow.last_date).getTime()) / 86400000,
-        );
-        if (ageDays > maxAgeDays) {
-          stalePriceTickers.push({
-            ticker: row.ticker,
-            last_price_date: latestRow.last_date,
-            age_days: ageDays,
-          });
-        }
-      }
-    }
+    stalePriceTickers = staleRows.map((r) => ({
+      ticker: r.ticker,
+      last_price_date: r.last_price_date,
+      age_days: r.age_days,
+    }));
   }
 
   // stale_tickers is the union of both sets (maintained for backward compat)

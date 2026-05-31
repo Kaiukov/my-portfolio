@@ -1,4 +1,5 @@
 import { query, querySingle } from "../db.js";
+import { STALE_MAX_AGE_DAYS } from "../validators.js";
 import type { PriceRow } from "../providers/yahoo.js";
 
 export interface RepairPricesResult {
@@ -166,4 +167,9 @@ export async function repairPrices(
     range: { start, end },
     skipped_fresh: skippedFresh,
   };
+}
+
+export async function runDailyMaintenanceCheck(maxAgeDays?: number): Promise<void> {
+  const maxAge = maxAgeDays ?? STALE_MAX_AGE_DAYS;
+  await query("SELECT daily_maintenance_check($1)", [maxAge]);
 }
