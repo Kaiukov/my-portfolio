@@ -9,7 +9,7 @@ import { getPriceFreshness } from "../commands/freshness.js";
 export async function buildSnapshot(): Promise<PortfolioSnapshot> {
   const [summary, widget, status, freshness] = await Promise.all([
     getSummary(),
-    getWidget(30),
+    getWidget(180),
     getStatus(),
     getPriceFreshness(),
   ]);

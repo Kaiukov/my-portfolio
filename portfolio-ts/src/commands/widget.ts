@@ -105,7 +105,7 @@ export async function getWidget(
     }));
 
   return {
-    title: "Portfolio",
+    title: "My holdings",
     currency: "USD",
     as_of_date: asOfDateStr,
     last_refresh: lastRefresh,

@@ -28,7 +28,7 @@ describe("getWidget — shape and keys", () => {
     const { getWidget } = await import("../src/commands/widget.js");
     const result = await getWidget(30, "2026-05-30");
 
-    expect(result.title).toBe("Portfolio");
+    expect(result.title).toBe("My holdings");
     expect(result.currency).toBe("USD");
     expect(result.as_of_date).toBe("2026-05-30");
     expect(result.last_refresh).toBe("2026-05-30");
@@ -195,7 +195,7 @@ describe("getWidget — empty database", () => {
     const { getWidget } = await import("../src/commands/widget.js");
     const result = await getWidget(30, "2026-05-30");
 
-    expect(result.title).toBe("Portfolio");
+    expect(result.title).toBe("My holdings");
     expect(result.currency).toBe("USD");
     expect(result.value).toBeNull();
     expect(result.total.amount).toBeNull();
@@ -229,7 +229,7 @@ describe("getWidget — CLI integration", () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.ok).toBe(true);
     expect(output.command).toBe("widget");
-    expect(output.data.title).toBe("Portfolio");
+    expect(output.data.title).toBe("My holdings");
     expect(output.data.currency).toBe("USD");
     expect(output.data.value).toBe(19257.13);
     expect(output.data.today.amount).toBe(125.50);

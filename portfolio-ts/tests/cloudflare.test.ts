@@ -89,7 +89,7 @@ describe("worker.js template", () => {
     expect(output).toContain("portfolio_value_usd");
     expect(output).toContain("amount:");
     expect(output).toContain("series:");
-    expect(output).toContain('title: "Portfolio"');
+    expect(output).toContain('title: "My holdings"');
   });
 });
 

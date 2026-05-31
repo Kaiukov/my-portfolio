@@ -2,7 +2,7 @@
 //     widget – the ListWidget
 //     args.widgetParameter – Scriptable external parameter (unused)
 //     Script – Scriptable runtime
-//     ListWidget, DrawContext, Path, Point, Size, Color, Font, Request, LinearGradient
+//     ListWidget, DrawContext, Path, Point, Rect, Size, Color, Font, Request, LinearGradient
 // ═══════════════════════════════════════════════════
 // Configurable URL – point this at your widget.json endpoint.
 // The URL MUST NOT expose database credentials.
@@ -202,9 +202,46 @@ function drawChart(series, width, height, trendDown) {
   fillPath.addLine(new Point(points[points.length - 1].x, height - padV))
   fillPath.closeSubpath()
 
+  const fillHex = trendDown ? CFG.red : CFG.green
+  const baseline = height - padV
+
+  // Faint solid base under the whole area (hides seams between the strips below).
   ctx.addPath(fillPath)
-  ctx.setFillColor(new Color(trendDown ? CFG.red : CFG.green, 0.18))
+  ctx.setFillColor(new Color(fillHex, 0.05))
   ctx.fillPath()
+
+  // Vertical gradient fade under the curve (dense near the line -> transparent at
+  // the baseline), emulated with per-column strips. DrawContext.setFillColor takes
+  // a Color, not a LinearGradient, so we layer thin rects to fake the gradient.
+  const yAt = (px) => {
+    if (px <= points[0].x) return points[0].y
+    const last = points[points.length - 1]
+    if (px >= last.x) return last.y
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i]
+      const b = points[i + 1]
+      if (px >= a.x && px <= b.x) {
+        const t = b.x === a.x ? 0 : (px - a.x) / (b.x - a.x)
+        return a.y + t * (b.y - a.y)
+      }
+    }
+    return last.y
+  }
+  const colW = 1
+  const bands = 14
+  const maxAlpha = 0.38
+  for (let x = points[0].x; x <= points[points.length - 1].x; x += colW) {
+    const yCurve = yAt(x)
+    const stripH = baseline - yCurve
+    if (stripH <= 0) continue
+    for (let b = 0; b < bands; b++) {
+      const yTop = yCurve + (stripH * b) / bands
+      const bandH = stripH / bands + 0.8
+      const alpha = maxAlpha * (1 - b / bands)
+      ctx.setFillColor(new Color(fillHex, alpha))
+      ctx.fillRect(new Rect(x, yTop, colW + 0.6, bandH))
+    }
+  }
 
   const linePath = new Path()
   points.forEach((p, i) => {
