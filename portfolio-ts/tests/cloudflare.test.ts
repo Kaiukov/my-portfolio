@@ -1327,7 +1327,7 @@ describe("cloudflare whoami CLI — mocked auth", () => {
 // ─── cloudflare unknown subcommand (updated message) ────────────
 
 describe("cloudflare unknown subcommand after #106", () => {
-  test("lists updated subcommands in error message", async () => {
+  test("lists updated subcommands with publish in error message", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
@@ -1335,9 +1335,377 @@ describe("cloudflare unknown subcommand after #106", () => {
     await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "fake"]);
 
     const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.error.message).toContain("publish");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── validateSnapshot ──────────────────────────────────────────────
+
+describe("validateSnapshot", () => {
+  function validSnapshot() {
+    return {
+      portfolio_value_usd: 15424.58,
+      today: { abs: -174.83, pct: -1.12 },
+      total: { abs: 369.03, pct: 2.91 },
+      history: [{ date: "2026-05-30", value: 15123.40 }],
+      prices_as_of: "2026-05-30",
+      as_of_date: "2026-05-31",
+      updatedAt: "2026-05-31T12:00:00.000Z",
+    };
+  }
+
+  test("accepts valid snapshot", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    expect(validateSnapshot(validSnapshot())).toBeNull();
+  });
+
+  test("rejects NaN portfolio_value_usd", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.portfolio_value_usd = NaN;
+    expect(validateSnapshot(s)).toContain("portfolio_value_usd");
+  });
+
+  test("rejects NaN today.abs", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.today.abs = NaN;
+    expect(validateSnapshot(s)).toContain("today.abs");
+  });
+
+  test("rejects NaN today.pct", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.today.pct = NaN;
+    expect(validateSnapshot(s)).toContain("today.pct");
+  });
+
+  test("rejects NaN total.abs", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.total.abs = NaN;
+    expect(validateSnapshot(s)).toContain("total.abs");
+  });
+
+  test("rejects NaN total.pct", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.total.pct = NaN;
+    expect(validateSnapshot(s)).toContain("total.pct");
+  });
+
+  test("rejects missing history", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    (s as Record<string, unknown>).history = null;
+    expect(validateSnapshot(s as unknown as ReturnType<typeof validSnapshot>)).toContain("history");
+  });
+
+  test("rejects missing as_of_date", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.as_of_date = "";
+    expect(validateSnapshot(s)).toContain("as_of_date");
+  });
+
+  test("rejects missing updatedAt", async () => {
+    const { validateSnapshot } = await import("../src/cloudflare/publish.js");
+    const s = validSnapshot();
+    s.updatedAt = "";
+    expect(validateSnapshot(s)).toContain("updatedAt");
+  });
+});
+
+// ─── publishToKv — mocked services + spawn + config ─────────────────
+
+describe("publishToKv — mocked services + spawn + config", () => {
+  const TMP = join(import.meta.dir, "__publish_test_tmp__");
+
+  let mockSpawn: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    if (existsSync(TMP)) rmSync(TMP, { recursive: true });
+    mkdirSync(TMP, { recursive: true });
+
+    mockSpawn = mock();
+    mock.module("../src/cloudflare/spawn.js", () => ({
+      spawnWrangler: mockSpawn,
+    }));
+  });
+
+  afterEach(() => {
+    if (existsSync(TMP)) rmSync(TMP, { recursive: true });
+    mock.module("../src/cloudflare/spawn.js", () => require("../src/cloudflare/spawn.js"));
+  });
+
+  function writeConfig(kvNamespaceId?: string) {
+    const { saveLocalConfig } = require("../src/cloudflare/config.js");
+    saveLocalConfig(
+      {
+        account_id: "abcdef1234567890abcdef1234567890",
+        kv_namespace_id: kvNamespaceId,
+        wrangler_project_name: "portfolio-widget",
+        initialized_at: "2026-05-31T00:00:00.000Z",
+      },
+      TMP,
+    );
+  }
+
+  test("builds snapshot from mocked services, publishes via wrangler kv", async () => {
+    writeConfig("kv-namespace-12345");
+
+    mockSpawn.mockReturnValue({ stdout: "OK", stderr: "", exitCode: 0 });
+
+    const mockQuerySingle = mock();
+    const mockQuery = mock();
+
+    mockQuerySingle.mockResolvedValue({
+      holding_count: 5,
+      total_cash_usd: 500,
+      portfolio_value_usd: 15424.58,
+      last_transaction_date: "2026-05-30",
+      transaction_count: 42,
+      as_of_date: "2026-05-31",
+    });
+
+    mockQuery.mockResolvedValue([
+      { date: "2026-05-30", portfolio_value: 15424.58, investment_return: -1.12 },
+      { date: "2026-05-29", portfolio_value: 15599.41, investment_return: 0.80 },
+      { date: "2026-05-28", portfolio_value: 15475.10, investment_return: 0.35 },
+    ]);
+
+    mock.module("../src/db.js", () => ({
+      query: mockQuery,
+      querySingle: mockQuerySingle,
+      connect: () => {},
+      close: () => {},
+    }));
+
+    mock.module("../src/tx.js", () => ({
+      runTx: async <T>(fn: (tx: { unsafe: (...args: unknown[]) => unknown }) => Promise<T>): Promise<T> =>
+        fn({ unsafe: async () => [] }),
+    }));
+
+    const { publishToKv } = await import("../src/cloudflare/publish.js");
+    const result = await publishToKv(TMP);
+
+    expect(result.success).toBe(true);
+    expect(result.key).toBe("portfolio");
+    expect(result.namespaceId).toBe("kv-namespace-12345");
+    expect(result.snapshot).not.toBeNull();
+
+    const snap = result.snapshot!;
+    expect(snap.portfolio_value_usd).toBe(15424.58);
+    expect(Math.abs(snap.today.abs - (-174.83))).toBeLessThan(0.01);
+    expect(snap.today.pct).toBe(-1.12);
+    expect(snap.total).toBeDefined();
+    expect(snap.history.length).toBe(3);
+    expect(snap.history[0].date).toBe("2026-05-28");
+    expect(snap.history[2].date).toBe("2026-05-30");
+    expect(snap.prices_as_of).toBeDefined();
+    expect(snap.as_of_date).toBe("2026-05-31");
+    expect(snap.updatedAt).toBeDefined();
+    expect(new Date(snap.updatedAt).getTime()).toBeGreaterThan(0);
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const callArgs = mockSpawn.mock.calls[0] as [string[], { cwd?: string }?];
+    expect(callArgs[0][0]).toBe("kv");
+    expect(callArgs[0][1]).toBe("key");
+    expect(callArgs[0][2]).toBe("put");
+    expect(callArgs[0][3]).toBe("portfolio");
+    expect(JSON.parse(callArgs[0][4])).toEqual(snap);
+    expect(callArgs[0][5]).toBe("--namespace-id");
+    expect(callArgs[0][6]).toBe("kv-namespace-12345");
+
+    mock.module("../src/db.js", () => require("../src/db.js"));
+    mock.module("../src/tx.js", () => require("../src/tx.js"));
+  });
+
+  test("returns error when config is missing", async () => {
+    const { publishToKv } = await import("../src/cloudflare/publish.js");
+    const result = await publishToKv(TMP);
+
+    expect(result.success).toBe(false);
+    expect(result.namespaceId).toBeNull();
+    expect(result.snapshot).toBeNull();
+    expect(result.error).toContain("Not initialized");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  test("returns error when kv_namespace_id is missing", async () => {
+    writeConfig(undefined);
+
+    const { publishToKv } = await import("../src/cloudflare/publish.js");
+    const result = await publishToKv(TMP);
+
+    expect(result.success).toBe(false);
+    expect(result.namespaceId).toBeNull();
+    expect(result.snapshot).toBeNull();
+    expect(result.error).toContain("KV namespace not configured");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  test("returns error when wrangler kv put fails", async () => {
+    writeConfig("kv-namespace-12345");
+
+    mockSpawn.mockReturnValue({
+      stdout: "",
+      stderr: "Error: authentication failed",
+      exitCode: 1,
+    });
+
+    const mockQuerySingle = mock();
+    const mockQuery = mock();
+
+    mockQuerySingle.mockResolvedValue({
+      holding_count: 5,
+      total_cash_usd: 500,
+      portfolio_value_usd: 15424.58,
+      last_transaction_date: null,
+      transaction_count: 1,
+      as_of_date: "2026-05-31",
+    });
+
+    mockQuery.mockResolvedValue([
+      { date: "2026-05-30", portfolio_value: 15424.58, investment_return: -1.12 },
+      { date: "2026-05-29", portfolio_value: 15599.41, investment_return: 0.80 },
+    ]);
+
+    mock.module("../src/db.js", () => ({
+      query: mockQuery,
+      querySingle: mockQuerySingle,
+      connect: () => {},
+      close: () => {},
+    }));
+
+    mock.module("../src/tx.js", () => ({
+      runTx: async <T>(fn: (tx: { unsafe: (...args: unknown[]) => unknown }) => Promise<T>): Promise<T> =>
+        fn({ unsafe: async () => [] }),
+    }));
+
+    const { publishToKv } = await import("../src/cloudflare/publish.js");
+    const result = await publishToKv(TMP);
+
+    expect(result.success).toBe(false);
+    expect(result.namespaceId).toBe("kv-namespace-12345");
+    expect(result.snapshot).not.toBeNull();
+    expect(result.error).toContain("wrangler kv key put failed");
+
+    mock.module("../src/db.js", () => require("../src/db.js"));
+    mock.module("../src/tx.js", () => require("../src/tx.js"));
+  });
+});
+
+// ─── CLI integration — cloudflare publish ──────────────────────────
+
+describe("cloudflare publish CLI — mocked publishToKv", () => {
+  let mockPublish: ReturnType<typeof mock>;
+
+  afterEach(() => {
+    mock.module("../src/cloudflare/publish.js", () => require("../src/cloudflare/publish.js"));
+  });
+
+  test("returns success envelope on publish", async () => {
+    const snapshot = {
+      portfolio_value_usd: 15424.58,
+      today: { abs: -174.83, pct: -1.12 },
+      total: { abs: 369.03, pct: 2.91 },
+      history: [{ date: "2026-05-30", value: 15123.40 }],
+      prices_as_of: "2026-05-30",
+      as_of_date: "2026-05-31",
+      updatedAt: "2026-05-31T12:00:00.000Z",
+    };
+
+    mockPublish = mock().mockResolvedValue({
+      success: true,
+      key: "portfolio",
+      namespaceId: "kv-namespace-12345",
+      snapshot,
+    });
+
+    mock.module("../src/cloudflare/publish.js", () => ({
+      publishToKv: mockPublish,
+      buildSnapshot: require("../src/cloudflare/publish.js").buildSnapshot,
+      validateSnapshot: require("../src/cloudflare/publish.js").validateSnapshot,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "publish"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:publish");
+    expect(output.data.key).toBe("portfolio");
+    expect(output.data.namespace_id).toBe("kv-namespace-12345");
+    expect(output.data.snapshot).toEqual(snapshot);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns KV_NOT_CONFIGURED error when namespace missing", async () => {
+    mockPublish = mock().mockResolvedValue({
+      success: false,
+      key: "portfolio",
+      namespaceId: null,
+      snapshot: null,
+      error: "KV namespace not configured. Run `portfolio cloudflare init` or set kv_namespace_id in .portfolio/config.json.",
+    });
+
+    mock.module("../src/cloudflare/publish.js", () => ({
+      publishToKv: mockPublish,
+      buildSnapshot: require("../src/cloudflare/publish.js").buildSnapshot,
+      validateSnapshot: require("../src/cloudflare/publish.js").validateSnapshot,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "publish"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.ok).toBe(false);
-    expect(output.error.code).toBe("UNKNOWN_SUBCOMMAND");
-    expect(output.error.message).toContain("init | deploy | url | login | logout | whoami");
+    expect(output.command).toBe("cloudflare:publish");
+    expect(output.error.code).toBe("KV_NOT_CONFIGURED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns KV_PUBLISH_FAILED error when wrangler fails", async () => {
+    mockPublish = mock().mockResolvedValue({
+      success: false,
+      key: "portfolio",
+      namespaceId: "kv-namespace-12345",
+      snapshot: null,
+      error: "wrangler kv key put failed (exit code 1): auth error",
+    });
+
+    mock.module("../src/cloudflare/publish.js", () => ({
+      publishToKv: mockPublish,
+      buildSnapshot: require("../src/cloudflare/publish.js").buildSnapshot,
+      validateSnapshot: require("../src/cloudflare/publish.js").validateSnapshot,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "publish"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:publish");
+    expect(output.error.code).toBe("KV_PUBLISH_FAILED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
