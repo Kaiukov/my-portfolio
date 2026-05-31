@@ -9,8 +9,8 @@
 -- Monthly: performance snapshot
 --
 -- To apply: psql "$PORTFOLIO_DB_URL" -f portfolio_db/sql/cron_jobs.sql
--- To list:   SELECT * FROM cron.job WHERE jobname LIKE 'portfolio_%';
--- To clear:  SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname LIKE 'portfolio_%';
+-- To list:   SELECT * FROM cron.job WHERE jobname LIKE 'portfolio\_%' ESCAPE '\';
+-- To clear:  SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname LIKE 'portfolio\_%' ESCAPE '\';
 
 DO $do$
 BEGIN
@@ -96,6 +96,6 @@ BEGIN
     );
 
     RAISE NOTICE 'Portfolio pg_cron jobs registered successfully.';
-    RAISE NOTICE 'Use SELECT * FROM cron.job WHERE jobname LIKE ''portfolio_%%'' to list active jobs.';
+    RAISE NOTICE 'Use SELECT * FROM cron.job WHERE jobname LIKE ''portfolio\_%%'' ESCAPE ''\'' to list active jobs.';
 END;
 $do$;

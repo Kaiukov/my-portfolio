@@ -68,6 +68,11 @@ BEGIN
                 rows_affected = v_total_issues,
                 error_message = v_combined_list
             WHERE id = v_job_id;
+
+            INSERT INTO service_state (state_key, state_value, updated_at)
+            VALUES ('prices_need_fetch', 'true', now())
+            ON CONFLICT (state_key)
+            DO UPDATE SET state_value = 'true', updated_at = now();
         ELSE
             UPDATE scheduled_job_log
             SET status = 'completed_ok',

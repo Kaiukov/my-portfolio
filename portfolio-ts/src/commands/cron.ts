@@ -122,7 +122,7 @@ export async function cronList(): Promise<CronListResult> {
   const jobs = await query<CronListJob>(
     `SELECT jobid, jobname, schedule, command, nodename, nodeport, database, username, active
      FROM cron.job
-     WHERE jobname LIKE 'portfolio_%'
+     WHERE jobname LIKE 'portfolio\_%' ESCAPE '\'
      ORDER BY jobid`,
   );
 
