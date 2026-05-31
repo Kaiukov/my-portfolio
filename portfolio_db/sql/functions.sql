@@ -54,7 +54,8 @@ AS $$
         WHEN asset = 'CASH EUR' THEN 'EURUSD=X'
         WHEN asset = 'CASH GBP' THEN 'GBPUSD=X'
         WHEN asset = 'CASH UAH' THEN 'UAHUSD=X'
-        ELSE asset
+        WHEN RIGHT(asset, 4) = '-USD' OR RIGHT(asset, 5) = 'USD=X' THEN asset
+        ELSE asset || '-USD'
     END
 $$;
 
@@ -183,6 +184,25 @@ AS $$
     END
 $$;
 
+-- Map a fee_currency to the ticker used for USD price lookup.
+-- Fiat currencies (EUR, GBP, JPY, etc.) are converted to their FX pair (EURUSD=X).
+-- Non-fiat currencies (BTC, ETH, etc.) are converted to their -USD pair (BTC-USD).
+-- NULL, empty, or USD fee_currency returns 'USD'.
+-- This single rule replaces duplicated BTC->BTC-USD logic in FIFO, status, and cash engines.
+CREATE OR REPLACE FUNCTION fee_currency_ticker_sql(p_fee_currency TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN p_fee_currency IS NULL OR p_fee_currency = '' THEN 'USD'
+        WHEN get_asset_type_sql(p_fee_currency) = 'cash_base' THEN 'USD'
+        WHEN get_asset_type_sql(p_fee_currency) = 'cash_fx'
+            THEN get_cash_key_for_asset_sql(p_fee_currency, get_asset_type_sql(p_fee_currency))
+        ELSE p_fee_currency || '-USD'
+    END
+$$;
+
 -- Get market value in USD for an asset quantity
 CREATE OR REPLACE FUNCTION asset_market_value_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
 RETURNS DOUBLE PRECISION
@@ -306,12 +326,12 @@ AS $$
         UNION
 
         -- Asset tickers needed for non-fiat fee currencies (e.g. BTC -> BTC-USD)
-        SELECT DISTINCT t.fee_currency || '-USD', 'asset'::TEXT
+        SELECT DISTINCT fee_currency_ticker_sql(t.fee_currency), 'asset'::TEXT
         FROM transactions t
         WHERE t.fee_currency IS NOT NULL
-          AND t.fee_currency NOT IN ('', 'USD', 'EUR', 'GBP', 'UAH', 'JPY',
-                                      'CHF', 'CAD', 'AUD', 'HKD', 'SGD')
+          AND t.fee_currency <> ''
           AND get_asset_type_sql(t.fee_currency) NOT IN ('cash_base', 'cash_fx')
+          AND fee_currency_ticker_sql(t.fee_currency) <> 'USD'
     ) sub
     WHERE ticker IS NOT NULL
 $$;
@@ -394,19 +414,15 @@ AS $$
 DECLARE
     v_cost_basis       DOUBLE PRECISION := 0;
     v_realized_gain    DOUBLE PRECISION := 0;
-    v_total_cost_all   DOUBLE PRECISION := 0;
     v_market_value     DOUBLE PRECISION := 0;
     v_lot_cost         DOUBLE PRECISION;
     v_proceeds         DOUBLE PRECISION;
-    v_trade_currency   TEXT;
-    v_fee_currency     TEXT;
     v_sell_qty         DOUBLE PRECISION;
     v_consume          DOUBLE PRECISION;
     v_cost_consumed    DOUBLE PRECISION;
     v_proceeds_share   DOUBLE PRECISION;
     lot_rec            RECORD;
     tx                 RECORD;
-    asset_rec           RECORD;
 BEGIN
     v_cost_basis := 0;
     v_realized_gain := 0;
@@ -433,7 +449,7 @@ BEGIN
     LOOP
         IF tx.action = 'BUY' THEN
             v_lot_cost := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
-                        + cash_amount_to_usd_sql(tx.fee_currency, COALESCE(tx.fees, 0), tx.date);
+                        + cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
 
             INSERT INTO fifo_lots (asset, remaining_qty, unit_cost_usd)
             VALUES (tx.asset, tx.quantity,
@@ -441,7 +457,7 @@ BEGIN
         ELSIF tx.action = 'SELL' THEN
             v_sell_qty := tx.quantity;
             v_proceeds := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
-                        - cash_amount_to_usd_sql(tx.fee_currency, COALESCE(tx.fees, 0), tx.date);
+                        - cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
 
             FOR lot_rec IN
                 SELECT id, remaining_qty, unit_cost_usd
@@ -534,7 +550,7 @@ AS $$
                 THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0)
             + COALESCE(SUM(CASE WHEN t.fees IS NOT NULL AND t.fees > 0
                 THEN cash_amount_to_usd_sql(
-                    COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD'),
+                    fee_currency_ticker_sql(COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD')),
                     t.fees,
                     t.date
                 ) ELSE 0 END), 0) AS fees,
@@ -639,12 +655,7 @@ AS $$
     ),
     fee_cash AS (
         SELECT
-            CASE
-                WHEN get_asset_type_sql(t.fee_currency) = 'cash_base' THEN 'USD'
-                WHEN get_asset_type_sql(t.fee_currency) = 'cash_fx'
-                    THEN get_cash_key_for_asset_sql(t.fee_currency, get_asset_type_sql(t.fee_currency))
-                ELSE t.fee_currency || '-USD'
-            END AS cash_key,
+            fee_currency_ticker_sql(t.fee_currency) AS cash_key,
             CASE
                 WHEN get_asset_type_sql(t.fee_currency) = 'cash_base' THEN 'USD'
                 ELSE t.fee_currency
