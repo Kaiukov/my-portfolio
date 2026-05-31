@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { detectAuth, validateAccountId } from "./auth.js";
 import { generateWranglerJsonc, generateWorkerJs } from "./templates.js";
 import { saveLocalConfig } from "./config.js";
-import type { AuthResult, CloudflareConfig, InitOptions, InitResult } from "./types.js";
+import type { CloudflareConfig, InitOptions, InitResult } from "./types.js";
 
 const CLOUDFLARE_DIR = "cloudflare";
+
+const emptyFileActions = { wranglerJsonc: "none" as const, workerJs: "none" as const };
 
 export async function cloudflareInit(
   options: InitOptions = {},
@@ -20,6 +22,7 @@ export async function cloudflareInit(
       auth: authResult,
       config: null,
       files: { wranglerJsonc: "", workerJs: "" },
+      fileActions: emptyFileActions,
       warnings,
     };
   }
@@ -30,6 +33,7 @@ export async function cloudflareInit(
       auth: { ...authResult, accountId: null, error: result.error },
       config: null,
       files: { wranglerJsonc: "", workerJs: "" },
+      fileActions: emptyFileActions,
       warnings,
     };
   }
@@ -45,13 +49,38 @@ export async function cloudflareInit(
     mkdirSync(cloudflareDir, { recursive: true });
   }
 
-  const wranglerJsoncContent = generateWranglerJsonc(config);
-  const workerJsContent = generateWorkerJs();
+  const wranglerPath = join(cloudflareDir, "wrangler.jsonc");
+  const workerPath = join(cloudflareDir, "worker.js");
 
-  writeFileSync(join(cloudflareDir, "wrangler.jsonc"), wranglerJsoncContent, "utf-8");
-  writeFileSync(join(cloudflareDir, "worker.js"), workerJsContent, "utf-8");
+  const wranglerExists = existsSync(wranglerPath);
+  const workerExists = existsSync(workerPath);
 
-  const configPath = saveLocalConfig(config, root);
+  let wranglerAction: "written" | "skipped" | "none" = "none";
+  let workerAction: "written" | "skipped" | "none" = "none";
+
+  if (!wranglerExists || options.force) {
+    const wranglerJsoncContent = generateWranglerJsonc(config);
+    writeFileSync(wranglerPath, wranglerJsoncContent, "utf-8");
+    wranglerAction = "written";
+  } else {
+    warnings.push(
+      "cloudflare/wrangler.jsonc already exists. Use --force to overwrite. Keeping existing file.",
+    );
+    wranglerAction = "skipped";
+  }
+
+  if (!workerExists || options.force) {
+    const workerJsContent = generateWorkerJs();
+    writeFileSync(workerPath, workerJsContent, "utf-8");
+    workerAction = "written";
+  } else {
+    warnings.push(
+      "cloudflare/worker.js already exists. Use --force to overwrite. Keeping existing file.",
+    );
+    workerAction = "skipped";
+  }
+
+  saveLocalConfig(config, root);
 
   if (!config.kv_namespace_id) {
     warnings.push(
@@ -63,8 +92,12 @@ export async function cloudflareInit(
     auth: { authenticated: true, method: authResult.method, accountId: result.id },
     config,
     files: {
-      wranglerJsonc: join(cloudflareDir, "wrangler.jsonc"),
-      workerJs: join(cloudflareDir, "worker.js"),
+      wranglerJsonc: wranglerPath,
+      workerJs: workerPath,
+    },
+    fileActions: {
+      wranglerJsonc: wranglerAction,
+      workerJs: workerAction,
     },
     warnings,
   };

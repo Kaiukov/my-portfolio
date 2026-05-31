@@ -19,6 +19,10 @@ export interface InitResult {
     wranglerJsonc: string;
     workerJs: string;
   };
+  fileActions: {
+    wranglerJsonc: "written" | "skipped" | "none";
+    workerJs: "written" | "skipped" | "none";
+  };
   warnings: string[];
 }
 

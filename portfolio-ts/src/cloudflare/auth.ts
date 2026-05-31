@@ -48,16 +48,23 @@ async function tryWranglerAccountId(): Promise<string | null> {
     if (proc.exitCode !== 0) return null;
 
     const output = new TextDecoder().decode(proc.stdout);
-    const match = output.match(/Account ID\s*\|\s*([a-f0-9]{32})/i);
-    if (match) return match[1];
-
-    const altMatch = output.match(/\|([a-f0-9]{32})\|/);
-    if (altMatch) return altMatch[1];
-
-    return null;
+    return parseWranglerWhoami(output);
   } catch {
     return null;
   }
+}
+
+export function parseWranglerWhoami(output: string): string | null {
+  const boxMatch = output.match(/[\│\|]\s*([a-f0-9]{32})\s*[\│\|]/i);
+  if (boxMatch) return boxMatch[1];
+
+  const labelMatch = output.match(/Account\s+ID[^│|a-f0-9]*[│|]\s*([a-f0-9]{32})/i);
+  if (labelMatch) return labelMatch[1];
+
+  const hexMatch = output.match(/\b([a-f0-9]{32})\b/i);
+  if (hexMatch) return hexMatch[1];
+
+  return null;
 }
 
 export interface AccountIdValid {

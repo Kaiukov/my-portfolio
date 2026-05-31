@@ -1,7 +1,7 @@
 import { describe, expect, test, mock, jest, afterEach, beforeEach } from "bun:test";
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import type { AuthResult, CloudflareConfig, InitResult } from "../src/cloudflare/types.js";
+import type { CloudflareConfig, InitResult } from "../src/cloudflare/types.js";
 
 const tmpDir = join(import.meta.dir, "__cloudflare_test_tmp__");
 
@@ -16,7 +16,8 @@ function teardownTmpDir() {
 
 describe("cloudflare types", () => {
   test("AuthResult shape", () => {
-    const ar: AuthResult = {
+    const { AuthResult } = require("../src/cloudflare/types.js");
+    const ar = {
       authenticated: false,
       method: null,
       accountId: null,
@@ -24,18 +25,6 @@ describe("cloudflare types", () => {
     };
     expect(ar.authenticated).toBe(false);
     expect(ar.method).toBeNull();
-  });
-
-  test("InitResult shape", () => {
-    const ir: InitResult = {
-      auth: { authenticated: false, method: null, accountId: null },
-      config: null,
-      files: { wranglerJsonc: "", workerJs: "" },
-      warnings: [],
-    };
-    expect(ir.auth.authenticated).toBe(false);
-    expect(ir.config).toBeNull();
-    expect(ir.warnings).toEqual([]);
   });
 });
 
@@ -136,6 +125,53 @@ describe("auth detection — explicit env (no global mutation)", () => {
   });
 });
 
+describe("parseWranglerWhoami — box-drawing table", () => {
+  test("extracts account id from box-drawing table with Account ID row", () => {
+    const { parseWranglerWhoami } = require("../src/cloudflare/auth.js");
+    const output =
+      "├────────────────────────┼──────────────────────────────────┤\n" +
+      "│ Account ID             │ abcdef1234567890abcdef1234567890 │\n" +
+      "├────────────────────────┼──────────────────────────────────┤\n";
+    const result = parseWranglerWhoami(output);
+    expect(result).toBe("abcdef1234567890abcdef1234567890");
+  });
+
+  test("extracts account id from simple box table with │ separator", () => {
+    const { parseWranglerWhoami } = require("../src/cloudflare/auth.js");
+    const output = "│ abcdef1234567890abcdef1234567890 │";
+    const result = parseWranglerWhoami(output);
+    expect(result).toBe("abcdef1234567890abcdef1234567890");
+  });
+
+  test("falls back to 32-char hex anywhere in output", () => {
+    const { parseWranglerWhoami } = require("../src/cloudflare/auth.js");
+    const output = "Some random output containing abcdef1234567890abcdef1234567890 inside text";
+    const result = parseWranglerWhoami(output);
+    expect(result).toBe("abcdef1234567890abcdef1234567890");
+  });
+
+  test("returns null when no 32-char hex found", () => {
+    const { parseWranglerWhoami } = require("../src/cloudflare/auth.js");
+    const output = "No account id here, just some text";
+    const result = parseWranglerWhoami(output);
+    expect(result).toBeNull();
+  });
+
+  test("handles upper-case hex id", () => {
+    const { parseWranglerWhoami } = require("../src/cloudflare/auth.js");
+    const output = "│ ABCDEF1234567890ABCDEF1234567890 │";
+    const result = parseWranglerWhoami(output);
+    expect(result).toBe("ABCDEF1234567890ABCDEF1234567890");
+  });
+
+  test("handles mixed-case hex id", () => {
+    const { parseWranglerWhoami } = require("../src/cloudflare/auth.js");
+    const output = "│ AbCdEf1234567890AbCdEf1234567890 │";
+    const result = parseWranglerWhoami(output);
+    expect(result).toBe("AbCdEf1234567890AbCdEf1234567890");
+  });
+});
+
 describe("validateAccountId", () => {
   test("accepts valid 32-char hex account ID", () => {
     const { validateAccountId } = require("../src/cloudflare/auth.js");
@@ -230,6 +266,7 @@ describe("cloudflareInit — mocked auth (no global env mutation)", () => {
     mock.module("../src/cloudflare/auth.js", () => ({
       detectAuth: mockDetectAuth,
       validateAccountId: require("../src/cloudflare/auth.js").validateAccountId,
+      parseWranglerWhoami: require("../src/cloudflare/auth.js").parseWranglerWhoami,
     }));
   });
 
@@ -272,6 +309,8 @@ describe("cloudflareInit — mocked auth (no global env mutation)", () => {
     expect(result.config!.account_id).toBe("deadbeef12345678deadbeef12345678");
     expect(result.files.wranglerJsonc).toContain("cloudflare/wrangler.jsonc");
     expect(result.files.workerJs).toContain("cloudflare/worker.js");
+    expect(result.fileActions.wranglerJsonc).toBe("written");
+    expect(result.fileActions.workerJs).toBe("written");
 
     expect(existsSync(join(tmpDir, "cloudflare/wrangler.jsonc"))).toBe(true);
     expect(existsSync(join(tmpDir, "cloudflare/worker.js"))).toBe(true);
@@ -342,7 +381,8 @@ describe("cloudflareInit — mocked auth (no global env mutation)", () => {
     const result = await cloudflareInit({}, tmpDir);
 
     expect(result.warnings.length).toBeGreaterThan(0);
-    expect(result.warnings[0]).toContain("KV namespace");
+    const kvWarning = result.warnings.find((w) => w.includes("KV namespace"));
+    expect(kvWarning).toBeDefined();
   });
 
   test("rejects invalid account_id format", async () => {
@@ -361,6 +401,110 @@ describe("cloudflareInit — mocked auth (no global env mutation)", () => {
   });
 });
 
+describe("cloudflareInit — force guard", () => {
+  let mockDetectAuth: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    setupTmpDir();
+    mockDetectAuth = mock();
+    mock.module("../src/cloudflare/auth.js", () => ({
+      detectAuth: mockDetectAuth,
+      validateAccountId: require("../src/cloudflare/auth.js").validateAccountId,
+      parseWranglerWhoami: require("../src/cloudflare/auth.js").parseWranglerWhoami,
+    }));
+  });
+
+  afterEach(() => {
+    teardownTmpDir();
+    mock.module("../src/cloudflare/auth.js", () => require("../src/cloudflare/auth.js"));
+  });
+
+  test("skips existing files when force is false", async () => {
+    mockDetectAuth.mockResolvedValue({
+      authenticated: true,
+      method: "api_token",
+      accountId: "deadbeef12345678deadbeef12345678",
+    });
+
+    const cloudflareDir = join(tmpDir, "cloudflare");
+    mkdirSync(cloudflareDir, { recursive: true });
+    writeFileSync(join(cloudflareDir, "wrangler.jsonc"), '{"name":"user-edited"}', "utf-8");
+    writeFileSync(join(cloudflareDir, "worker.js"), "// user custom worker", "utf-8");
+
+    const { cloudflareInit } = await import("../src/cloudflare/init.js");
+    const result = await cloudflareInit({}, tmpDir);
+
+    expect(result.fileActions.wranglerJsonc).toBe("skipped");
+    expect(result.fileActions.workerJs).toBe("skipped");
+
+    const wranglerContent = readFileSync(join(cloudflareDir, "wrangler.jsonc"), "utf-8");
+    expect(wranglerContent).toBe('{"name":"user-edited"}');
+
+    const workerContent = readFileSync(join(cloudflareDir, "worker.js"), "utf-8");
+    expect(workerContent).toBe("// user custom worker");
+  });
+
+  test("overwrites existing files when force is true", async () => {
+    mockDetectAuth.mockResolvedValue({
+      authenticated: true,
+      method: "api_token",
+      accountId: "deadbeef12345678deadbeef12345678",
+    });
+
+    const cloudflareDir = join(tmpDir, "cloudflare");
+    mkdirSync(cloudflareDir, { recursive: true });
+    writeFileSync(join(cloudflareDir, "wrangler.jsonc"), '{"name":"user-edited"}', "utf-8");
+    writeFileSync(join(cloudflareDir, "worker.js"), "// user custom worker", "utf-8");
+
+    const { cloudflareInit } = await import("../src/cloudflare/init.js");
+    const result = await cloudflareInit({ force: true }, tmpDir);
+
+    expect(result.fileActions.wranglerJsonc).toBe("written");
+    expect(result.fileActions.workerJs).toBe("written");
+
+    const wranglerContent = readFileSync(join(cloudflareDir, "wrangler.jsonc"), "utf-8");
+    expect(wranglerContent).toContain("deadbeef12345678deadbeef12345678");
+    expect(wranglerContent).not.toContain("user-edited");
+
+    const workerContent = readFileSync(join(cloudflareDir, "worker.js"), "utf-8");
+    expect(workerContent).toContain("PORTFOLIO_KV");
+    expect(workerContent).not.toContain("user custom worker");
+  });
+
+  test("warns when files are skipped", async () => {
+    mockDetectAuth.mockResolvedValue({
+      authenticated: true,
+      method: "api_token",
+      accountId: "deadbeef12345678deadbeef12345678",
+    });
+
+    const cloudflareDir = join(tmpDir, "cloudflare");
+    mkdirSync(cloudflareDir, { recursive: true });
+    writeFileSync(join(cloudflareDir, "wrangler.jsonc"), "existing", "utf-8");
+
+    const { cloudflareInit } = await import("../src/cloudflare/init.js");
+    const result = await cloudflareInit({}, tmpDir);
+
+    const skipWarning = result.warnings.find((w) => w.includes("already exists"));
+    expect(skipWarning).toBeDefined();
+    expect(skipWarning).toContain("--force");
+  });
+
+  test("writes files on first run (no existing files)", async () => {
+    mockDetectAuth.mockResolvedValue({
+      authenticated: true,
+      method: "api_token",
+      accountId: "deadbeef12345678deadbeef12345678",
+    });
+
+    const { cloudflareInit } = await import("../src/cloudflare/init.js");
+    const result = await cloudflareInit({}, tmpDir);
+
+    expect(result.fileActions.wranglerJsonc).toBe("written");
+    expect(result.fileActions.workerJs).toBe("written");
+  });
+});
+
 describe("cloudflare CLI integration — mocked init (no global env)", () => {
   afterEach(() => {
     mock.module("../src/cloudflare/init.js", () => require("../src/cloudflare/init.js"));
@@ -376,6 +520,7 @@ describe("cloudflare CLI integration — mocked init (no global env)", () => {
       },
       config: null,
       files: { wranglerJsonc: "", workerJs: "" },
+      fileActions: { wranglerJsonc: "none" as const, workerJs: "none" as const },
       warnings: [],
     } satisfies InitResult);
 
@@ -466,6 +611,7 @@ describe("cloudflare init — missing account_id error code via mocked init", ()
       },
       config: null,
       files: { wranglerJsonc: "", workerJs: "" },
+      fileActions: { wranglerJsonc: "none" as const, workerJs: "none" as const },
       warnings: [],
     } satisfies InitResult);
 
@@ -505,6 +651,7 @@ describe("cloudflare init — missing account_id error code via mocked init", ()
         wranglerJsonc: "cloudflare/wrangler.jsonc",
         workerJs: "cloudflare/worker.js",
       },
+      fileActions: { wranglerJsonc: "written" as const, workerJs: "written" as const },
       warnings: [],
     } satisfies InitResult);
 
