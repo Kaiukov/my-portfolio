@@ -17,6 +17,9 @@ mock.module("../src/tx.js", () => ({
 
 describe("exchangeCurrency", () => {
   test("throws when from and to are the same", async () => {
+    mockQuerySingle
+      .mockResolvedValueOnce({ normalized: "USD" })
+      .mockResolvedValueOnce({ normalized: "USD" });
     const { exchangeCurrency } = await import("../src/commands/exchange.js");
     await expect(
       exchangeCurrency({
@@ -29,8 +32,42 @@ describe("exchangeCurrency", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  test("throws when equivalent cash buckets: USD vs CASH USD", async () => {
+    mockQuerySingle
+      .mockResolvedValueOnce({ normalized: "USD" })
+      .mockResolvedValueOnce({ normalized: "USD" });
+    const { exchangeCurrency } = await import("../src/commands/exchange.js");
+    await expect(
+      exchangeCurrency({
+        dateStr: "01-01-2026",
+        fromAsset: "USD",
+        toAsset: "CASH USD",
+        quantity: 1000,
+        rate: 1,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("throws when equivalent cash buckets: CASH USD vs USD", async () => {
+    mockQuerySingle
+      .mockResolvedValueOnce({ normalized: "USD" })
+      .mockResolvedValueOnce({ normalized: "USD" });
+    const { exchangeCurrency } = await import("../src/commands/exchange.js");
+    await expect(
+      exchangeCurrency({
+        dateStr: "01-01-2026",
+        fromAsset: "CASH USD",
+        toAsset: "USD",
+        quantity: 1000,
+        rate: 1,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   test("accepts ISO YYYY-MM-DD date format", async () => {
     mockQuerySingle
+      .mockResolvedValueOnce({ normalized: "USD" })
+      .mockResolvedValueOnce({ normalized: "EURUSD=X" })
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: true });
     mockWithTransaction.mockImplementation(async (fn: (tx: any) => Promise<any>) => {
@@ -57,6 +94,8 @@ describe("exchangeCurrency", () => {
 
   test("throws when FROM is not cash-like", async () => {
     mockQuerySingle
+      .mockResolvedValueOnce({ normalized: "AAPL" })
+      .mockResolvedValueOnce({ normalized: "USD" })
       .mockResolvedValueOnce({ ok: false }) // from: AAPL is not cash-like
       .mockResolvedValueOnce({ ok: true });
     const { exchangeCurrency } = await import("../src/commands/exchange.js");
@@ -73,6 +112,8 @@ describe("exchangeCurrency", () => {
 
   test("succeeds: creates two transactions and recalculates", async () => {
     mockQuerySingle
+      .mockResolvedValueOnce({ normalized: "USD" })
+      .mockResolvedValueOnce({ normalized: "EURUSD=X" })
       .mockResolvedValueOnce({ ok: true }) // from: USD is cash-like
       .mockResolvedValueOnce({ ok: true }); // to: EURUSD=X is cash-like
 
