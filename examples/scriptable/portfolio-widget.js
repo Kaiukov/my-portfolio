@@ -153,20 +153,20 @@ function addMetricLine(stack, label, metric, currency) {
 
   const labelTxt = row.addText(`${label} `)
   labelTxt.textColor = new Color(CFG.labelGray)
-  labelTxt.font = Font.mediumSystemFont(13)
+  labelTxt.font = Font.mediumSystemFont(12)
 
   const valueTxt = row.addText(`${formatSignedMoney(m.amount, currency)} (${formatPct(m.pct)})`)
   valueTxt.textColor = color
-  valueTxt.font = Font.mediumSystemFont(13)
+  valueTxt.font = Font.mediumSystemFont(12)
   valueTxt.lineLimit = 1
   valueTxt.minimumScaleFactor = 0.7
 }
 
 function addChart(parent, series, today) {
   const trendDown = today && today.amount != null ? today.amount < 0 : false
-  const chart = drawChart(series, 110, 44, trendDown)
+  const chart = drawChart(series, 140, 50, trendDown)
   const img = parent.addImage(chart)
-  img.imageSize = new Size(110, 44)
+  img.imageSize = new Size(140, 50)
 }
 
 // ═══════════ SPARKLINE ═══════════
