@@ -413,7 +413,12 @@ export async function dispatch(argv: string[]): Promise<void> {
       switch (sub) {
         case "install": {
           const result = await cronInstall();
-          console.log(JSON.stringify(success("cron:install", result), null, 2));
+          if (result.applied) {
+            console.log(JSON.stringify(success("cron:install", result), null, 2));
+          } else {
+            console.log(JSON.stringify(error("cron:install", result.pg_cron_available ? "CRON_REGISTRATION_FAILED" : "CRON_UNAVAILABLE", result.message), null, 2));
+            process.exit(1);
+          }
           return;
         }
         case "list": {

@@ -1,9 +1,15 @@
--- pg_cron job wrapper: detect missing/stale prices.
+-- pg_cron job wrapper: DETECT missing/stale prices (diagnostic only).
 -- Runs daily_maintenance_check() and stale_tickers_sql() to detect price gaps.
--- Logs detection results to scheduled_job_log.
--- NOTE: actual Yahoo price fetching requires network I/O and is performed by
--- the 'portfolio-ts repair_prices' CLI command. This wrapper is a SQL-only
--- diagnostic that flags staleness in service_state for the CLI to act on.
+-- Sets service_state.prices_need_fetch flag for external CLI to act on.
+-- STATUS: 'needs_external_repair' when stale tickers found, 'completed_ok' when all fresh.
+--
+-- IMPORTANT LIMITATION: PostgreSQL/pg_cron cannot make network calls.
+-- This wrapper CANNOT fetch prices from Yahoo Finance or any external API.
+-- Actual price fetching MUST run via the external CLI:
+--   portfolio-ts repair_prices
+-- (trigger manually, via OS crontab, or via CI pipeline).
+-- pg_cron ONLY detects staleness — it does not and cannot repair it.
+--
 -- Deployable independently of pg_cron; test with: SELECT job_repair_missing_prices();
 
 DROP FUNCTION IF EXISTS job_repair_missing_prices(INTEGER) CASCADE;
@@ -28,7 +34,10 @@ BEGIN
         FROM stale_tickers_sql(p_max_age_days) s;
 
         UPDATE scheduled_job_log
-        SET status = 'completed',
+        SET status = CASE
+                WHEN v_stale_count > 0 THEN 'needs_external_repair'
+                ELSE 'completed_ok'
+            END,
             finished_at = now(),
             rows_affected = v_stale_count,
             error_message = CASE

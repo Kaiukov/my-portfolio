@@ -55,16 +55,45 @@ SELECT job_health(5);
 
 The `cron_jobs.sql` file contains all `cron.schedule()` registrations guarded by an extension existence check. Deploying it on a DB without pg_cron is safe — it emits a NOTICE and skips.
 
+## LIMITATION: pg_cron is SQL-Only — Cannot Fetch External Prices
+
+**pg_cron runs SQL functions inside the database. It has NO network access.** It cannot call external APIs (Yahoo Finance, etc.) to fetch price data. This is a fundamental PostgreSQL security boundary — PL/pgSQL cannot make HTTP requests.
+
+**What pg_cron CAN do (and does):**
+- `job_repair_missing_prices` — DETECTS stale/missing prices via `daily_maintenance_check()` + `stale_tickers_sql()`, sets `service_state.prices_need_fetch = true`, logs which tickers are stale to `scheduled_job_log` with status `needs_external_repair`
+- `job_verify_prices` — DIAGNOSTIC coverage and staleness check
+- `job_recalculate` — Rebuilds `daily_returns` from cached prices (only works when prices are already in `prices` table)
+- `job_health` — DB liveness + service_state freshness check
+
+**What requires the external CLI (OS crontab / CI / manual):**
+- Actual price fetching: `portfolio-ts repair_prices` which calls Yahoo Finance via `yahoo-finance2`
+
+**Recommended hybrid approach:**
+1. Let pg_cron run `job_detect_missing_prices` (Sunday 02:30) to flag staleness before the weekly recalc
+2. Schedule `portfolio-ts repair_prices` via OS crontab 20 minutes earlier (Sunday 02:10) so fresh prices are in the cache before detection runs
+3. Or run `portfolio-ts repair_prices` manually when `scheduled_job_log` shows `needs_external_repair` entries
+
+**Verifying staleness in the audit trail:**
+```sql
+SELECT started_at, rows_affected, error_message
+FROM scheduled_job_log
+WHERE job_name = 'job_repair_missing_prices'
+  AND status = 'needs_external_repair'
+ORDER BY started_at DESC;
+```
+
 ## Lifecycle
 
-Jobs are scheduled in this daily/weekly order:
+Jobs are scheduled in this daily/weekly order (pg_cron SQL-only jobs, plus external CLI for price fetching):
 
 ```
-verify_prices (07:00) → health (07:05)
-repair_prices (Sun 02:30) → recalculate (Sun 03:00, force)
-backup (02:00 daily, before all other jobs)
-recalculate (Mon-Fri 18:30, Sat 10:00)
-monthly performance (1st 06:00)
+external: repair_prices (OS crontab Sun 02:10) — fetches fresh prices from Yahoo
+pg_cron:  detect_missing_prices (Sun 02:30) — verifies prices are now fresh
+pg_cron:  recalculate --force (Sun 03:00)    — full weekly rebuild
+pg_cron:  backup (daily 02:00)
+pg_cron:  verify_prices (daily 07:00) → health (07:05)
+pg_cron:  recalculate (Mon-Fri 18:30, Sat 10:00) — guarded (skips if no changes)
+pg_cron:  monthly performance (1st 06:00)
 ```
 
 ## Job Schedule
@@ -74,10 +103,10 @@ monthly performance (1st 06:00)
 | `portfolio_verify_prices_daily` | `0 7 * * *` | `job_verify_prices()` | Price coverage + staleness diagnostic |
 | `portfolio_health_daily` | `5 7 * * *` | `job_health()` | DB reachability + service_state freshness |
 | `portfolio_backup_daily` | `0 2 * * *` | `job_backup()` | COPY snapshot of transactions, daily_returns, prices |
-| `portfolio_recalc_weekday` | `30 18 * * 1-5` | `job_recalculate()` | Refresh daily returns after US market close |
-| `portfolio_recalc_saturday` | `0 10 * * 6` | `job_recalculate()` | Catch late Friday settlement data |
-| `portfolio_recalc_sunday` | `0 3 * * 0` | `job_recalculate()` | Weekly deep recalculation |
-| `portfolio_repair_prices_sunday` | `30 2 * * 0` | `job_repair_missing_prices()` | Detect missing/stale prices (diagnostic only) |
+| `portfolio_recalc_weekday` | `30 18 * * 1-5` | `job_recalculate()` | Guarded refresh (skips if no changes or stale prices) |
+| `portfolio_recalc_saturday` | `0 10 * * 6` | `job_recalculate()` | Guarded refresh (catch late Friday data) |
+| `portfolio_recalc_sunday` | `0 3 * * 0` | `job_recalculate(true)` | Forced full rebuild (bypasses all guards) |
+| `portfolio_detect_missing_prices_sunday` | `30 2 * * 0` | `job_repair_missing_prices()` | Detect missing/stale prices (SQL-only, cannot fetch) |
 | `portfolio_performance_monthly` | `0 6 1 * *` | `job_monthly_performance()` | Monthly performance snapshot |
 
 ## CLI Commands

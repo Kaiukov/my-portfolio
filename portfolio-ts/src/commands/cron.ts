@@ -75,12 +75,12 @@ export async function cronInstall(): Promise<CronInstallResult> {
               $$SELECT job_recalculate()$$
           );
           PERFORM cron.schedule(
-              'portfolio_repair_prices_sunday', '30 2 * * 0',
+              'portfolio_detect_missing_prices_sunday', '30 2 * * 0',
               $$SELECT job_repair_missing_prices(5)$$
           );
           PERFORM cron.schedule(
               'portfolio_recalc_sunday', '0 3 * * 0',
-              $$SELECT job_recalculate()$$
+              $$SELECT job_recalculate(true)$$
           );
           PERFORM cron.schedule(
               'portfolio_performance_monthly', '0 6 1 * *',

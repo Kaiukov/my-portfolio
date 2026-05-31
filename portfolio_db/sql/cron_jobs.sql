@@ -69,21 +69,21 @@ BEGIN
     );
 
     --
-    -- Sun 02:30 -- Detect missing/stale prices
+    -- Sun 02:30 -- Detect missing/stale prices (diagnostic only, cannot fetch)
     --
     PERFORM cron.schedule(
-        'portfolio_repair_prices_sunday',
+        'portfolio_detect_missing_prices_sunday',
         '30 2 * * 0',
         $$SELECT job_repair_missing_prices(5)$$
     );
 
     --
-    -- Sun 03:00 -- Deep weekly recalculation
+    -- Sun 03:00 -- Forced deep weekly recalculation (bypasses all guards)
     --
     PERFORM cron.schedule(
         'portfolio_recalc_sunday',
         '0 3 * * 0',
-        $$SELECT job_recalculate()$$
+        $$SELECT job_recalculate(true)$$
     );
 
     --
