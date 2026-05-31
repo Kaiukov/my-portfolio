@@ -30,7 +30,7 @@ Usage:
   portfolio-ts <command> [options]
 
 Commands:
-  status          Current portfolio status snapshot
+  status          Current portfolio status snapshot (--as-of-date YYYY-MM-DD)
   transactions    Paginated transaction list
   add             Add a transaction and recalculate
   edit            Edit an existing transaction and recalculate
@@ -124,7 +124,8 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "status": {
-      const data = await getStatus();
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const data = await getStatus(asOfDate);
       console.log(JSON.stringify(success("status", data), null, 2));
       return;
     }

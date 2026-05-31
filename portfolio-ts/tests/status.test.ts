@@ -11,6 +11,35 @@ mock.module("../src/db.js", () => ({
 }));
 
 describe("getStatus", () => {
+  test("passes as_of_date parameter to SQL", async () => {
+    mockQuerySingle.mockClear();
+    mockQuerySingle.mockResolvedValue({
+      transactions_count: 42,
+      start_date: "2024-01-15",
+      end_date: "2026-03-20",
+      portfolio_value: 125000.50,
+      total_invested: 85000,
+      deposits: 100000,
+      withdrawals: 15000,
+      income: 2500,
+      fees: 120,
+      taxes: 50,
+      total_gain: 40000.50,
+      total_gain_pct: 47.06,
+      cost_basis: 60000,
+      realized_gain: 5000,
+      unrealized_gain: 35000.50,
+      total_profit: 40000.50,
+      as_of_date: "2026-03-20",
+    });
+
+    const { getStatus } = await import("../src/commands/status.js");
+    const result = await getStatus("2026-03-20");
+
+    expect(result.as_of_date).toBe("2026-03-20");
+    expect(mockQuerySingle.mock.calls[0][1]).toEqual(["2026-03-20"]);
+  });
+
   test("returns status from portfolio_status_sql()", async () => {
     mockQuerySingle.mockResolvedValue({
       transactions_count: 42,

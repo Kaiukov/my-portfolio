@@ -1,6 +1,8 @@
 -- Portfolio database helper functions
 -- These mirror Python domain helpers as SQL functions for database-side calculations
 
+SET check_function_bodies = off;
+
 -- Asset type detection based on ticker symbol
 DROP FUNCTION IF EXISTS get_asset_type_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION get_asset_type_sql(ticker TEXT)
@@ -437,6 +439,7 @@ BEGIN
     v_cost_basis := 0;
     v_realized_gain := 0;
 
+    DROP TABLE IF EXISTS fifo_lots;
     CREATE TEMP TABLE fifo_lots (
         id SERIAL PRIMARY KEY,
         asset TEXT NOT NULL,
@@ -519,9 +522,10 @@ $$;
 -- Called by `portfolio-ts status` so TypeScript never computes financial metrics.
 -- Deposits/withdrawals/income/fees/taxes are FX-converted to USD via cash_amount_to_usd_sql().
 -- fees includes: standalone FEE action quantity + fees column from BUY/SELL/all transactions.
--- portfolio_value and as_of_date are taken from daily_returns (recalculated by PG).
+-- portfolio_value comes from portfolio_value_asof_sql() — the single canonical valuation source.
+-- FIFO metrics (cost_basis/reward/unrealized) are computed as-of the same date.
 DROP FUNCTION IF EXISTS portfolio_status_sql();
-CREATE OR REPLACE FUNCTION portfolio_status_sql()
+CREATE OR REPLACE FUNCTION portfolio_status_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     transactions_count    INTEGER,
     start_date            TEXT,
@@ -567,24 +571,20 @@ AS $$
             COALESCE(SUM(CASE WHEN t.action = 'TAX'
                 THEN cash_amount_to_usd_sql(t.asset, t.quantity, t.date) ELSE 0 END), 0) AS taxes
         FROM transactions t
+        WHERE t.date <= p_as_of_date
     ),
-    latest_dr AS (
-        SELECT portfolio_value, date, date::TEXT AS as_of_date
-        FROM daily_returns
-        ORDER BY date DESC
-        LIMIT 1
+    valuation AS (
+        SELECT COALESCE(portfolio_value_asof_sql(p_as_of_date), 0) AS portfolio_value
     ),
     fifo AS (
         SELECT cost_basis, realized_gain, unrealized_gain, total_profit
-        FROM portfolio_fifo_metrics_sql(
-            COALESCE((SELECT date FROM latest_dr), CURRENT_DATE)
-        )
+        FROM portfolio_fifo_metrics_sql(p_as_of_date)
     )
     SELECT
         a.transactions_count,
         a.start_date,
         a.end_date,
-        dr.portfolio_value,
+        v.portfolio_value,
         -- total_invested = net contributed capital (deposits - withdrawals), NOT gross invested.
         -- total_gain = portfolio_value - total_invested; total_gain and total_gain_pct are NULL when deposits <= withdrawals.
         a.deposits - a.withdrawals                                      AS total_invested,
@@ -593,22 +593,22 @@ AS $$
         a.income,
         a.fees,
         a.taxes,
-        CASE WHEN dr.portfolio_value IS NOT NULL
-                  AND (a.deposits - a.withdrawals) > 0
-             THEN dr.portfolio_value - (a.deposits - a.withdrawals)
-             ELSE NULL END                                              AS total_gain,
-        CASE WHEN dr.portfolio_value IS NOT NULL
-                  AND (a.deposits - a.withdrawals) > 0
-             THEN (dr.portfolio_value - (a.deposits - a.withdrawals))
-                   / (a.deposits - a.withdrawals) * 100.0
-             ELSE NULL END                                              AS total_gain_pct,
+        CASE WHEN v.portfolio_value IS NOT NULL
+                   AND (a.deposits - a.withdrawals) > 0
+              THEN v.portfolio_value - (a.deposits - a.withdrawals)
+              ELSE NULL END                                              AS total_gain,
+        CASE WHEN v.portfolio_value IS NOT NULL
+                   AND (a.deposits - a.withdrawals) > 0
+              THEN (v.portfolio_value - (a.deposits - a.withdrawals))
+                    / (a.deposits - a.withdrawals) * 100.0
+              ELSE NULL END                                              AS total_gain_pct,
         f.cost_basis,
         f.realized_gain,
         f.unrealized_gain,
         f.total_profit,
-        dr.as_of_date
+        p_as_of_date::TEXT
     FROM agg a
-    LEFT JOIN latest_dr dr ON TRUE
+    CROSS JOIN valuation v
     CROSS JOIN fifo f
 $$;
 
@@ -797,8 +797,81 @@ AS $$
     ORDER BY v.value_usd DESC
 $$;
 
+-- Price existence guard for daily-returns recalculation.
+-- Iterates held (non-cash, non-zero quantity) assets as-of p_as_of_date and
+-- verifies that price_asof_sql returns a non-NULL price for every one.
+-- For foreign-currency stocks also verifies the FX pair price is available.
+-- Raises an exception if any required price is missing, preventing the
+-- recalculation path from silently writing understated daily_returns values.
+-- This guard is called by refresh_daily_returns_sql ONLY; the live read-path
+-- (status/allocation/summary) does NOT use it and behaves as before.
+DROP FUNCTION IF EXISTS verify_held_prices_sql(DATE);
+CREATE OR REPLACE FUNCTION verify_held_prices_sql(p_as_of_date DATE)
+RETURNS VOID
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    h RECORD;
+    v_price DOUBLE PRECISION;
+    v_fx_price DOUBLE PRECISION;
+BEGIN
+    FOR h IN
+        SELECT
+            asset,
+            SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
+                     WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
+                     ELSE 0 END) AS net_quantity
+        FROM transactions
+        WHERE date <= p_as_of_date
+          AND NOT is_cash_like_sql(asset)
+        GROUP BY asset
+        HAVING SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
+                         WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
+                         ELSE 0 END) <> 0
+    LOOP
+        v_price := price_asof_sql(h.asset, p_as_of_date);
+        IF v_price IS NULL THEN
+            RAISE EXCEPTION USING MESSAGE =
+                'Price unavailable for ' || h.asset || ' as of ' || p_as_of_date;
+        END IF;
+
+        IF get_asset_type_sql(h.asset) IN (
+            'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+            'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+        ) THEN
+            v_fx_price := price_asof_sql(
+                cash_currency_for_asset_type_sql(get_asset_type_sql(h.asset)),
+                p_as_of_date
+            );
+            IF v_fx_price IS NULL THEN
+                RAISE EXCEPTION USING MESSAGE =
+                    'FX price unavailable for '
+                    || cash_currency_for_asset_type_sql(get_asset_type_sql(h.asset))
+                    || ' as of ' || p_as_of_date;
+            END IF;
+        END IF;
+    END LOOP;
+END;
+$$;
+
+-- Canonical as-of-date portfolio value.
+-- Delegates to portfolio_allocation_sql() which is the single source of truth
+-- for all market valuation. Non-cash holdings valued via price_asof_sql with
+-- FX conversion, and all cash legs via portfolio_cash_sql.
+-- Used by portfolio_status_sql, portfolio_summary_sql, and other consumers.
+DROP FUNCTION IF EXISTS portfolio_value_asof_sql(DATE) CASCADE;
+CREATE OR REPLACE FUNCTION portfolio_value_asof_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
+RETURNS DOUBLE PRECISION
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT COALESCE(SUM(value_usd), 0)
+    FROM portfolio_allocation_sql(p_as_of_date)
+$$;
+
 -- Portfolio summary: high-level portfolio metrics as of a given date.
--- Returns holding count, total cash, portfolio value, transaction metadata.
+-- Uses the consolidated portfolio_value_asof_sql() for portfolio value.
 DROP FUNCTION IF EXISTS portfolio_summary_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_summary_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
@@ -832,8 +905,7 @@ AS $$
         FROM portfolio_cash_sql(p_as_of_date)
     ),
     alloc_tot AS (
-        SELECT COALESCE(SUM(value_usd), 0) AS alloc_total
-        FROM portfolio_allocation_sql(p_as_of_date)
+        SELECT COALESCE(portfolio_value_asof_sql(p_as_of_date), 0) AS alloc_total
     )
     SELECT
         (SELECT cnt FROM holdings),
@@ -1438,11 +1510,7 @@ BEGIN
         flow_dates[i] := rec.flow_date;
     END LOOP;
 
-    SELECT portfolio_value INTO term_value
-    FROM daily_returns
-    WHERE date <= p_as_of_date
-    ORDER BY date DESC
-    LIMIT 1;
+    SELECT COALESCE(portfolio_value_asof_sql(p_as_of_date), 0) INTO term_value;
 
     IF term_value IS NULL OR term_value <= 0 OR i = 0 THEN
         RETURN NULL;
@@ -1520,3 +1588,5 @@ BEGIN
     END IF;
 END;
 $$;
+
+SET check_function_bodies = on;
