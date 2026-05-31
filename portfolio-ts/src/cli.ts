@@ -22,6 +22,9 @@ import { getWidget } from "./commands/widget.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import { cronInstall, cronList, cronRemove } from "./commands/cron.js";
+import { getPriceFreshness } from "./commands/freshness.js";
+import { refreshPortfolio } from "./commands/refresh.js";
+import { scheduleEmit, scheduleInstall, scheduleRemove } from "./commands/schedule.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -49,6 +52,8 @@ Commands:
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
   sync            repair_prices + recalculate (daily maintenance)
+  refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
+  schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
   init            Verify database schema is ready
@@ -68,6 +73,9 @@ Examples:
   portfolio-ts edit --id 42 --price 155.50
   portfolio-ts delete --id 42 --confirm
   portfolio-ts exchange --date 2026-01-01 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
+  portfolio-ts schedule emit
+  portfolio-ts schedule install / schedule remove
+  portfolio-ts refresh
   portfolio-ts --help
 `.trim();
 
@@ -129,8 +137,9 @@ export async function dispatch(argv: string[]): Promise<void> {
 
     case "status": {
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
       const data = await getStatus(asOfDate);
-      console.log(JSON.stringify(success("status", data), null, 2));
+      console.log(JSON.stringify(success("status", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 
@@ -445,6 +454,30 @@ export async function dispatch(argv: string[]): Promise<void> {
       }
     }
 
+    case "refresh": {
+      const today = new Date().toISOString().split("T")[0];
+      const freshnessMeta = await getPriceFreshness(today);
+      const result = await refreshPortfolio();
+      console.log(JSON.stringify(success("refresh", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "schedule": {
+      if (bool(flags, "remove")) {
+        const result = scheduleRemove();
+        console.log(JSON.stringify(success("schedule", result), null, 2));
+        return;
+      }
+      if (bool(flags, "install")) {
+        const result = scheduleInstall();
+        console.log(JSON.stringify(success("schedule", result), null, 2));
+        return;
+      }
+      const emitResult = scheduleEmit();
+      console.log(JSON.stringify(success("schedule", { cron_line: emitResult.block }), null, 2));
+      return;
+    }
+
     case "cash": {
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       const result = await getCash(asOfDate);
@@ -461,8 +494,9 @@ export async function dispatch(argv: string[]): Promise<void> {
 
     case "summary": {
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate ?? new Date().toISOString().split("T")[0]);
       const result = await getSummary(asOfDate);
-      console.log(JSON.stringify(success("summary", result), null, 2));
+      console.log(JSON.stringify(success("summary", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 
@@ -488,6 +522,95 @@ export async function dispatch(argv: string[]): Promise<void> {
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       const result = await getMwr(asOfDate);
       console.log(JSON.stringify(success("mwr", result), null, 2));
+      return;
+    }
+
+    case "widget": {
+      const days = (() => {
+        const v = int(flags, "days");
+        if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
+          console.log(JSON.stringify(error("widget", "VALIDATION_ERROR", "--days must be a positive number"), null, 2));
+          process.exit(1);
+          return 30;
+        }
+        return v ?? 30;
+      })();
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getWidget(days, asOfDate);
+      console.log(JSON.stringify(success("widget", result, result.series.length), null, 2));
+      return;
+    }
+
+    case "schedule": {
+      if (bool(flags, "remove")) {
+        const result = scheduleRemove();
+        console.log(JSON.stringify(success("schedule", result), null, 2));
+        return;
+      }
+      if (bool(flags, "install")) {
+        const result = scheduleInstall();
+        if (result.installed) {
+          console.log(JSON.stringify(success("schedule", result), null, 2));
+        } else {
+          console.log(JSON.stringify(error("schedule", "CRON_INSTALL_FAILED", result.message), null, 2));
+          process.exit(1);
+        }
+        return;
+      }
+      const result = scheduleEmit();
+      console.log(JSON.stringify(success("schedule", { cron_line: result.block }), null, 2));
+      return;
+    }
+
+    case "cash": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getCash(asOfDate);
+      console.log(JSON.stringify(success("cash", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "allocation": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getAllocation(asOfDate);
+      console.log(JSON.stringify(success("allocation", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "summary": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getSummary(asOfDate);
+      console.log(JSON.stringify(success("summary", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "concentration": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getConcentration(asOfDate, topN);
+      console.log(JSON.stringify(success("concentration", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "performance": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const benchmark = str(flags, "benchmark");
+      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      const period = str(flags, "period");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getPerformance({ asOfDate, benchmark, fromDate, period });
+      console.log(JSON.stringify(success("performance", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "mwr": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getMwr(asOfDate);
+      console.log(JSON.stringify(success("mwr", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 

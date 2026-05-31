@@ -1,159 +1,73 @@
-# Portfolio Crontab Schedule (Fallback / OS-level)
+# Portfolio Scheduling
 
-**Primary scheduling**: `pg_cron` (see `docs/pg-cron.md`). Use this crontab only as a fallback when pg_cron is unavailable (Supabase Free, no superuser access).
+Two distinct cron approaches serve different purposes. Do not mix them.
 
 ---
 
-## Prerequisites
+## 1. pg_cron (SQL-only — internal DB operations)
 
-- Project installed via `uv` (see `pyproject.toml`)
-- PostgreSQL connection URL set in `PORTFOLIO_DB_URL` env var (required)
-- Logs written to `$PROJECT/logs/`
+**Scope**: recalculate, verify, health checks, backup — runs INSIDE PostgreSQL.
 
+**Network**: NO. pg_cron has no network access and cannot fetch Yahoo prices.
+
+**Commands**:
 ```bash
-# One-time setup
-mkdir -p /path/to/my-portfolio/logs
-
-# Set PostgreSQL connection
-export PORTFOLIO_DB_URL='postgresql://postgres:password@localhost:5432/postgres'
-# OR use Supabase
-export PORTFOLIO_DB_URL='postgresql://postgres:password@db.project.supabase.co:5432/postgres?sslmode=require'
+portfolio cron install    # register all pg_cron jobs
+portfolio cron list       # list managed jobs
+portfolio cron remove     # unregister
 ```
 
----
-
-## Schedule Overview
-
-| Job | Schedule | When | Why |
-|---|---|---|---|
-| `recalculate` | Mon–Fri 18:30 | After US market close (16:00 ET) | Refresh daily returns with latest closing prices |
-| `recalculate` | Sat 10:00 | Weekend morning | Catch any late Friday settlement data |
-| `recalculate --force` | Sun 03:00 | Weekly deep refresh | Full recalc — clears cache, rebuilds all rows |
-| `repair_prices` | Sun 02:30 | Before weekly recalc | Backfill any missing price coverage |
-| `verify_prices` | Daily 07:00 | Before market open | Detect missing/stale price data early |
-| `health` | Daily 07:05 | After verify | Confirm DB reachable and recalc fresh |
-| `backup` | Daily 02:00 | Nightly | Timestamped DB snapshot before daily operations |
-| `status` | Mon–Fri 09:00 | Morning briefing | Snapshot portfolio value to log |
-| `performance` | 1st of month 06:00 | Monthly | Persist monthly performance report to file |
+**Managed jobs** (all SQL-only):
+| Job | Schedule | Purpose |
+|---|---|---|
+| `portfolio_verify_prices_daily` | Daily 07:00 | Detect stale/missing price data |
+| `portfolio_health_daily` | Daily 07:05 | DB reachability + recalc freshness |
+| `portfolio_backup_daily` | Daily 02:00 | Nightly DB snapshot |
+| `portfolio_recalc_weekday` | Mon–Fri 18:30 | Recalculate daily returns after US close |
+| `portfolio_recalc_saturday` | Sat 10:00 | Catch late Friday settlement |
+| `portfolio_detect_missing_prices_sunday` | Sun 02:30 | Scan for missing price coverage |
+| `portfolio_recalc_sunday` | Sun 03:00 | Weekly forced full recalc |
+| `portfolio_performance_monthly` | 1st of month 06:00 | Monthly performance snapshot |
 
 ---
 
-## Crontab Entries
+## 2. OS-crontab (`portfolio refresh` — network price fetch)
 
+**Scope**: Fetches Yahoo Finance prices via HTTPS, recalculates, returns fresh summary — runs on HOST OS.
+
+**Network**: YES. This is the ONLY way to fetch fresh prices from Yahoo Finance on a schedule.
+
+**Commands**:
+```bash
+portfolio schedule --emit      # print the crontab line (default)
+portfolio schedule --install   # append managed block to user crontab (idempotent)
+portfolio schedule --remove    # remove managed block
+```
+
+**Managed crontab entry**:
 ```cron
-# ─── ENVIRONMENT ────────────────────────────────────────────────────────────
-SHELL=/bin/bash
-PROJECT=/path/to/my-portfolio
-LOG=$PROJECT/logs
-UV=uv
-# PostgreSQL connection (required)
-PORTFOLIO_DB_URL=postgresql://postgres:password@localhost:5432/postgres
-
-# ─── NIGHTLY: backup DB before daily operations (02:00) ──────────────────────
-0 2  * * *    cd $PROJECT && $UV run portfolio backup >> $LOG/backup.log 2>&1
-
-# ─── SUNDAY: repair missing prices before weekly recalc (02:30) ──────────────
-30 2 * * 0    cd $PROJECT && $UV run portfolio repair_prices >> $LOG/repair-prices.log 2>&1
-
-# ─── SUNDAY: full forced recalculation (weekly deep refresh) (03:00) ─────────
-0 3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force >> $LOG/recalc-full.log 2>&1
-
-# ─── WEEKDAY: recalculate after US market close (Mon–Fri 18:30) ─────────────
-30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
-
-# ─── SATURDAY: catch late Friday settlement data ─────────────────────────────
-0 10 * * 6    cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
-
-# ─── DAILY: verify price data integrity at 07:00 ─────────────────────────────
-0 7  * * *    cd $PROJECT && $UV run portfolio verify_prices >> $LOG/verify-prices.log 2>&1
-
-# ─── DAILY: health check after verify (07:05) ────────────────────────────────
-5 7  * * *    cd $PROJECT && $UV run portfolio health >> $LOG/health.log 2>&1
-
-# ─── WEEKDAY MORNING: portfolio status snapshot at 09:00 ─────────────────────
-0 9  * * 1-5  cd $PROJECT && $UV run portfolio status >> $LOG/status.log 2>&1
-
-# ─── MONTHLY: performance report on 1st of each month at 06:00 ───────────────
-0 6  1 * *    cd $PROJECT && $UV run portfolio performance > $LOG/performance-$(date +\%Y-\%m).log 2>&1
+# >>> portfolio-cli managed >>>
+30 18 * * 1-5 cd /path/to/repo && portfolio refresh >/dev/null 2>&1
+# <<< portfolio-cli managed <<<
 ```
+
+**Schedule**: Weekdays (Mon–Fri) at 18:30 local time — 2.5 hours after US market close (16:00 ET), giving Yahoo Finance time to propagate closing prices.
+
+**Idempotency**: Running `schedule --install` twice does NOT duplicate the block. The managed block is identified by comment delimiters `# >>> portfolio-cli managed >>>` / `# <<< portfolio-cli managed <<<`.
+
+**Compatibility**: macOS and Linux (uses `crontab -l` / `crontab -`).
 
 ---
 
-## Install / Remove
+## Division of labor
 
-### Install
-```bash
-# Append entries to current crontab
-crontab -l > /tmp/current_crontab 2>/dev/null
-cat >> /tmp/current_crontab << 'EOF'
-
-# ── portfolio auto-refresh ────────────────────────────────────────────────────
-SHELL=/bin/bash
-PROJECT=/path/to/my-portfolio
-LOG=$PROJECT/logs
-UV=uv
-PORTFOLIO_DB_URL=postgresql://postgres:password@localhost:5432/postgres
-
-30 18 * * 1-5  cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
-0  10 * * 6    cd $PROJECT && $UV run portfolio recalculate >> $LOG/recalc.log 2>&1
-0  3  * * 0    cd $PROJECT && $UV run portfolio recalculate --force >> $LOG/recalc-full.log 2>&1
-0  7  * * *    cd $PROJECT && $UV run portfolio verify_prices >> $LOG/verify-prices.log 2>&1
-0  9  * * 1-5  cd $PROJECT && $UV run portfolio status >> $LOG/status.log 2>&1
-0  6  1 * *    cd $PROJECT && $UV run portfolio performance > $LOG/performance-$(date +%Y-%m).log 2>&1
-EOF
-crontab /tmp/current_crontab && echo "Crontab installed." && rm /tmp/current_crontab
-```
-
-### Remove
-```bash
-crontab -l | grep -v "portfolio" | crontab -
-echo "Portfolio crontab entries removed."
-```
-
-### Verify
-```bash
-crontab -l | grep portfolio
-```
-
----
-
-## Log Files
-
-| File | Updated by |
+| Concern | Who handles it |
 |---|---|
-| `logs/portfolio.log` | All mutations and key events (structured JSON lines) |
-| `logs/backup.log` | Nightly backup |
-| `logs/repair-prices.log` | Sunday price repair |
-| `logs/recalc.log` | Weekday + Saturday recalculate |
-| `logs/recalc-full.log` | Sunday forced recalculate |
-| `logs/verify-prices.log` | Daily price integrity check |
-| `logs/health.log` | Daily health check |
-| `logs/status.log` | Weekday morning status snapshot |
-| `logs/performance-YYYY-MM.log` | Monthly performance report (one file per month) |
+| Fetch fresh Yahoo prices | OS-cron (`portfolio refresh`) |
+| Recalculate from cached prices | pg_cron (`portfolio_recalc_*`) |
+| Verify price data integrity | pg_cron (`portfolio_verify_prices_daily`) |
+| DB health checks | pg_cron (`portfolio_health_daily`) |
+| DB backups | pg_cron (`portfolio_backup_daily`) |
+| Monthly performance snap | pg_cron (`portfolio_performance_monthly`) |
 
-### Tail logs
-```bash
-# Live tail of recalc
-tail -f $PROJECT/logs/recalc.log
-
-# Last price verification
-tail -20 $PROJECT/logs/verify-prices.log
-
-# This month's performance report
-cat $PROJECT/logs/performance-$(date +%Y-%m).log
-```
-
----
-
-## Notes
-
-- All times are **local server time**. Adjust if server is not in your timezone.
-- US market closes at **16:00 ET**. 18:30 local gives a 2.5 h buffer for data propagation on yfinance.
-- `recalculate` without `--force` uses the smart cache — it skips if nothing changed.
-- `recalculate --force` on Sunday rebuilds from scratch; this is the safety net for any cache drift.
-- All log output is pure JSON envelopes — easy to pipe into `jq` or ingest into monitoring tools.
-
-```bash
-# Example: monitor for errors
-tail -f logs/recalc.log | jq 'select(.ok == false)'
-```
+pg_cron CANNOT fetch Yahoo prices (no network). OS-cron CAN fetch prices but cannot run inside PostgreSQL. Use both together for a complete automated pipeline.
