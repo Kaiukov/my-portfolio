@@ -32,6 +32,9 @@ import { getPriceFreshness } from "./commands/freshness.js";
 import { refreshPortfolio, refreshPortfolioDryRun } from "./commands/refresh.js";
 import { scheduleEmit, scheduleInstall, scheduleRemove } from "./commands/schedule.js";
 import { cloudflareInit } from "./cloudflare/init.js";
+import { deployWorker } from "./cloudflare/deploy.js";
+import { getWidgetUrl } from "./cloudflare/url.js";
+import { runWranglerLogin, runWranglerLogout, runWranglerWhoami } from "./cloudflare/auth.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -58,7 +61,7 @@ Commands:
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
-  cloudflare      Cloudflare Workers setup: cloudflare init
+  cloudflare      Cloudflare Workers: init, deploy, url, login, logout, whoami
   sync            repair_prices + recalculate (daily maintenance)
   refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
@@ -632,7 +635,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       if (!sub || sub.startsWith("--")) {
         console.log(
           JSON.stringify(
-            error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init"),
+            error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init | deploy | url | login | logout | whoami"),
             null,
             2,
           ),
@@ -672,10 +675,115 @@ export async function dispatch(argv: string[]): Promise<void> {
           }
           return;
         }
+
+        case "deploy": {
+          const result = await deployWorker();
+          if (result.success && result.url) {
+            console.log(
+              JSON.stringify(success("cloudflare:deploy", { url: result.url }), null, 2),
+            );
+          } else {
+            console.log(
+              JSON.stringify(
+                error("cloudflare:deploy", "DEPLOY_FAILED", result.error ?? "Deploy failed"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
+        case "url": {
+          const result = getWidgetUrl();
+          if (result.ok && result.url) {
+            console.log(
+              JSON.stringify(success("cloudflare:url", { url: result.url }), null, 2),
+            );
+          } else {
+            console.log(
+              JSON.stringify(
+                error("cloudflare:url", "NOT_DEPLOYED", result.error ?? "URL not available"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
+        case "login": {
+          const result = runWranglerLogin();
+          if (result.success) {
+            console.log(
+              JSON.stringify(success("cloudflare:login", { authenticated: true }), null, 2),
+            );
+          } else {
+            console.log(
+              JSON.stringify(
+                error("cloudflare:login", "LOGIN_FAILED", result.error ?? "Login failed"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
+        case "logout": {
+          const result = runWranglerLogout();
+          if (result.success) {
+            console.log(
+              JSON.stringify(success("cloudflare:logout", { authenticated: false }), null, 2),
+            );
+          } else {
+            console.log(
+              JSON.stringify(
+                error("cloudflare:logout", "LOGOUT_FAILED", result.error ?? "Logout failed"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
+        case "whoami": {
+          const result = runWranglerWhoami();
+          if (result.authenticated) {
+            console.log(
+              JSON.stringify(
+                success("cloudflare:whoami", {
+                  authenticated: result.authenticated,
+                  account_name: result.accountName ?? null,
+                  account_id: result.accountId ?? null,
+                  email: result.email ?? null,
+                }),
+                null,
+                2,
+              ),
+            );
+          } else {
+            console.log(
+              JSON.stringify(
+                error("cloudflare:whoami", "NOT_AUTHENTICATED", result.error ?? "Not authenticated"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
         default: {
           console.log(
             JSON.stringify(
-              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init`),
+              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init | deploy | url | login | logout | whoami`),
               null,
               2,
             ),

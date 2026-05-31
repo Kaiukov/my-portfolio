@@ -1,4 +1,5 @@
-import type { AuthResult } from "./types.js";
+import type { AuthResult, WhoamiInfo } from "./types.js";
+import { spawnWrangler } from "./spawn.js";
 
 export async function detectAuth(env: typeof process.env = process.env): Promise<AuthResult> {
   const token = env["CLOUDFLARE_API_TOKEN"];
@@ -11,7 +12,7 @@ export async function detectAuth(env: typeof process.env = process.env): Promise
     return { authenticated: true, method: "api_token", accountId };
   }
 
-  const wranglerOk = await tryWranglerWhoami();
+  const wranglerOk = await tryWranglerWhoami(env);
   if (wranglerOk) {
     const accountId = env["CLOUDFLARE_ACCOUNT_ID"] ?? await tryWranglerAccountId();
     return { authenticated: true, method: "wrangler", accountId };
@@ -25,12 +26,14 @@ export async function detectAuth(env: typeof process.env = process.env): Promise
   };
 }
 
-async function tryWranglerWhoami(): Promise<boolean> {
+async function tryWranglerWhoami(
+  env: Record<string, string | undefined> = process.env,
+): Promise<boolean> {
   try {
     const proc = Bun.spawnSync(["wrangler", "whoami"], {
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, PATH: process.env.PATH },
+      env: { PATH: env.PATH ?? process.env.PATH },
     });
     return proc.exitCode === 0;
   } catch {
@@ -75,6 +78,51 @@ export interface AccountIdValid {
 export interface AccountIdInvalid {
   ok: false;
   error: string;
+}
+
+export function runWranglerLogin(): { success: boolean; error?: string } {
+  const proc = spawnWrangler(["login"], { inherit: true });
+  if (proc.exitCode !== 0) {
+    return { success: false, error: "wrangler login failed. Run `wrangler login` manually." };
+  }
+  return { success: true };
+}
+
+export function runWranglerLogout(): { success: boolean; error?: string } {
+  const proc = spawnWrangler(["logout"], { inherit: true });
+  if (proc.exitCode !== 0) {
+    return { success: false, error: "wrangler logout failed. Run `wrangler logout` manually." };
+  }
+  return { success: true };
+}
+
+export function runWranglerWhoami(): WhoamiInfo {
+  const proc = spawnWrangler(["whoami"]);
+  if (proc.exitCode !== 0) {
+    return {
+      authenticated: false,
+      error: "wrangler whoami failed. Run `wrangler login` first.",
+    };
+  }
+  return parseWhoamiOutput(proc.stdout);
+}
+
+export function parseWhoamiOutput(output: string): WhoamiInfo {
+  if (/not authenticated/i.test(output)) {
+    return { authenticated: false, error: "Not authenticated. Run `wrangler login` first." };
+  }
+
+  const accountId = parseWranglerWhoami(output);
+  const emailMatch = output.match(/email\s+([\w.+-]+@[\w.-]+\.[\w]+)/i);
+  const dataRowMatch = output.match(/[│|]\s*([^│|]+?)\s*[│|]\s*([a-f0-9]{32})\s*[│|]/i);
+  const accountName = dataRowMatch ? dataRowMatch[1].trim() : undefined;
+
+  return {
+    authenticated: !!accountId || !!emailMatch,
+    accountName,
+    accountId: accountId ?? undefined,
+    email: emailMatch ? emailMatch[1] : undefined,
+  };
 }
 
 export type AccountIdResult = AccountIdValid | AccountIdInvalid;
