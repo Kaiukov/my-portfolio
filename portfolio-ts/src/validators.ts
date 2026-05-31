@@ -29,7 +29,7 @@ export function parseDate(dateStr: string, flagName: string): string {
     return `${legacy[3]}-${legacy[2]}-${legacy[1]}`;
   }
   throw new ValidationError(
-    `${flagName}: expected ISO 8601 format YYYY-MM-DD, got ${JSON.stringify(dateStr)}`,
+    `${flagName}: expected YYYY-MM-DD (or legacy DD-MM-YYYY), got ${JSON.stringify(dateStr)}`,
   );
 }
 
@@ -82,7 +82,7 @@ export function validateAssetSymbol(asset: string, action: string): void {
     throw new ValidationError(
       "--asset is required.\n" +
       "Expected: --asset <ticker symbol>\n" +
-      "Example:  portfolio-ts add --date 01-01-2026 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive",
+      "Example:  portfolio-ts add --date 2026-01-01 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive",
     );
   }
 
@@ -93,7 +93,7 @@ export function validateAssetSymbol(asset: string, action: string): void {
       `--asset: ${JSON.stringify(asset)} looks like an ISO currency code. ` +
       `Use the FX pair format (e.g. EURUSD=X) instead of a bare currency code.\n` +
       "Expected: --asset <SYMBOL> or <XXXYYY=X>\n" +
-      "Example:  portfolio-ts add --date 01-01-2026 --asset EURUSD=X --action BUY --quantity 1000 --price 1.05 --exchange Interactive",
+      "Example:  portfolio-ts add --date 2026-01-01 --asset EURUSD=X --action BUY --quantity 1000 --price 1.05 --exchange Interactive",
     );
   }
 }

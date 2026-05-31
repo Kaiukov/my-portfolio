@@ -60,10 +60,10 @@ Environment:
 Examples:
   portfolio-ts status
   portfolio-ts transactions --limit 20 --offset 40
-  portfolio-ts add --date 01-01-2026 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive
+  portfolio-ts add --date 2026-01-01 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive
   portfolio-ts edit --id 42 --price 155.50
   portfolio-ts delete --id 42 --confirm
-  portfolio-ts exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
+  portfolio-ts exchange --date 2026-01-01 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
   portfolio-ts --help
 `.trim();
 
@@ -165,7 +165,7 @@ export async function dispatch(argv: string[]): Promise<void> {
         const env = error(
           "add",
           "VALIDATION_ERROR",
-          "Required: --date DD-MM-YYYY --asset SYMBOL --action ACTION --quantity N --exchange NAME",
+          "Required: --date YYYY-MM-DD --asset SYMBOL --action ACTION --quantity N --exchange NAME",
         );
         console.log(JSON.stringify(env, null, 2));
         process.exit(1);
@@ -250,7 +250,7 @@ export async function dispatch(argv: string[]): Promise<void> {
         const env = error(
           "exchange",
           "VALIDATION_ERROR",
-          "Required: --date DD-MM-YYYY --from ASSET --to ASSET --quantity N --rate N",
+          "Required: --date YYYY-MM-DD --from ASSET --to ASSET --quantity N --rate N",
         );
         console.log(JSON.stringify(env, null, 2));
         process.exit(1);
