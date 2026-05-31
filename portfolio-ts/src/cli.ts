@@ -470,98 +470,18 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "schedule": {
-      const projectDir = str(flags, "project-dir") ?? str(flags, "project_dir");
       const posSub = argv[3] as string | undefined;
-      const sub = bool(flags, "remove") ? "remove"
-        : bool(flags, "install") ? "install"
-        : bool(flags, "emit") ? "emit"
+      const sub = bool(flags, "remove") || posSub === "remove" ? "remove"
+        : bool(flags, "install") || posSub === "install" ? "install"
+        : bool(flags, "emit") || posSub === "emit" ? "emit"
         : posSub && !posSub.startsWith("--") ? posSub
         : "emit";
       if (sub === "remove") {
-        const result = scheduleRemove(projectDir);
-        console.log(JSON.stringify(success("schedule", result), null, 2));
-        return;
-      }
-      if (sub === "install") {
-        const result = scheduleInstall(projectDir);
-        console.log(JSON.stringify(success("schedule", result), null, 2));
-        return;
-      }
-      const emitResult = scheduleEmit(projectDir);
-      console.log(JSON.stringify(success("schedule", { cron_line: emitResult.block }), null, 2));
-      return;
-    }
-
-    case "cash": {
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const result = await getCash(asOfDate);
-      console.log(JSON.stringify(success("cash", result, result.rows.length), null, 2));
-      return;
-    }
-
-    case "allocation": {
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const result = await getAllocation(asOfDate);
-      console.log(JSON.stringify(success("allocation", result, result.rows.length), null, 2));
-      return;
-    }
-
-    case "summary": {
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate ?? new Date().toISOString().split("T")[0]);
-      const result = await getSummary(asOfDate);
-      console.log(JSON.stringify(success("summary", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
-      return;
-    }
-
-    case "concentration": {
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
-      const result = await getConcentration(asOfDate, topN);
-      console.log(JSON.stringify(success("concentration", result), null, 2));
-      return;
-    }
-
-    case "performance": {
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const benchmark = str(flags, "benchmark");
-      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
-      const period = str(flags, "period");
-      const result = await getPerformance({ asOfDate, benchmark, fromDate, period });
-      console.log(JSON.stringify(success("performance", result), null, 2));
-      return;
-    }
-
-    case "mwr": {
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const result = await getMwr(asOfDate);
-      console.log(JSON.stringify(success("mwr", result), null, 2));
-      return;
-    }
-
-    case "widget": {
-      const days = (() => {
-        const v = int(flags, "days");
-        if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
-          console.log(JSON.stringify(error("widget", "VALIDATION_ERROR", "--days must be a positive number"), null, 2));
-          process.exit(1);
-          return 30;
-        }
-        return v ?? 30;
-      })();
-      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const result = await getWidget(days, asOfDate);
-      console.log(JSON.stringify(success("widget", result, result.series.length), null, 2));
-      return;
-    }
-
-    case "schedule": {
-      if (bool(flags, "remove")) {
         const result = scheduleRemove();
         console.log(JSON.stringify(success("schedule", result), null, 2));
         return;
       }
-      if (bool(flags, "install")) {
+      if (sub === "install") {
         const result = scheduleInstall();
         if (result.installed) {
           console.log(JSON.stringify(success("schedule", result), null, 2));

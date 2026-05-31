@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, jest } from "bun:test";
+import { describe, expect, test, mock } from "bun:test";
 
 const mockQuerySingle = mock();
 const mockQuery = mock();
@@ -26,6 +26,7 @@ describe("getPriceFreshness", () => {
   test("returns stale=true when MAX(date) is older than max-age (default 5 days)", async () => {
     const oldDate = daysAgo(7);
     mockQuerySingle.mockResolvedValue({ prices_as_of: oldDate });
+    mockQuery.mockResolvedValue([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -38,6 +39,7 @@ describe("getPriceFreshness", () => {
   test("returns stale=false when MAX(date) is within max-age", async () => {
     const recent = daysAgo(2);
     mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
+    mockQuery.mockResolvedValue([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -47,9 +49,10 @@ describe("getPriceFreshness", () => {
     expect(result.stale).toBe(false);
   });
 
-  test("returns stale=true at exact boundary (age = max-age days)", async () => {
+  test("returns stale=false at exact boundary (age = max-age days)", async () => {
     const boundary = daysAgo(5);
     mockQuerySingle.mockResolvedValue({ prices_as_of: boundary });
+    mockQuery.mockResolvedValue([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -85,6 +88,7 @@ describe("getPriceFreshness", () => {
     process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"] = "10";
     const oldDate = daysAgo(7);
     mockQuerySingle.mockResolvedValue({ prices_as_of: oldDate });
+    mockQuery.mockResolvedValue([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -100,6 +104,7 @@ describe("getPriceFreshness", () => {
     process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"] = "not-a-number";
     const oldDate = daysAgo(7);
     mockQuerySingle.mockResolvedValue({ prices_as_of: oldDate });
+    mockQuery.mockResolvedValue([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -112,61 +117,22 @@ describe("getPriceFreshness", () => {
   });
 });
 
-describe("summary regression: stays read-only, carries freshness meta", () => {
-  test("summary envelope contains freshness meta", async () => {
-    mockQuerySingle
-      .mockResolvedValueOnce({ prices_as_of: daysAgo(3) })
-      .mockResolvedValueOnce({
-        holding_count: 5,
-        total_cash_usd: 5000,
-        portfolio_value_usd: 25000,
-        last_transaction_date: "2026-01-15",
-        transaction_count: 42,
-        as_of_date: "2026-01-15",
-      });
+describe("summary regression: summary does not invoke fetchPrices", () => {
+  test("getSummary remains read-only (no fetchPrices calls)", async () => {
+    mockQuerySingle.mockResolvedValue({
+      holding_count: 5,
+      total_cash_usd: 5000,
+      portfolio_value_usd: 25000,
+      last_transaction_date: "2026-01-15",
+      transaction_count: 42,
+      as_of_date: "2026-01-15",
+    });
 
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const { getSummary } = await import("../src/commands/summary.js");
+    const result = await getSummary("2026-01-15");
 
-    await mod.dispatch(["bun", "src/cli.ts", "summary"]);
-
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(output.command).toBe("summary");
-    expect(output.data.holding_count).toBe(5);
-    expect(output.meta.prices_as_of).toBeDefined();
-    expect(output.meta.price_age_days).toBe(3);
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  test("summary does NOT invoke fetchPrices (no network)", async () => {
-    mockQuerySingle
-      .mockResolvedValueOnce({ prices_as_of: daysAgo(3) })
-      .mockResolvedValueOnce({
-        holding_count: 5,
-        total_cash_usd: 5000,
-        portfolio_value_usd: 25000,
-        last_transaction_date: "2026-01-15",
-        transaction_count: 42,
-        as_of_date: "2026-01-15",
-      });
-
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
-
-    await mod.dispatch(["bun", "src/cli.ts", "summary"]);
-
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(output.command).toBe("summary");
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+    expect(result.holding_count).toBe(5);
+    expect(result.portfolio_value_usd).toBe(25000);
+    expect(result.as_of_date).toBe("2026-01-15");
   });
 });

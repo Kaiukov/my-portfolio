@@ -1,73 +1,108 @@
-# Portfolio Scheduling
+# Portfolio Cron Scheduling
 
-Two distinct cron approaches serve different purposes. Do not mix them.
+This project supports two distinct cron mechanisms with clear separation of responsibilities.
 
 ---
 
-## 1. pg_cron (SQL-only — internal DB operations)
+## 1. pg_cron (#41) — SQL-only, no network
 
-**Scope**: recalculate, verify, health checks, backup — runs INSIDE PostgreSQL.
+`pg_cron` is a PostgreSQL extension that runs **inside the database**. It handles **SQL-only operations** that don't require external network access.
 
-**Network**: NO. pg_cron has no network access and cannot fetch Yahoo prices.
+**Jobs managed by pg_cron:**
 
-**Commands**:
+| Job | Schedule | What it does |
+|-----|----------|-------------|
+| `recalculate` | Mon–Fri 18:30 | Refresh daily returns from cached prices (SQL-only) |
+| `recalculate` | Sat 10:00 | Catch Friday settlement data (SQL-only) |
+| `verify_prices` | Daily 07:00 | Detect missing price checkpoints (SQL-only diagnostic) |
+| `backup` | Daily 02:00 | pg_dump snapshot |
+
+**Management via CLI:**
 ```bash
-portfolio cron install    # register all pg_cron jobs
-portfolio cron list       # list managed jobs
-portfolio cron remove     # unregister
+portfolio-ts cron install    # Create pg_cron jobs
+portfolio-ts cron list       # List active pg_cron jobs
+portfolio-ts cron remove     # Remove all portfolio pg_cron jobs
 ```
 
-**Managed jobs** (all SQL-only):
-| Job | Schedule | Purpose |
-|---|---|---|
-| `portfolio_verify_prices_daily` | Daily 07:00 | Detect stale/missing price data |
-| `portfolio_health_daily` | Daily 07:05 | DB reachability + recalc freshness |
-| `portfolio_backup_daily` | Daily 02:00 | Nightly DB snapshot |
-| `portfolio_recalc_weekday` | Mon–Fri 18:30 | Recalculate daily returns after US close |
-| `portfolio_recalc_saturday` | Sat 10:00 | Catch late Friday settlement |
-| `portfolio_detect_missing_prices_sunday` | Sun 02:30 | Scan for missing price coverage |
-| `portfolio_recalc_sunday` | Sun 03:00 | Weekly forced full recalc |
-| `portfolio_performance_monthly` | 1st of month 06:00 | Monthly performance snapshot |
+**Key characteristics:**
+- No network calls (no Yahoo Finance, no HTTPS)
+- Runs inside PostgreSQL — requires `pg_cron` extension and superuser
+- Managed via `portfolio-ts cron` subcommands
 
 ---
 
-## 2. OS-crontab (`portfolio refresh` — network price fetch)
+## 2. OS-cron — HTTPS price fetch
 
-**Scope**: Fetches Yahoo Finance prices via HTTPS, recalculates, returns fresh summary — runs on HOST OS.
+OS-level crontab handles the **`portfolio refresh`** command which fetches prices from Yahoo Finance via HTTPS, repairs missing data, recalculates daily returns, and emits a summary.
 
-**Network**: YES. This is the ONLY way to fetch fresh prices from Yahoo Finance on a schedule.
-
-**Commands**:
+**The `refresh` command (one-step OS-cron entry point):**
 ```bash
-portfolio schedule --emit      # print the crontab line (default)
-portfolio schedule --install   # append managed block to user crontab (idempotent)
-portfolio schedule --remove    # remove managed block
+portfolio-ts refresh         # Fetch prices + recalculate + summary
+portfolio-ts refresh --dry-run  # Preview what would be fetched
 ```
 
-**Managed crontab entry**:
-```cron
-# >>> portfolio-cli managed >>>
-30 18 * * 1-5 cd /path/to/repo && portfolio refresh >/dev/null 2>&1
-# <<< portfolio-cli managed <<<
+**Manage OS-crontab via CLI:**
+```bash
+portfolio-ts schedule emit      # Print the crontab block (for manual review)
+portfolio-ts schedule install   # Install managed crontab block (idempotent)
+portfolio-ts schedule remove    # Remove the managed crontab block
 ```
 
-**Schedule**: Weekdays (Mon–Fri) at 18:30 local time — 2.5 hours after US market close (16:00 ET), giving Yahoo Finance time to propagate closing prices.
+**The installed crontab contains:**
+```
+### portfolio-refresh-start (managed — do not edit)
+# Mon–Fri after US market close
+30 18 * * 1-5  cd $PROJECT && bun run portfolio-ts/src/cli.ts refresh >> $LOG/refresh.log 2>&1
+# Saturday catch-up
+0 10 * * 6    cd $PROJECT && bun run portfolio-ts/src/cli.ts refresh >> $LOG/refresh.log 2>&1
+# Sunday full refresh
+0 3  * * 0    cd $PROJECT && bun run portfolio-ts/src/cli.ts refresh >> $LOG/refresh.log 2>&1
+### portfolio-refresh-end
+```
 
-**Idempotency**: Running `schedule --install` twice does NOT duplicate the block. The managed block is identified by comment delimiters `# >>> portfolio-cli managed >>>` / `# <<< portfolio-cli managed <<<`.
-
-**Compatibility**: macOS and Linux (uses `crontab -l` / `crontab -`).
+**Key characteristics:**
+- Makes HTTPS calls (Yahoo Finance `yahoo-finance2` npm package)
+- Requires `PORTFOLIO_DB_URL` environment variable
+- Managed via `portfolio-ts schedule` subcommands with idempotent install
+- Managed block delimited by `### portfolio-refresh-start` / `### portfolio-refresh-end` markers
+- Double-install is safe — block is not duplicated
 
 ---
 
-## Division of labor
+## Quick reference
 
-| Concern | Who handles it |
-|---|---|
-| Fetch fresh Yahoo prices | OS-cron (`portfolio refresh`) |
-| Recalculate from cached prices | pg_cron (`portfolio_recalc_*`) |
-| Verify price data integrity | pg_cron (`portfolio_verify_prices_daily`) |
-| DB health checks | pg_cron (`portfolio_health_daily`) |
-| DB backups | pg_cron (`portfolio_backup_daily`) |
-| Monthly performance snap | pg_cron (`portfolio_performance_monthly`) |
+| Concern | Mechanism | CLI | Network? |
+|---------|-----------|-----|----------|
+| Daily returns | pg_cron | `portfolio-ts cron install` | No |
+| Price verification | pg_cron | `portfolio-ts cron install` | No |
+| Backup | pg_cron | `portfolio-ts cron install` | No |
+| Price fetch + recalc | OS-crontab | `portfolio-ts schedule install` | Yes (Yahoo) |
+| Health check | OS-crontab | `portfolio-ts schedule install` | No |
 
-pg_cron CANNOT fetch Yahoo prices (no network). OS-cron CAN fetch prices but cannot run inside PostgreSQL. Use both together for a complete automated pipeline.
+---
+
+## Environment
+
+```bash
+export PORTFOLIO_DB_URL="postgresql://user:password@host:5432/dbname"
+```
+
+---
+
+## Log files (OS-cron)
+
+| Log file | Written by |
+|----------|-----------|
+| `logs/refresh.log` | `portfolio refresh` output |
+| `logs/health.log` | `health` command output |
+| `logs/performance-YYYY-MM.log` | Monthly performance snapshot |
+
+All log output is pure JSON envelopes — pipe into `jq` for monitoring:
+
+```bash
+# Monitor for refresh errors
+tail -f logs/refresh.log | jq 'select(.ok == false)'
+
+# Latest successful refresh
+tail -20 logs/refresh.log | jq 'select(.ok == true) | .meta.generated_at'
+```

@@ -102,6 +102,8 @@ export function scheduleEmit(projectDir?: string): ScheduleEmitResult {
 export function scheduleInstall(projectDir?: string): ScheduleInstallResult {
   const dir = projectDir ?? process.cwd();
 
+  spawnSync(["mkdir", "-p", `${dir}/logs`]);
+
   let current: string;
   try {
     current = readCrontab();

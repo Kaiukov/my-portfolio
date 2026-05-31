@@ -1,4 +1,4 @@
-import { querySingle } from "../db.js";
+import { querySingle, query } from "../db.js";
 import { STALE_MAX_AGE_DAYS } from "../validators.js";
 
 export interface PriceFreshness {
@@ -28,18 +28,42 @@ export async function getPriceFreshness(asOfDate?: string): Promise<PriceFreshne
 
   const pricesAsOf = row?.prices_as_of ?? null;
 
-  if (!pricesAsOf) {
-    return { prices_as_of: null, price_age_days: null, stale: false };
+  let priceAgeDays: number | null = null;
+  if (pricesAsOf) {
+    const pricesDate = new Date(pricesAsOf);
+    const refDate = new Date(referenceDate);
+    const diffMs = refDate.getTime() - pricesDate.getTime();
+    priceAgeDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   }
 
-  const pricesDate = new Date(pricesAsOf);
-  const refDate = new Date(referenceDate);
-  const diffMs = refDate.getTime() - pricesDate.getTime();
-  const ageDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  let stale = false;
+
+  const checkpointRows = await query<{ ticker: string }>(
+    `SELECT DISTINCT c.ticker
+     FROM get_required_price_checkpoints_sql($1::date) c
+     WHERE NOT EXISTS (
+       SELECT 1 FROM prices p
+       WHERE p.ticker = c.ticker AND p.date = c.checkpoint_date::date
+     )`,
+    [referenceDate],
+  );
+  if (checkpointRows.length > 0) {
+    stale = true;
+  }
+
+  if (!stale) {
+    const staleRows = await query<{ ticker: string }>(
+      "SELECT ticker FROM stale_tickers_sql($1)",
+      [maxAgeDays],
+    );
+    if (staleRows.length > 0) {
+      stale = true;
+    }
+  }
 
   return {
     prices_as_of: pricesAsOf,
-    price_age_days: ageDays,
-    stale: ageDays > maxAgeDays,
+    price_age_days: priceAgeDays,
+    stale,
   };
 }
