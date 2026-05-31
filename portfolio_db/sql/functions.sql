@@ -348,6 +348,21 @@ AS $$
     WHERE ticker IS NOT NULL
 $$;
 
+-- Helper: returns the most recent weekday (Mon-Fri) on or before p_date.
+-- Weekends only; holidays are out of scope.
+-- DOW: 0=Sun -> p_date-2, 6=Sat -> p_date-1, else p_date.
+CREATE OR REPLACE FUNCTION last_trading_day_sql(p_date DATE)
+RETURNS DATE
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE EXTRACT(DOW FROM p_date)
+        WHEN 0 THEN p_date - 2
+        WHEN 6 THEN p_date - 1
+        ELSE p_date
+    END;
+$$;
+
 -- Required price checkpoints per ticker: trade dates + end date
 -- Used to validate that the price cache covers all valuation points.
 DROP FUNCTION IF EXISTS get_required_price_checkpoints_sql(DATE);
@@ -364,7 +379,11 @@ AS $$
 
     UNION
 
-    SELECT DISTINCT t.asset::TEXT, p_end_date
+    SELECT DISTINCT t.asset::TEXT,
+        CASE WHEN get_asset_type_sql(t.asset) = 'crypto'
+             THEN p_end_date
+             ELSE last_trading_day_sql(p_end_date)
+        END
     FROM transactions t
     WHERE t.action IN ('BUY', 'SELL')
       AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
@@ -382,7 +401,8 @@ AS $$
 
     UNION
 
-    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT, p_end_date
+    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
+        last_trading_day_sql(p_end_date)
     FROM transactions t
     WHERE t.action IN ('BUY', 'SELL')
       AND get_asset_type_sql(t.asset) IN (
@@ -400,7 +420,12 @@ AS $$
 
     UNION
 
-    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT, p_end_date
+    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
+        CASE
+            WHEN get_asset_type_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))) = 'crypto'
+            THEN p_end_date
+            ELSE last_trading_day_sql(p_end_date)
+        END
     FROM transactions t
     WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
        OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
