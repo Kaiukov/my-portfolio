@@ -234,6 +234,119 @@ These paths and files are **already gitignored** — keep them so:
 - The Worker itself contains zero credentials — it reads from KV only, not from the database directly.
 - The widget URL is publicly routable by design (the Scriptable phone widget needs public HTTPS access). The data served is read-only aggregate portfolio metrics — no transaction details, no DB credentials, no API keys.
 
+## Backups (S3 / Cloudflare R2)
+
+S3-compatible backup storage for PostgreSQL dumps. Implemented as `portfolio backup push` and `portfolio backup pull`.
+
+### What It Does
+
+- **`portfolio backup push`** — runs `pg_dump` against `$PORTFOLIO_DB_URL`, uploads the dump to an S3-compatible bucket as both `portfolio.backup-<timestamp>.sql` and `latest.sql`.
+- **`portfolio backup pull [--key <name>]`** — downloads a dump and prints a restore command (`psql "$PORTFOLIO_DB_URL" -f <file>`). Defaults to `latest.sql`.
+
+### Required Environment
+
+The command reads `PORTFOLIO_S3_*` variables first, falling back to bare `S3_*`:
+
+| Variable | Required | Description |
+|---|---|---|
+| `PORTFOLIO_S3_ENDPOINT` / `S3_ENDPOINT` | Yes | S3 API endpoint URL |
+| `PORTFOLIO_S3_BUCKET` / `S3_BUCKET` | Yes | Bucket name |
+| `PORTFOLIO_S3_ACCESS_KEY_ID` / `S3_ACCESS_KEY_ID` | Yes | S3 API access key |
+| `PORTFOLIO_S3_SECRET_ACCESS_KEY` / `S3_SECRET_ACCESS_KEY` | Yes | S3 API secret key |
+| `PORTFOLIO_S3_REGION` / `S3_REGION` | No (default: `auto`) | AWS region or `auto` for R2 |
+
+Plus `PORTFOLIO_DB_URL` (see [Database Setup](#database-setup)).
+
+Example `.env` block (placeholders only — never commit real keys):
+
+```bash
+PORTFOLIO_DB_URL=postgresql://user:pass@host:5432/portfolio
+PORTFOLIO_S3_ENDPOINT=https://<your-account-id>.r2.cloudflarestorage.com
+PORTFOLIO_S3_BUCKET=portfolio-backups
+PORTFOLIO_S3_ACCESS_KEY_ID=<your-access-key-id>
+PORTFOLIO_S3_SECRET_ACCESS_KEY=<your-secret-access-key>
+PORTFOLIO_S3_REGION=auto
+```
+
+### Cloudflare R2
+
+This project uses Cloudflare R2 as the S3-compatible store. Key specifics:
+
+- **Endpoint format**: `https://<account-id>.r2.cloudflarestorage.com` (account-level; the client uses path-style addressing / `forcePathStyle`).
+- **Region**: must be `auto`.
+- **Obtaining credentials**: Cloudflare Dashboard → R2 → "Manage R2 API Tokens" → create an API token. The token yields an Access Key ID and a Secret Access Key. These are **separate** from `wrangler login` OAuth tokens — wrangler OAuth does **not** grant S3 API keys.
+- **Create a dedicated bucket**: `wrangler r2 bucket create portfolio-backups`. Set `PORTFOLIO_S3_BUCKET` to match. A dedicated bucket is recommended so backups don't mix with other data.
+
+### Usage
+
+```bash
+# Push a backup
+portfolio backup push
+```
+
+Push JSON output:
+
+```json
+{
+  "ok": true,
+  "command": "backup:push",
+  "data": {
+    "bucket": "portfolio-backups",
+    "dump_path": "/tmp/portfolio.backup-2026-05-31T120000.sql",
+    "dump_size_bytes": 143360,
+    "objects": [
+      "portfolio.backup-2026-05-31T120000.sql",
+      "latest.sql"
+    ]
+  },
+  "meta": {
+    "generated_at": "2026-05-31T12:00:00Z",
+    "count": 2
+  }
+}
+```
+
+```bash
+# Pull the latest backup
+portfolio backup pull
+```
+
+```bash
+# Pull a specific backup
+portfolio backup pull --key portfolio.backup-2026-05-30T120000.sql
+```
+
+Pull JSON output:
+
+```json
+{
+  "ok": true,
+  "command": "backup:pull",
+  "data": {
+    "bucket": "portfolio-backups",
+    "key": "latest.sql",
+    "local_path": "portfolio.restored.latest.sql",
+    "size_bytes": 143360,
+    "restore_command": "psql \"$PORTFOLIO_DB_URL\" -f portfolio.restored.latest.sql"
+  },
+  "meta": {
+    "generated_at": "2026-05-31T12:00:00Z",
+    "count": null
+  }
+}
+```
+
+### Security
+
+- Secrets must **never** be committed. Keep them in `.env` (gitignored) or a secrets manager.
+- Do **not** paste keys into committed files, issues, or chat.
+- R2 API tokens can be rotated or revoked at any time from Cloudflare Dashboard → R2 → "Manage R2 API Tokens".
+- Database credentials (`PORTFOLIO_DB_URL`) are never stored in the backup itself.
+
+### Cross-Reference
+
+The original S3 backup spec is in [`docs/platform-adapters.md`](docs/platform-adapters.md) (§5). The implementation has evolved since that draft — the README above is the source of truth.
+
 ## Testing
 
 The project uses `pytest`. Run tests locally with `uv`:
