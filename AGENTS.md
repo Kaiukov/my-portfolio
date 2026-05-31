@@ -238,7 +238,7 @@ Every calculation bug fix needs:
 
 ### Open issue #22 items
 
-- Time-based stale-price max-age is still not enforced.
+- **DONE**: Time-based stale-price max-age enforced — `recalculate` checks `prices_need_fetch` via `maintenance_check`, refuses unless `--force`; `sync` runs `daily_maintenance_check()` before repair. Default threshold: `STALE_MAX_AGE_DAYS = 5` (#84, supersedes #22 finding #9, #66 findings #6/#7).
 - **DONE**: Date-format split was unified — all commands accept ISO `YYYY-MM-DD`; legacy `DD-MM-YYYY` accepted with deprecation warning.
 
 ## Style

@@ -8,7 +8,7 @@ import { deleteTransaction, deletePreview } from "./commands/delete.js";
 import { exchangeCurrency } from "./commands/exchange.js";
 import { recalculate, recalculateDryRun } from "./commands/recalculate.js";
 import { verifyPrices } from "./commands/verify_prices.js";
-import { repairPrices, repairPricesDryRun } from "./commands/repair_prices.js";
+import { repairPrices, repairPricesDryRun, runDailyMaintenanceCheck } from "./commands/repair_prices.js";
 import { fetchPrices } from "./providers/yahoo.js";
 import { getReport } from "./commands/report.js";
 import { getCash } from "./commands/cash.js";
@@ -263,16 +263,19 @@ export async function dispatch(argv: string[]): Promise<void> {
 
     case "recalculate": {
       const isDryRun = bool(flags, "dry-run");
+      const maxAgeDays = int(flags, "max-age-days");
       if (isDryRun) {
         const result = await recalculateDryRun({
           fromDateStr: str(flags, "from-date") ?? str(flags, "from_date"),
           force: bool(flags, "force"),
+          maxAgeDays,
         });
         console.log(JSON.stringify(success("recalculate", result), null, 2));
       } else {
         const result = await recalculate({
           fromDateStr: str(flags, "from-date") ?? str(flags, "from_date"),
           force: bool(flags, "force"),
+          maxAgeDays,
         });
         console.log(JSON.stringify(success("recalculate", result), null, 2));
       }
@@ -315,7 +318,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       const maxAgeDays = int(flags, "max-age-days");
       if (isDryRun) {
         const repairResult = await repairPricesDryRun({ maxAgeDays });
-        const recalcResult = await recalculateDryRun({ force: false });
+        const recalcResult = await recalculateDryRun({ force: false, maxAgeDays });
         console.log(
           JSON.stringify(
             success("sync", { dry_run: true, repair_prices: repairResult, recalculate: recalcResult }),
@@ -324,8 +327,9 @@ export async function dispatch(argv: string[]): Promise<void> {
           ),
         );
       } else {
+        await runDailyMaintenanceCheck(maxAgeDays);
         const repairResult = await repairPrices({ maxAgeDays }, fetchPrices);
-        const recalcResult = await recalculate({ force: true });
+        const recalcResult = await recalculate({ force: true, maxAgeDays });
         console.log(
           JSON.stringify(
             success("sync", { repair_prices: repairResult, recalculate: recalcResult }),

@@ -1,3 +1,5 @@
+export const STALE_MAX_AGE_DAYS = 5;
+
 export class ValidationError extends Error {
   readonly code = "VALIDATION_ERROR" as const;
   constructor(message: string) {
