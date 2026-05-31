@@ -1,4 +1,6 @@
-import yahooFinance from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
+
+const yahooFinance = new YahooFinance();
 
 export interface PriceRow {
   ticker: string;
@@ -59,11 +61,12 @@ export async function fetchPrices(
   const extStart = new Date(startDate);
   extStart.setUTCDate(extStart.getUTCDate() - 10);
 
-  const data = (await yahooFinance.historical(yahooTicker, {
+  const result = await yahooFinance.chart(yahooTicker, {
     period1: extStart,
     period2: new Date(endDate),
     interval: "1d",
-  })) as Array<{ date: Date; close: number | null }>;
+  });
+  const data = (result?.quotes ?? []) as Array<{ date: Date; close: number | null }>;
 
   const rows: PriceRow[] = [];
   for (const row of data) {
