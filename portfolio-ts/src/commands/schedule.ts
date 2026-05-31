@@ -27,7 +27,7 @@ function buildCronBlock(projectDir: string): string {
     `SHELL=/bin/bash`,
     `PROJECT=${projectDir}`,
     `LOG=${logDir}`,
-    `export PORTFOLIO_DB_URL`,
+    `# Set PORTFOLIO_DB_URL=... below or ensure it is exported in the cron environment`,
     ``,
     `# Daily price refresh after US market close (Mon–Fri 18:30)`,
     `30 18 * * 1-5  cd $PROJECT && bun run portfolio-ts/src/cli.ts refresh >> $LOG/refresh.log 2>&1`,

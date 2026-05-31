@@ -22,7 +22,8 @@ export async function getPriceFreshness(asOfDate?: string): Promise<PriceFreshne
   const referenceDate = asOfDate ?? new Date().toISOString().split("T")[0];
 
   const row = await querySingle<{ prices_as_of: string | null }>(
-    "SELECT MAX(date)::text AS prices_as_of FROM prices",
+    "SELECT MAX(date)::text AS prices_as_of FROM prices WHERE date <= $1",
+    [referenceDate],
   );
 
   const pricesAsOf = row?.prices_as_of ?? null;

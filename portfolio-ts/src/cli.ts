@@ -23,7 +23,7 @@ import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import { cronInstall, cronList, cronRemove } from "./commands/cron.js";
 import { getPriceFreshness } from "./commands/freshness.js";
-import { refreshPortfolio } from "./commands/refresh.js";
+import { refreshPortfolio, refreshPortfolioDryRun } from "./commands/refresh.js";
 import { scheduleEmit, scheduleInstall, scheduleRemove } from "./commands/schedule.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
@@ -455,25 +455,39 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "refresh": {
-      const today = new Date().toISOString().split("T")[0];
-      const freshnessMeta = await getPriceFreshness(today);
-      const result = await refreshPortfolio();
-      console.log(JSON.stringify(success("refresh", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      const isDryRun = bool(flags, "dry-run");
+      if (isDryRun) {
+        const result = await refreshPortfolioDryRun();
+        const freshnessMeta = await getPriceFreshness();
+        const data = { ...result, ...freshnessMeta };
+        console.log(JSON.stringify(success("refresh", data), null, 2));
+      } else {
+        const result = await refreshPortfolio();
+        const freshnessMeta = await getPriceFreshness();
+        console.log(JSON.stringify(success("refresh", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      }
       return;
     }
 
     case "schedule": {
-      if (bool(flags, "remove")) {
-        const result = scheduleRemove();
+      const projectDir = str(flags, "project-dir") ?? str(flags, "project_dir");
+      const posSub = argv[3] as string | undefined;
+      const sub = bool(flags, "remove") ? "remove"
+        : bool(flags, "install") ? "install"
+        : bool(flags, "emit") ? "emit"
+        : posSub && !posSub.startsWith("--") ? posSub
+        : "emit";
+      if (sub === "remove") {
+        const result = scheduleRemove(projectDir);
         console.log(JSON.stringify(success("schedule", result), null, 2));
         return;
       }
-      if (bool(flags, "install")) {
-        const result = scheduleInstall();
+      if (sub === "install") {
+        const result = scheduleInstall(projectDir);
         console.log(JSON.stringify(success("schedule", result), null, 2));
         return;
       }
-      const emitResult = scheduleEmit();
+      const emitResult = scheduleEmit(projectDir);
       console.log(JSON.stringify(success("schedule", { cron_line: emitResult.block }), null, 2));
       return;
     }
