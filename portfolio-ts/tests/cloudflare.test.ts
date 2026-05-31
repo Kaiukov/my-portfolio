@@ -855,18 +855,18 @@ describe("parseWhoamiOutput", () => {
  ⛅️ wrangler 4.46.0
 ──────────────────
 Getting User settings...
-👋 You are logged in with an OAuth Token, associated with the email user@example.com!
-┌────────────────────────┬──────────────────────────────────┐
-│ Account Name           │ My Portfolio Account              │
-├────────────────────────┼──────────────────────────────────┤
-│ Account ID             │ abcdef1234567890abcdef1234567890 │
-└────────────────────────┴──────────────────────────────────┘
+👋 You are logged in with an OAuth Token, associated with the email kayukov2010@gmail.com.
+┌─────────────────────────────────┬──────────────────────────────────┐
+│ Account Name                    │ Account ID                       │
+├─────────────────────────────────┼──────────────────────────────────┤
+│ Kayukov2010@gmail.com's Account │ dd7ab9be93db46931523f62d3fe7f581 │
+└─────────────────────────────────┴──────────────────────────────────┘
 `;
     const result = parseWhoamiOutput(output);
     expect(result.authenticated).toBe(true);
-    expect(result.email).toBe("user@example.com");
-    expect(result.accountName).toBe("My Portfolio Account");
-    expect(result.accountId).toBe("abcdef1234567890abcdef1234567890");
+    expect(result.email).toBe("kayukov2010@gmail.com");
+    expect(result.accountName).toBe("Kayukov2010@gmail.com's Account");
+    expect(result.accountId).toBe("dd7ab9be93db46931523f62d3fe7f581");
   });
 
   test("parses whoami with account ID but no email", async () => {

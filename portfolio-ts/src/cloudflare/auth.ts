@@ -113,14 +113,13 @@ export function parseWhoamiOutput(output: string): WhoamiInfo {
   }
 
   const accountId = parseWranglerWhoami(output);
-  const emailMatch = output.match(/email\s+([^\s,<>!]+@[^\s,<>!]+)/i);
-  const accountNameMatch = output.match(
-    /Account\s+Name[^│]*[│|]\s*([^│|\n]+)/i,
-  );
+  const emailMatch = output.match(/email\s+([\w.+-]+@[\w.-]+\.[\w]+)/i);
+  const dataRowMatch = output.match(/[│|]\s*([^│|]+?)\s*[│|]\s*([a-f0-9]{32})\s*[│|]/i);
+  const accountName = dataRowMatch ? dataRowMatch[1].trim() : undefined;
 
   return {
     authenticated: !!accountId || !!emailMatch,
-    accountName: accountNameMatch ? accountNameMatch[1].trim() : undefined,
+    accountName,
     accountId: accountId ?? undefined,
     email: emailMatch ? emailMatch[1] : undefined,
   };
