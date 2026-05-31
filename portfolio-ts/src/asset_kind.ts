@@ -1,4 +1,6 @@
-import yahooFinance from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
+
+const yahooFinance = new YahooFinance();
 
 export interface AssetMetadata {
   yahoo_quote_type: string;
@@ -63,10 +65,7 @@ export async function fetchAssetMetadata(
   }
 
   try {
-    const quote = (await yahooFinance.quote(
-      ticker,
-      { fields: ["quoteType", "typeDisp", "shortName", "longName", "currency", "exchange"] },
-    )) as {
+    const quote = (await yahooFinance.quote(ticker)) as {
       quoteType?: string;
       typeDisp?: string;
       shortName?: string;
