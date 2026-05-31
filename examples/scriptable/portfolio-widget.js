@@ -202,13 +202,8 @@ function drawChart(series, width, height, trendDown) {
   fillPath.addLine(new Point(points[points.length - 1].x, height - padV))
   fillPath.closeSubpath()
 
-  const gradient = new LinearGradient()
-  gradient.colors = [new Color(trendDown ? CFG.red : CFG.green, 0.25), new Color(trendDown ? CFG.red : CFG.green, 0.0)]
-  gradient.startPoint = new Point(0, 0)
-  gradient.endPoint = new Point(0, height)
-
   ctx.addPath(fillPath)
-  ctx.setFillColor(gradient)
+  ctx.setFillColor(new Color(trendDown ? CFG.red : CFG.green, 0.18))
   ctx.fillPath()
 
   const linePath = new Path()
