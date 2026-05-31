@@ -25,6 +25,7 @@ import { cronInstall, cronList, cronRemove } from "./commands/cron.js";
 import { getPriceFreshness } from "./commands/freshness.js";
 import { refreshPortfolio, refreshPortfolioDryRun } from "./commands/refresh.js";
 import { scheduleEmit, scheduleInstall, scheduleRemove } from "./commands/schedule.js";
+import { cloudflareInit } from "./cloudflare/init.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -51,6 +52,7 @@ Commands:
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
+  cloudflare      Cloudflare Workers setup: cloudflare init
   sync            repair_prices + recalculate (daily maintenance)
   refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
@@ -563,6 +565,65 @@ export async function dispatch(argv: string[]): Promise<void> {
       const result = await getWidget(days, asOfDate);
       console.log(JSON.stringify(success("widget", result, result.series.length), null, 2));
       return;
+    }
+
+    case "cloudflare": {
+      const sub = argv[3];
+      if (!sub || sub.startsWith("--")) {
+        console.log(
+          JSON.stringify(
+            error("cloudflare", "VALIDATION_ERROR", "Subcommand required: cloudflare init"),
+            null,
+            2,
+          ),
+        );
+        process.exit(1);
+        return;
+      }
+
+      switch (sub) {
+        case "init": {
+          const result = await cloudflareInit({
+            projectName: str(flags, "project-name") ?? str(flags, "project_name"),
+            accountId: str(flags, "account-id") ?? str(flags, "account_id"),
+            force: bool(flags, "force"),
+          });
+
+          if (result.config !== null) {
+            console.log(
+              JSON.stringify(
+                success("cloudflare:init", result, null, undefined, { warnings: result.warnings }),
+                null,
+                2,
+              ),
+            );
+          } else {
+            const errCode = result.auth.error?.includes("CLOUDFLARE_ACCOUNT_ID")
+              ? "MISSING_ACCOUNT_ID"
+              : "AUTH_FAILED";
+            console.log(
+              JSON.stringify(
+                error("cloudflare:init", errCode, result.auth.error ?? "Cloudflare not configured"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+        default: {
+          console.log(
+            JSON.stringify(
+              error("cloudflare", "UNKNOWN_SUBCOMMAND", `Unknown: cloudflare ${sub}. Use: cloudflare init`),
+              null,
+              2,
+            ),
+          );
+          process.exit(1);
+          return;
+        }
+      }
     }
 
     default: {
