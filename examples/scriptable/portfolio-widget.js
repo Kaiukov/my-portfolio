@@ -164,9 +164,9 @@ function addMetricLine(stack, label, metric, currency) {
 
 function addChart(parent, series, today) {
   const trendDown = today && today.amount != null ? today.amount < 0 : false
-  const chart = drawChart(series, 132, 46, trendDown)
+  const chart = drawChart(series, 110, 44, trendDown)
   const img = parent.addImage(chart)
-  img.imageSize = new Size(132, 46)
+  img.imageSize = new Size(110, 44)
 }
 
 // ═══════════ SPARKLINE ═══════════
