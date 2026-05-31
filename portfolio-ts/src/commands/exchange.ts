@@ -25,7 +25,16 @@ export async function exchangeCurrency(params: {
   validatePositiveFloat(params.quantity, "--quantity", "exchange");
   validatePositiveFloat(params.rate, "--rate", "exchange");
 
-  if (params.fromAsset.toUpperCase() === params.toAsset.toUpperCase()) {
+  const fromNorm = await querySingle<{ normalized: string }>(
+    "SELECT normalize_cash_asset_sql($1, get_asset_type_sql($1)) AS normalized",
+    [params.fromAsset],
+  );
+  const toNorm = await querySingle<{ normalized: string }>(
+    "SELECT normalize_cash_asset_sql($1, get_asset_type_sql($1)) AS normalized",
+    [params.toAsset],
+  );
+
+  if (fromNorm?.normalized === toNorm?.normalized) {
     throw new ValidationError(
       `--from and --to must be different assets; both are ${JSON.stringify(params.fromAsset)}.\n` +
         "Expected: --from <currency> --to <different currency>\n" +
