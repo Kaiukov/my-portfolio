@@ -66,7 +66,7 @@ const routes = {
       return json({ error: "portfolio not published" }, 404);
     }
     const widget = {
-      title: "Portfolio",
+      title: "My holdings",
       currency: "USD",
       as_of_date: data.as_of_date ?? null,
       last_refresh: data.prices_as_of ?? data.updatedAt ?? null,

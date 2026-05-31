@@ -2,7 +2,7 @@
 //     widget – the ListWidget
 //     args.widgetParameter – Scriptable external parameter (unused)
 //     Script – Scriptable runtime
-//     ListWidget, DrawContext, Path, Point, Size, Color, Font, Request, LinearGradient
+//     ListWidget, DrawContext, Path, Point, Rect, Size, Color, Font, Request, LinearGradient
 // ═══════════════════════════════════════════════════
 // Configurable URL – point this at your widget.json endpoint.
 // The URL MUST NOT expose database credentials.
@@ -202,8 +202,16 @@ function drawChart(series, width, height, trendDown) {
   fillPath.addLine(new Point(points[points.length - 1].x, height - padV))
   fillPath.closeSubpath()
 
+  const fillGradientColor = trendDown ? CFG.red : CFG.green
+  const fillGradient = new LinearGradient()
+  fillGradient.startPoint = new Point(0, 0)
+  fillGradient.endPoint = new Point(0, height)
+  fillGradient.colors = [new Color(fillGradientColor, 0.42), new Color(fillGradientColor, 0.00)]
+  fillGradient.locations = [0.0, 1.0]
+  ctx.drawRectInRect(0, 0, new Rect(0, 0, width, height), fillGradient)
+
   ctx.addPath(fillPath)
-  ctx.setFillColor(new Color(trendDown ? CFG.red : CFG.green, 0.18))
+  ctx.setFillColor(new Color(fillGradientColor, 0.12))
   ctx.fillPath()
 
   const linePath = new Path()
