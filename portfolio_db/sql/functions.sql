@@ -2,6 +2,7 @@
 -- These mirror Python domain helpers as SQL functions for database-side calculations
 
 -- Asset type detection based on ticker symbol
+DROP FUNCTION IF EXISTS get_asset_type_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION get_asset_type_sql(ticker TEXT)
 RETURNS TEXT
 LANGUAGE sql
@@ -25,6 +26,7 @@ AS $$
 $$;
 
 -- Check if asset is cash-like (USD, FX symbols, or CASH buckets)
+DROP FUNCTION IF EXISTS is_cash_like_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION is_cash_like_sql(asset TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -35,6 +37,7 @@ AS $$
 $$;
 
 -- Normalize cash asset to standard representation
+DROP FUNCTION IF EXISTS normalize_cash_asset_sql(TEXT, TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION normalize_cash_asset_sql(asset TEXT, asset_type TEXT)
 RETURNS TEXT
 LANGUAGE sql
@@ -60,6 +63,7 @@ AS $$
 $$;
 
 -- Get the cash FX key for an asset (used to track cash positions)
+DROP FUNCTION IF EXISTS get_cash_key_for_asset_sql(TEXT, TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION get_cash_key_for_asset_sql(asset TEXT, asset_type TEXT)
 RETURNS TEXT
 LANGUAGE sql
@@ -94,6 +98,7 @@ AS $$
 $$;
 
 -- Get display currency for cash symbol
+DROP FUNCTION IF EXISTS cash_display_currency_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION cash_display_currency_sql(symbol TEXT)
 RETURNS TEXT
 LANGUAGE sql
@@ -115,6 +120,7 @@ AS $$
 $$;
 
 -- Get cash currency for asset type
+DROP FUNCTION IF EXISTS cash_currency_for_asset_type_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION cash_currency_for_asset_type_sql(asset_type TEXT)
 RETURNS TEXT
 LANGUAGE sql
@@ -170,6 +176,7 @@ AS $$
 $$;
 
 -- Convert cash amount to USD using FX rates
+DROP FUNCTION IF EXISTS cash_amount_to_usd_sql(TEXT, DOUBLE PRECISION, DATE) CASCADE;
 CREATE OR REPLACE FUNCTION cash_amount_to_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
 RETURNS DOUBLE PRECISION
 LANGUAGE sql
@@ -189,6 +196,7 @@ $$;
 -- Non-fiat currencies (BTC, ETH, etc.) are converted to their -USD pair (BTC-USD).
 -- NULL, empty, or USD fee_currency returns 'USD'.
 -- This single rule replaces duplicated BTC->BTC-USD logic in FIFO, status, and cash engines.
+DROP FUNCTION IF EXISTS fee_currency_ticker_sql(TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION fee_currency_ticker_sql(p_fee_currency TEXT)
 RETURNS TEXT
 LANGUAGE sql
@@ -204,6 +212,7 @@ AS $$
 $$;
 
 -- Get market value in USD for an asset quantity
+DROP FUNCTION IF EXISTS asset_market_value_usd_sql(TEXT, DOUBLE PRECISION, DATE) CASCADE;
 CREATE OR REPLACE FUNCTION asset_market_value_usd_sql(p_asset TEXT, p_quantity DOUBLE PRECISION, p_as_of_date DATE)
 RETURNS DOUBLE PRECISION
 LANGUAGE sql
@@ -224,6 +233,7 @@ AS $$
 $$;
 
 -- Lazy-recalc staleness check: TRUE when price refresh is newer than last recalculation
+DROP FUNCTION IF EXISTS needs_recalc() CASCADE;
 CREATE OR REPLACE FUNCTION needs_recalc()
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -1475,6 +1485,7 @@ $$;
 -- Evaluates staleness per ticker (not via a single global MAX(date), which would mask
 -- per-ticker staleness if any one ticker has a recent price).
 -- p_max_age_days (default 2): ticker is stale if its latest price < CURRENT_DATE - p_max_age_days.
+DROP FUNCTION IF EXISTS daily_maintenance_check(INTEGER) CASCADE;
 CREATE OR REPLACE FUNCTION daily_maintenance_check(p_max_age_days INTEGER DEFAULT 2)
 RETURNS VOID
 LANGUAGE plpgsql
