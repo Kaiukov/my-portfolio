@@ -23,36 +23,52 @@ function daysAgo(days: number): string {
 }
 
 describe("getPriceFreshness", () => {
-  test("returns stale=true when MAX(date) is older than max-age (default 5 days)", async () => {
+  test("returns stale=true when coverage gaps exist (per-ticker)", async () => {
+    const recent = daysAgo(1);
+    mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
+    mockQuery.mockResolvedValueOnce([{ ticker: "AAPL" }]);
+
+    const { getPriceFreshness } = await import("../src/commands/freshness.js");
+    const result = await getPriceFreshness(TODAY);
+
+    expect(result.prices_as_of).toBe(recent);
+    expect(result.price_age_days).toBe(1);
+    expect(result.stale).toBe(true);
+  });
+
+  test("returns stale=true when stale_tickers_sql returns rows (per-ticker)", async () => {
+    const recent = daysAgo(1);
+    mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([{ ticker: "SPY" }]);
+
+    const { getPriceFreshness } = await import("../src/commands/freshness.js");
+    const result = await getPriceFreshness(TODAY);
+
+    expect(result.prices_as_of).toBe(recent);
+    expect(result.price_age_days).toBe(1);
+    expect(result.stale).toBe(true);
+  });
+
+  test("returns stale=false when no coverage gaps and no stale tickers (even with old MAX date)", async () => {
     const oldDate = daysAgo(7);
     mockQuerySingle.mockResolvedValue({ prices_as_of: oldDate });
-    mockQuery.mockResolvedValue([]);
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
 
     expect(result.prices_as_of).toBe(oldDate);
     expect(result.price_age_days).toBe(7);
-    expect(result.stale).toBe(true);
-  });
-
-  test("returns stale=false when MAX(date) is within max-age", async () => {
-    const recent = daysAgo(2);
-    mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
-    mockQuery.mockResolvedValue([]);
-
-    const { getPriceFreshness } = await import("../src/commands/freshness.js");
-    const result = await getPriceFreshness(TODAY);
-
-    expect(result.prices_as_of).toBe(recent);
-    expect(result.price_age_days).toBe(2);
     expect(result.stale).toBe(false);
   });
 
-  test("returns stale=false at exact boundary (age = max-age days)", async () => {
+  test("correctly computes prices_as_of and price_age_days from MAX(date)", async () => {
     const boundary = daysAgo(5);
     mockQuerySingle.mockResolvedValue({ prices_as_of: boundary });
-    mockQuery.mockResolvedValue([]);
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -64,6 +80,8 @@ describe("getPriceFreshness", () => {
 
   test("returns null prices_as_of when no price data exists", async () => {
     mockQuerySingle.mockResolvedValue(null);
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -75,6 +93,8 @@ describe("getPriceFreshness", () => {
 
   test("handles null prices_as_of field in row", async () => {
     mockQuerySingle.mockResolvedValue({ prices_as_of: null });
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
@@ -84,34 +104,44 @@ describe("getPriceFreshness", () => {
     expect(result.stale).toBe(false);
   });
 
-  test("uses env PORTFOLIO_PRICE_MAX_AGE_DAYS override", async () => {
-    process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"] = "10";
-    const oldDate = daysAgo(7);
-    mockQuerySingle.mockResolvedValue({ prices_as_of: oldDate });
-    mockQuery.mockResolvedValue([]);
+  test("uses env PORTFOLIO_PRICE_MAX_AGE_DAYS to pass maxAgeDays to stale_tickers_sql", async () => {
+    process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"] = "3";
+    const recent = daysAgo(1);
+    mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
 
-    expect(result.prices_as_of).toBe(oldDate);
-    expect(result.price_age_days).toBe(7);
     expect(result.stale).toBe(false);
+
+    const staleCallArgs = mockQuery.mock.calls.find(
+      (call: string[]) => typeof call[0] === "string" && call[0].includes("stale_tickers_sql"),
+    );
+    expect(staleCallArgs).toBeDefined();
+    expect(staleCallArgs[1]).toEqual([3]);
 
     delete process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"];
   });
 
   test("ignores invalid env PORTFOLIO_PRICE_MAX_AGE_DAYS and falls back to default", async () => {
     process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"] = "not-a-number";
-    const oldDate = daysAgo(7);
-    mockQuerySingle.mockResolvedValue({ prices_as_of: oldDate });
-    mockQuery.mockResolvedValue([]);
+    const recent = daysAgo(1);
+    mockQuerySingle.mockResolvedValue({ prices_as_of: recent });
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const { getPriceFreshness } = await import("../src/commands/freshness.js");
     const result = await getPriceFreshness(TODAY);
 
-    expect(result.prices_as_of).toBe(oldDate);
-    expect(result.price_age_days).toBe(7);
-    expect(result.stale).toBe(true);
+    expect(result.stale).toBe(false);
+
+    const staleCallArgs = mockQuery.mock.calls.find(
+      (call: string[]) => typeof call[0] === "string" && call[0].includes("stale_tickers_sql"),
+    );
+    expect(staleCallArgs).toBeDefined();
+    expect(staleCallArgs[1]).toEqual([5]);
 
     delete process.env["PORTFOLIO_PRICE_MAX_AGE_DAYS"];
   });
