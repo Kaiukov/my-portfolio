@@ -111,7 +111,7 @@ describe("auth detection — explicit env (no global mutation)", () => {
 
   test("returns unauthenticated when no token and PATH empty", async () => {
     const mod = require("../src/cloudflare/auth.js");
-    const result = await mod.detectAuth({ PATH: "" });
+    const result = await mod.detectAuth({ PATH: "", CLOUDFLARE_API_TOKEN: "" });
     expect(result.authenticated).toBe(false);
     expect(result.method).toBeNull();
     expect(result.error).toBeDefined();
@@ -119,7 +119,8 @@ describe("auth detection — explicit env (no global mutation)", () => {
 
   test("error contains wrangler login suggestion", async () => {
     const mod = require("../src/cloudflare/auth.js");
-    const result = await mod.detectAuth({});
+    const result = await mod.detectAuth({ PATH: "/dev/null" });
+    expect(result.authenticated).toBe(false);
     expect(result.error).toContain("wrangler login");
     expect(result.error).toContain("CLOUDFLARE_API_TOKEN");
   });
@@ -568,7 +569,7 @@ describe("cloudflare CLI integration — mocked init (no global env)", () => {
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "deploy"]);
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "xyz-nope"]);
 
     expect(logSpy).toHaveBeenCalled();
     const output = JSON.parse(logSpy.mock.calls[0][0]);
@@ -670,6 +671,673 @@ describe("cloudflare init — missing account_id error code via mocked init", ()
     expect(output.command).toBe("cloudflare:init");
     expect(output.data.auth.accountId).toBe("deadbeef12345678deadbeef12345678");
     expect(output.data.config.account_id).toBe("deadbeef12345678deadbeef12345678");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── parseDeployedUrl ───────────────────────────────────────────
+
+describe("parseDeployedUrl", () => {
+  test("extracts workers.dev URL from realistic wrangler deploy output", () => {
+    const { parseDeployedUrl } = require("../src/cloudflare/deploy.js");
+    const output = `
+ ⛅️ wrangler 4.46.0 (update available 4.47.3)
+────────────────────────────────────────────
+
+▲ [WARNING] Processing wrangler.jsonc configuration:
+
+    - "kv_namespaces" fields are deprecated and will be removed in a future version of Wrangler.
+
+
+Total Upload: 0.45 KiB / 1 file
+Worker Startup Time: 5 ms
+Uploaded portfolio-widget (2.34 sec)
+Deployed portfolio-widget triggers (0.81 sec)
+  https://portfolio-widget.username.workers.dev
+Current Deployment ID: abc123-def456-ghi789
+`;
+    const result = parseDeployedUrl(output);
+    expect(result).toBe("https://portfolio-widget.username.workers.dev");
+  });
+
+  test("extracts URL with subdomain dots", () => {
+    const { parseDeployedUrl } = require("../src/cloudflare/deploy.js");
+    const output = "  https://my-worker.sub.domain.workers.dev";
+    expect(parseDeployedUrl(output)).toBe("https://my-worker.sub.domain.workers.dev");
+  });
+
+  test("strips trailing slash", () => {
+    const { parseDeployedUrl } = require("../src/cloudflare/deploy.js");
+    const output = "  https://portfolio-widget.username.workers.dev/";
+    expect(parseDeployedUrl(output)).toBe("https://portfolio-widget.username.workers.dev");
+  });
+
+  test("returns null when no workers.dev URL present", () => {
+    const { parseDeployedUrl } = require("../src/cloudflare/deploy.js");
+    const output = "Some random output without a URL";
+    expect(parseDeployedUrl(output)).toBeNull();
+  });
+
+  test("returns null when only non-workers.dev URLs present", () => {
+    const { parseDeployedUrl } = require("../src/cloudflare/deploy.js");
+    const output = "https://example.com/deploy-success";
+    expect(parseDeployedUrl(output)).toBeNull();
+  });
+});
+
+// ─── getWidgetUrl ───────────────────────────────────────────────
+
+describe("getWidgetUrl", () => {
+  beforeEach(setupTmpDir);
+  afterEach(teardownTmpDir);
+
+  test("returns saved URL from config", () => {
+    const { saveLocalConfig } = require("../src/cloudflare/config.js");
+    const { getWidgetUrl } = require("../src/cloudflare/url.js");
+
+    saveLocalConfig(
+      {
+        account_id: "abc123",
+        wrangler_project_name: "test",
+        initialized_at: "2026-01-01T00:00:00.000Z",
+        widget_url: "https://test.user.workers.dev/portfolio",
+      },
+      tmpDir,
+    );
+
+    const result = getWidgetUrl(tmpDir);
+    expect(result.ok).toBe(true);
+    expect(result.url).toBe("https://test.user.workers.dev/portfolio");
+  });
+
+  test("returns error when no config exists", () => {
+    const { getWidgetUrl } = require("../src/cloudflare/url.js");
+    const result = getWidgetUrl(tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Not deployed yet");
+  });
+
+  test("returns error when config has no widget_url", () => {
+    const { saveLocalConfig } = require("../src/cloudflare/config.js");
+    const { getWidgetUrl } = require("../src/cloudflare/url.js");
+
+    saveLocalConfig(
+      {
+        account_id: "abc123",
+        wrangler_project_name: "test",
+        initialized_at: "2026-01-01T00:00:00.000Z",
+      },
+      tmpDir,
+    );
+
+    const result = getWidgetUrl(tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("deploy");
+  });
+});
+
+// ─── deployWorker — mocked spawn ─────────────────────────────────
+
+describe("deployWorker — mocked spawn", () => {
+  let mockSpawn: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    setupTmpDir();
+    mockSpawn = mock();
+    mock.module("../src/cloudflare/spawn.js", () => ({
+      spawnWrangler: mockSpawn,
+    }));
+  });
+
+  afterEach(() => {
+    teardownTmpDir();
+    mock.module("../src/cloudflare/spawn.js", () => require("../src/cloudflare/spawn.js"));
+  });
+
+  test("deploys, parses URL, saves config", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "Uploaded portfolio-widget (2.34 sec)\n  https://portfolio-widget.username.workers.dev\n",
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const { deployWorker } = await import("../src/cloudflare/deploy.js");
+    const result = await deployWorker(tmpDir);
+
+    expect(result.success).toBe(true);
+    expect(result.url).toBe("https://portfolio-widget.username.workers.dev/portfolio");
+
+    const { loadLocalConfig } = require("../src/cloudflare/config.js");
+    const config = loadLocalConfig(tmpDir);
+    expect(config).not.toBeNull();
+    expect(config!.widget_url).toBe("https://portfolio-widget.username.workers.dev/portfolio");
+  });
+
+  test("returns error when wrangler deploy fails", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "",
+      stderr: "Error: authentication failed",
+      exitCode: 1,
+    });
+
+    const { deployWorker } = await import("../src/cloudflare/deploy.js");
+    const result = await deployWorker(tmpDir);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("wrangler deploy failed");
+    expect(result.url).toBeNull();
+  });
+
+  test("returns error when URL cannot be parsed", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "Deploy succeeded but no URL here",
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const { deployWorker } = await import("../src/cloudflare/deploy.js");
+    const result = await deployWorker(tmpDir);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Could not parse");
+  });
+});
+
+// ─── parseWhoamiOutput ─────────────────────────────────────────
+
+describe("parseWhoamiOutput", () => {
+  test("parses authenticated whoami with full details", async () => {
+    const mod = await import("../src/cloudflare/auth.js");
+    const { parseWhoamiOutput } = mod;
+    const output = `
+ ⛅️ wrangler 4.46.0
+──────────────────
+Getting User settings...
+👋 You are logged in with an OAuth Token, associated with the email user@example.com!
+┌────────────────────────┬──────────────────────────────────┐
+│ Account Name           │ My Portfolio Account              │
+├────────────────────────┼──────────────────────────────────┤
+│ Account ID             │ abcdef1234567890abcdef1234567890 │
+└────────────────────────┴──────────────────────────────────┘
+`;
+    const result = parseWhoamiOutput(output);
+    expect(result.authenticated).toBe(true);
+    expect(result.email).toBe("user@example.com");
+    expect(result.accountName).toBe("My Portfolio Account");
+    expect(result.accountId).toBe("abcdef1234567890abcdef1234567890");
+  });
+
+  test("parses whoami with account ID but no email", async () => {
+    const mod = await import("../src/cloudflare/auth.js");
+    const { parseWhoamiOutput } = mod;
+    const output = `
+┌────────────────────────┬──────────────────────────────────┐
+│ Account ID             │ abcdef1234567890abcdef1234567890 │
+└────────────────────────┴──────────────────────────────────┘
+`;
+    const result = parseWhoamiOutput(output);
+    expect(result.authenticated).toBe(true);
+    expect(result.accountId).toBe("abcdef1234567890abcdef1234567890");
+    expect(result.email).toBeUndefined();
+  });
+
+  test("detects not-authenticated state", async () => {
+    const mod = await import("../src/cloudflare/auth.js");
+    const { parseWhoamiOutput } = mod;
+    const output = `
+ ⛅️ wrangler 4.46.0
+──────────────────
+✘ You are not authenticated. Run \`wrangler login\` to authenticate.
+`;
+    const result = parseWhoamiOutput(output);
+    expect(result.authenticated).toBe(false);
+    expect(result.error).toContain("Not authenticated");
+  });
+
+  test("parses whoami with upper-case hex account ID", async () => {
+    const mod = await import("../src/cloudflare/auth.js");
+    const { parseWhoamiOutput } = mod;
+    const output =
+      "│ Account ID             │ ABCDEF1234567890ABCDEF1234567890 │";
+    const result = parseWhoamiOutput(output);
+    expect(result.authenticated).toBe(true);
+    expect(result.accountId).toBe("ABCDEF1234567890ABCDEF1234567890");
+  });
+
+  test("handles empty whoami output gracefully", async () => {
+    const mod = await import("../src/cloudflare/auth.js");
+    const { parseWhoamiOutput } = mod;
+    const output = "";
+    const result = parseWhoamiOutput(output);
+    expect(result.authenticated).toBe(false);
+  });
+});
+
+// ─── runWranglerWhoami — mocked spawn ────────────────────────────
+
+describe("runWranglerWhoami — mocked spawn", () => {
+  let mockSpawn: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    mockSpawn = mock();
+    mock.module("../src/cloudflare/spawn.js", () => ({
+      spawnWrangler: mockSpawn,
+    }));
+  });
+
+  afterEach(() => {
+    mock.module("../src/cloudflare/spawn.js", () => require("../src/cloudflare/spawn.js"));
+  });
+
+  test("returns whoami info on success", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "👋 You are logged in with an OAuth Token, associated with the email user@example.com!\n│ Account ID │ abcdef1234567890abcdef1234567890 │",
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const mod = await import("../src/cloudflare/auth.js");
+    const { runWranglerWhoami } = mod;
+    const result = runWranglerWhoami();
+
+    expect(result.authenticated).toBe(true);
+    expect(result.email).toBe("user@example.com");
+  });
+
+  test("returns error when whoami fails", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "",
+      stderr: "You are not authenticated",
+      exitCode: 1,
+    });
+
+    const mod = await import("../src/cloudflare/auth.js");
+    const { runWranglerWhoami } = mod;
+    const result = runWranglerWhoami();
+
+    expect(result.authenticated).toBe(false);
+    expect(result.error).toContain("wrangler whoami failed");
+  });
+});
+
+// ─── runWranglerLogin / runWranglerLogout — mocked spawn ─────────
+
+describe("runWranglerLogin / runWranglerLogout — mocked spawn", () => {
+  let mockSpawn: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    mockSpawn = mock();
+    mock.module("../src/cloudflare/spawn.js", () => ({
+      spawnWrangler: mockSpawn,
+    }));
+  });
+
+  afterEach(() => {
+    mock.module("../src/cloudflare/spawn.js", () => require("../src/cloudflare/spawn.js"));
+  });
+
+  test("login invokes wrangler login with inherit", async () => {
+    mockSpawn.mockReturnValue({ stdout: "", stderr: "", exitCode: 0 });
+
+    const mod = await import("../src/cloudflare/auth.js");
+    const { runWranglerLogin } = mod;
+    const result = runWranglerLogin();
+
+    expect(result.success).toBe(true);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const callArgs = mockSpawn.mock.calls[0];
+    expect(callArgs[0]).toEqual(["login"]);
+    expect(callArgs[1]).toEqual({ inherit: true });
+  });
+
+  test("login returns error on failure", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "",
+      stderr: "Failed to open browser",
+      exitCode: 1,
+    });
+
+    const mod = await import("../src/cloudflare/auth.js");
+    const { runWranglerLogin } = mod;
+    const result = runWranglerLogin();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("wrangler login failed");
+  });
+
+  test("logout invokes wrangler logout with inherit", async () => {
+    mockSpawn.mockReturnValue({ stdout: "", stderr: "", exitCode: 0 });
+
+    const mod = await import("../src/cloudflare/auth.js");
+    const { runWranglerLogout } = mod;
+    const result = runWranglerLogout();
+
+    expect(result.success).toBe(true);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const callArgs = mockSpawn.mock.calls[0];
+    expect(callArgs[0]).toEqual(["logout"]);
+    expect(callArgs[1]).toEqual({ inherit: true });
+  });
+
+  test("logout returns error on failure", async () => {
+    mockSpawn.mockReturnValue({
+      stdout: "",
+      stderr: "No credentials to remove",
+      exitCode: 1,
+    });
+
+    const mod = await import("../src/cloudflare/auth.js");
+    const { runWranglerLogout } = mod;
+    const result = runWranglerLogout();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("wrangler logout failed");
+  });
+});
+
+// ─── CLI integration — cloudflare deploy ─────────────────────────
+
+describe("cloudflare deploy CLI — mocked deploy", () => {
+  afterEach(() => {
+    mock.module("../src/cloudflare/deploy.js", () => require("../src/cloudflare/deploy.js"));
+  });
+
+  test("returns success envelope on deploy", async () => {
+    const mockDeploy = mock().mockResolvedValue({
+      success: true,
+      url: "https://portfolio-widget.username.workers.dev/portfolio",
+    });
+
+    mock.module("../src/cloudflare/deploy.js", () => ({
+      deployWorker: mockDeploy,
+      parseDeployedUrl: require("../src/cloudflare/deploy.js").parseDeployedUrl,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "deploy"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:deploy");
+    expect(output.data.url).toBe("https://portfolio-widget.username.workers.dev/portfolio");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns error envelope when deploy fails", async () => {
+    const mockDeploy = mock().mockResolvedValue({
+      success: false,
+      url: null,
+      error: "wrangler deploy failed (exit code 1)",
+    });
+
+    mock.module("../src/cloudflare/deploy.js", () => ({
+      deployWorker: mockDeploy,
+      parseDeployedUrl: require("../src/cloudflare/deploy.js").parseDeployedUrl,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "deploy"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:deploy");
+    expect(output.error.code).toBe("DEPLOY_FAILED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── CLI integration — cloudflare url ────────────────────────────
+
+describe("cloudflare url CLI — mocked url", () => {
+  afterEach(() => {
+    mock.module("../src/cloudflare/url.js", () => require("../src/cloudflare/url.js"));
+  });
+
+  test("returns success envelope with saved URL", async () => {
+    const mockGetUrl = mock().mockReturnValue({
+      ok: true,
+      url: "https://test.user.workers.dev/portfolio",
+    });
+
+    mock.module("../src/cloudflare/url.js", () => ({
+      getWidgetUrl: mockGetUrl,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "url"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:url");
+    expect(output.data.url).toBe("https://test.user.workers.dev/portfolio");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns error envelope when not deployed", async () => {
+    const mockGetUrl = mock().mockReturnValue({
+      ok: false,
+      error: "Not deployed yet. Run `portfolio cloudflare deploy` first.",
+    });
+
+    mock.module("../src/cloudflare/url.js", () => ({
+      getWidgetUrl: mockGetUrl,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "url"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:url");
+    expect(output.error.code).toBe("NOT_DEPLOYED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── CLI integration — cloudflare login / logout ─────────────────
+
+describe("cloudflare login/logout CLI — mocked auth", () => {
+  afterEach(() => {
+    mock.module("../src/cloudflare/auth.js", () => require("../src/cloudflare/auth.js"));
+  });
+
+  test("cloudflare login returns success", async () => {
+    const mockLogin = mock().mockReturnValue({ success: true });
+    const mockLogout = () => ({ success: true });
+    const mockWhoami = () => ({ authenticated: false });
+
+    mock.module("../src/cloudflare/auth.js", () => ({
+      ...require("../src/cloudflare/auth.js"),
+      runWranglerLogin: mockLogin,
+      runWranglerLogout: mockLogout,
+      runWranglerWhoami: mockWhoami,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "login"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:login");
+    expect(output.data.authenticated).toBe(true);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("cloudflare login returns error on failure", async () => {
+    const mockLogin = mock().mockReturnValue({
+      success: false,
+      error: "wrangler login failed",
+    });
+    const mockLogout = () => ({ success: true });
+    const mockWhoami = () => ({ authenticated: false });
+
+    mock.module("../src/cloudflare/auth.js", () => ({
+      ...require("../src/cloudflare/auth.js"),
+      runWranglerLogin: mockLogin,
+      runWranglerLogout: mockLogout,
+      runWranglerWhoami: mockWhoami,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "login"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("LOGIN_FAILED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("cloudflare logout returns success", async () => {
+    const mockLogout = mock().mockReturnValue({ success: true });
+    const mockLogin = () => ({ success: false });
+    const mockWhoami = () => ({ authenticated: false });
+
+    mock.module("../src/cloudflare/auth.js", () => ({
+      ...require("../src/cloudflare/auth.js"),
+      runWranglerLogin: mockLogin,
+      runWranglerLogout: mockLogout,
+      runWranglerWhoami: mockWhoami,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "logout"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:logout");
+    expect(output.data.authenticated).toBe(false);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── CLI integration — cloudflare whoami ─────────────────────────
+
+describe("cloudflare whoami CLI — mocked auth", () => {
+  afterEach(() => {
+    mock.module("../src/cloudflare/auth.js", () => require("../src/cloudflare/auth.js"));
+  });
+
+  test("returns whoami success envelope", async () => {
+    const mockWhoami = mock().mockReturnValue({
+      authenticated: true,
+      accountName: "My Account",
+      accountId: "abcdef1234567890abcdef1234567890",
+      email: "user@example.com",
+    });
+    const mockLogin = () => ({ success: false });
+    const mockLogout = () => ({ success: false });
+
+    mock.module("../src/cloudflare/auth.js", () => ({
+      ...require("../src/cloudflare/auth.js"),
+      runWranglerLogin: mockLogin,
+      runWranglerLogout: mockLogout,
+      runWranglerWhoami: mockWhoami,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "whoami"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("cloudflare:whoami");
+    expect(output.data.authenticated).toBe(true);
+    expect(output.data.account_name).toBe("My Account");
+    expect(output.data.account_id).toBe("abcdef1234567890abcdef1234567890");
+    expect(output.data.email).toBe("user@example.com");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("returns whoami not-authenticated error", async () => {
+    const mockWhoami = mock().mockReturnValue({
+      authenticated: false,
+      error: "Not authenticated. Run `wrangler login` first.",
+    });
+    const mockLogin = () => ({ success: false });
+    const mockLogout = () => ({ success: false });
+
+    mock.module("../src/cloudflare/auth.js", () => ({
+      ...require("../src/cloudflare/auth.js"),
+      runWranglerLogin: mockLogin,
+      runWranglerLogout: mockLogout,
+      runWranglerWhoami: mockWhoami,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "whoami"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.command).toBe("cloudflare:whoami");
+    expect(output.error.code).toBe("NOT_AUTHENTICATED");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ─── cloudflare unknown subcommand (updated message) ────────────
+
+describe("cloudflare unknown subcommand after #106", () => {
+  test("lists updated subcommands in error message", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "cloudflare", "fake"]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("UNKNOWN_SUBCOMMAND");
+    expect(output.error.message).toContain("init | deploy | url | login | logout | whoami");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
