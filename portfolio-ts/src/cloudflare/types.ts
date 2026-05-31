@@ -30,6 +30,7 @@ export interface InitResult {
 export interface InitOptions {
   projectName?: string;
   accountId?: string;
+  kvNamespaceId?: string;
   force?: boolean;
 }
 

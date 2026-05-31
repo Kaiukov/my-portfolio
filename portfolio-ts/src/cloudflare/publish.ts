@@ -105,6 +105,7 @@ export async function publishToKv(projectRoot?: string): Promise<PublishResult> 
     payload,
     "--namespace-id",
     namespaceId,
+    "--remote",
   ]);
 
   if (proc.exitCode !== 0) {

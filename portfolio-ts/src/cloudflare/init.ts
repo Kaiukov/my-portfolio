@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { detectAuth, validateAccountId } from "./auth.js";
 import { generateWranglerJsonc, generateWorkerJs } from "./templates.js";
-import { saveLocalConfig } from "./config.js";
+import { loadLocalConfig, saveLocalConfig } from "./config.js";
 import type { CloudflareConfig, InitOptions, InitResult } from "./types.js";
 
 const CLOUDFLARE_DIR = "cloudflare";
@@ -38,8 +38,10 @@ export async function cloudflareInit(
     };
   }
 
+  const existing = loadLocalConfig(root);
   const config: CloudflareConfig = {
-    account_id: result.id,
+    account_id: options.accountId ?? existing?.account_id ?? result.id,
+    kv_namespace_id: options.kvNamespaceId ?? existing?.kv_namespace_id,
     wrangler_project_name: options.projectName ?? "portfolio-widget",
     initialized_at: new Date().toISOString(),
   };

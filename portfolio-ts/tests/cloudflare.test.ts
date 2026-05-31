@@ -1519,6 +1519,7 @@ describe("publishToKv — mocked services + spawn + config", () => {
     expect(JSON.parse(callArgs[0][4])).toEqual(snap);
     expect(callArgs[0][5]).toBe("--namespace-id");
     expect(callArgs[0][6]).toBe("kv-namespace-12345");
+    expect(callArgs[0][7]).toBe("--remote");
 
     mock.module("../src/db.js", () => require("../src/db.js"));
     mock.module("../src/tx.js", () => require("../src/tx.js"));
@@ -1709,5 +1710,55 @@ describe("cloudflare publish CLI — mocked publishToKv", () => {
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+});
+
+describe("cloudflare init — preserves and wires kv_namespace_id (#107 live fix)", () => {
+  const TMP = join(import.meta.dir, "__init_kv_test_tmp__");
+
+  beforeEach(() => {
+    if (existsSync(TMP)) rmSync(TMP, { recursive: true });
+    mkdirSync(TMP, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TMP)) rmSync(TMP, { recursive: true });
+  });
+
+  test("loadLocalConfig preserves kv_namespace_id across init-style round-trip", async () => {
+    const { saveLocalConfig, loadLocalConfig } = await import("../src/cloudflare/config.js");
+    const { generateWranglerJsonc } = await import("../src/cloudflare/templates.js");
+
+    saveLocalConfig(
+      {
+        account_id: "abcdef1234567890abcdef1234567890",
+        kv_namespace_id: "real-kv-9999",
+        wrangler_project_name: "portfolio-widget",
+        initialized_at: "2026-05-31T00:00:00.000Z",
+      },
+      TMP,
+    );
+
+    const existing = loadLocalConfig(TMP);
+    expect(existing).not.toBeNull();
+    expect(existing!.kv_namespace_id).toBe("real-kv-9999");
+
+    const newConfig = {
+      account_id: existing!.account_id,
+      kv_namespace_id: existing!.kv_namespace_id,
+      wrangler_project_name: "portfolio-widget",
+      initialized_at: "2026-05-31T00:00:00.000Z",
+    } as const;
+
+    const wrangler = generateWranglerJsonc(newConfig);
+    expect(wrangler).toContain("real-kv-9999");
+    expect(wrangler).not.toContain("REPLACE_WITH_YOUR_KV_NAMESPACE_ID");
+
+    saveLocalConfig(newConfig, TMP);
+    const afterSave = loadLocalConfig(TMP);
+    expect(afterSave!.kv_namespace_id).toBe("real-kv-9999");
+
+    const cfg = JSON.parse(readFileSync(join(TMP, ".portfolio", "config.json"), "utf-8"));
+    expect(cfg.kv_namespace_id).toBe("real-kv-9999");
   });
 });
