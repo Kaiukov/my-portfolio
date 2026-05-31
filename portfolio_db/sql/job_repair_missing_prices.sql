@@ -44,7 +44,7 @@ BEGIN
         INTO v_coverage_count, v_coverage_list
         FROM (
             SELECT DISTINCT c.ticker
-            FROM get_required_price_checkpoints_sql(last_trading_day_sql(CURRENT_DATE)) c
+            FROM get_required_price_checkpoints_sql(CURRENT_DATE) c
             WHERE NOT EXISTS (
                 SELECT 1 FROM prices p
                 WHERE p.ticker = c.ticker AND p.date = c.checkpoint_date::date

@@ -379,7 +379,11 @@ AS $$
 
     UNION
 
-    SELECT DISTINCT t.asset::TEXT, p_end_date
+    SELECT DISTINCT t.asset::TEXT,
+        CASE WHEN get_asset_type_sql(t.asset) = 'crypto'
+             THEN p_end_date
+             ELSE last_trading_day_sql(p_end_date)
+        END
     FROM transactions t
     WHERE t.action IN ('BUY', 'SELL')
       AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
@@ -397,7 +401,8 @@ AS $$
 
     UNION
 
-    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT, p_end_date
+    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
+        last_trading_day_sql(p_end_date)
     FROM transactions t
     WHERE t.action IN ('BUY', 'SELL')
       AND get_asset_type_sql(t.asset) IN (
@@ -415,7 +420,12 @@ AS $$
 
     UNION
 
-    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT, p_end_date
+    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
+        CASE
+            WHEN get_asset_type_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))) = 'crypto'
+            THEN p_end_date
+            ELSE last_trading_day_sql(p_end_date)
+        END
     FROM transactions t
     WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
        OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
