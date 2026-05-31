@@ -23,9 +23,10 @@ export async function checkPricesStale(maxAgeDays: number = STALE_MAX_AGE_DAYS):
   tickers: string[];
 }> {
   const rows = await query<{ ticker: string }>(
-    `SELECT dt.ticker
+    `SELECT DISTINCT dt.ticker
      FROM discover_required_tickers_sql() dt
-     WHERE price_asof_stale_sql(dt.ticker, CURRENT_DATE, $1) IS NULL
+     WHERE NOT is_cash_like_sql(dt.ticker)
+       AND price_asof_stale_sql(dt.ticker, CURRENT_DATE, $1) IS NULL
      ORDER BY dt.ticker`,
     [maxAgeDays],
   );
