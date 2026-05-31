@@ -27,7 +27,24 @@ describe("parseDate", () => {
     expect(() => parseDate("", "--date")).toThrow(ValidationError);
     expect(() => parseDate("not-a-date", "--date")).toThrow(ValidationError);
   });
+
+  test("error message mentions both YYYY-MM-DD and DD-MM-YYYY", () => {
+    const err = tryParseDate("15/01/2026", "--date");
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err!.message).toContain("YYYY-MM-DD");
+    expect(err!.message).toContain("DD-MM-YYYY");
+    expect(err!.message).toContain("15/01/2026");
+  });
 });
+
+function tryParseDate(dateStr: string, flagName: string): Error | null {
+  try {
+    parseDate(dateStr, flagName);
+    return null;
+  } catch (e) {
+    return e as Error;
+  }
+}
 
 describe("validatePositiveFloat", () => {
   test("passes for positive numbers", () => {
