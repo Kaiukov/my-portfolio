@@ -60,6 +60,24 @@ const routes = {
     return json(data, 200, { "Cache-Control": "public, max-age=300" });
   },
 
+  "/widget": async (_request, env) => {
+    const data = await env.PORTFOLIO_KV.get("portfolio", "json");
+    if (!data) {
+      return json({ error: "portfolio not published" }, 404);
+    }
+    const widget = {
+      title: "Portfolio",
+      currency: "USD",
+      as_of_date: data.as_of_date ?? null,
+      last_refresh: data.prices_as_of ?? data.updatedAt ?? null,
+      value: data.portfolio_value_usd ?? null,
+      today: { amount: data.today?.abs ?? 0, pct: data.today?.pct ?? 0 },
+      total: { amount: data.total?.abs ?? 0, pct: data.total?.pct ?? 0 },
+      series: Array.isArray(data.history) ? data.history.map((h) => ({ date: h.date, value: h.value })) : [],
+    };
+    return json(widget, 200, { "Cache-Control": "public, max-age=300" });
+  },
+
   "/health": async () => {
     return json({ ok: true });
   },

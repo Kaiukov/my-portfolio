@@ -67,6 +67,7 @@ describe("worker.js template", () => {
     expect(output).toContain("/portfolio");
     expect(output).toContain("Access-Control-Allow-Origin");
     expect(output).toContain("corsHeaders");
+    expect(output).toContain("/widget");
     expect(output).toContain("/health");
     expect(output).toContain("/version");
     expect(output).toContain("not found");
@@ -79,6 +80,16 @@ describe("worker.js template", () => {
     expect(typeof API_VERSION).toBe("string");
     const output = generateWorkerJs();
     expect(output).toContain(`{ version: "${API_VERSION}" }`);
+  });
+
+  test("includes /widget route mapping KV snapshot to widget.json shape", () => {
+    const { generateWorkerJs } = require("../src/cloudflare/templates.js");
+    const output = generateWorkerJs();
+    expect(output).toContain('"/widget"');
+    expect(output).toContain("portfolio_value_usd");
+    expect(output).toContain("amount:");
+    expect(output).toContain("series:");
+    expect(output).toContain('title: "Portfolio"');
   });
 });
 
