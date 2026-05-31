@@ -1,6 +1,10 @@
 import { query, querySingle } from "../db.js";
 import { STALE_MAX_AGE_DAYS } from "../validators.js";
 import type { PriceRow } from "../providers/yahoo.js";
+import { fetchAssetMetadata } from "../asset_kind.js";
+import type { AssetMetadata } from "../asset_kind.js";
+
+export type MetadataFetchFn = (ticker: string) => Promise<AssetMetadata | null>;
 
 export interface RepairPricesResult {
   tickers: string[];
@@ -64,6 +68,22 @@ async function upsertPrices(rows: PriceRow[]): Promise<number> {
   return count;
 }
 
+async function upsertAssetMetadata(ticker: string, meta: AssetMetadata): Promise<void> {
+  await query(
+    `SELECT upsert_asset_metadata($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      ticker,
+      meta.yahoo_quote_type,
+      meta.yahoo_type_disp ?? null,
+      meta.yahoo_short_name ?? null,
+      meta.yahoo_long_name ?? null,
+      meta.currency ?? null,
+      meta.exchange ?? null,
+      new Date().toISOString(),
+    ],
+  );
+}
+
 export async function repairPricesDryRun(params: {
   tickers?: string[];
   startDate?: string;
@@ -122,6 +142,7 @@ async function markRefreshSuccess(rowsAffected: number): Promise<void> {
 export async function repairPrices(
   params: { tickers?: string[]; startDate?: string; endDate?: string; maxAgeDays?: number },
   fetchFn: FetchFn,
+  metadataFetchFn: MetadataFetchFn = fetchAssetMetadata,
 ): Promise<RepairPricesResult> {
   const today = new Date().toISOString().split("T")[0];
   const txRange = await getDateRange();
@@ -149,6 +170,15 @@ export async function repairPrices(
       rowsPerTicker[ticker] = inserted;
       totalRows += inserted;
       await recordRepair(ticker, start, end, "success", inserted);
+
+      try {
+        const meta = await metadataFetchFn(ticker);
+        if (meta) {
+          await upsertAssetMetadata(ticker, meta);
+        }
+      } catch {
+        // fail-soft: never abort price repair due to metadata fetch failure
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       rowsPerTicker[ticker] = 0;

@@ -77,3 +77,15 @@ CREATE TABLE IF NOT EXISTS repair_log (
     message VARCHAR,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Asset metadata: per-ticker metadata from Yahoo Finance (quoteType etc.)
+CREATE TABLE IF NOT EXISTS asset_metadata (
+    ticker VARCHAR PRIMARY KEY,
+    yahoo_quote_type VARCHAR,
+    yahoo_type_disp VARCHAR,
+    yahoo_short_name VARCHAR,
+    yahoo_long_name VARCHAR,
+    currency VARCHAR,
+    exchange VARCHAR,
+    fetched_at TIMESTAMPTZ DEFAULT NOW()
+);
