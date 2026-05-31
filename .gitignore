@@ -82,3 +82,18 @@ $DB
 *.backup-*.sql
 portfolio.backup-*.sql
 portfolio_db/__pycache__/
+
+# Env variants & local state
+.env.*
+!.env.example
+.wrangler/
+.portfolio/
+
+# Restored DB dumps
+portfolio.restored-*.sql
+
+# Coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
