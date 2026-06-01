@@ -2,7 +2,9 @@ import { describe, expect, test, mock, jest, afterEach, beforeEach, afterAll } f
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { CloudflareConfig, InitResult } from "../src/cloudflare/types.js";
-import * as realPublishModule from "../src/cloudflare/publish.js";
+import * as publishModuleNs from "../src/cloudflare/publish.js";
+
+const realPublishModule = { ...publishModuleNs };
 
 const tmpDir = join(import.meta.dir, "__cloudflare_test_tmp__");
 
