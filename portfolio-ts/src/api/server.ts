@@ -9,7 +9,16 @@ import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 
+type RequestContext = {
+  ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
+};
+
 type Handler = (searchParams: URLSearchParams) => Promise<SuccessEnvelope>;
+
+export interface ReadyRouteResult {
+  status: 200 | 503;
+  body: unknown;
+}
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -81,7 +90,7 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-export async function handleRequest(req: Request): Promise<Response> {
+export async function handleRequest(req: Request, ctx: RequestContext = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -90,6 +99,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed. Only GET is supported.`),
       405,
     );
+  }
+
+  if (path === "/ready") {
+    if (ctx.ready) {
+      const readyResult = await ctx.ready();
+      return jsonResponse(readyResult.body, readyResult.status);
+    }
+    return jsonResponse({ ready: true }, 200);
   }
 
   const handler = ROUTES[path];
@@ -109,11 +126,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 }
 
-export function createApiServer(opts?: { port?: number }) {
+export function createApiServer(opts?: { port?: number; ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult }) {
   const port = opts?.port ?? 8787;
   const server = Bun.serve({
     port,
-    fetch: handleRequest,
+    fetch: (req) => handleRequest(req, { ready: opts?.ready }),
   });
   return server;
 }

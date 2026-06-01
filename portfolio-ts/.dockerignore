@@ -1,0 +1,14 @@
+node_modules
+node_modules/
+.git
+.env
+.env.*
+.portfolio
+coverage
+tests
+*.test.ts
+*.md
+PARITY.md
+README*
+*.log
+dist
