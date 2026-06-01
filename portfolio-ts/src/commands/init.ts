@@ -20,12 +20,12 @@ export interface InitResult {
 export async function initDb(): Promise<InitResult> {
   const applyResult = await applySqlFiles();
 
+  const inList = REQUIRED_TABLES.map((t) => `'${t}'`).join(", ");
   const row = await querySingle<{ count: number }>(
     `SELECT COUNT(*)::int AS count
      FROM information_schema.tables
      WHERE table_schema = 'public'
-       AND table_name = ANY($1::text[])`,
-    [...REQUIRED_TABLES],
+       AND table_name IN (${inList})`,
   );
   const found = Number(row?.count ?? 0);
   return {

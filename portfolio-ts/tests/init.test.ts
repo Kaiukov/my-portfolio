@@ -214,4 +214,29 @@ describe("initDb (#140) — unit tests with mocked db", () => {
     expect(resolved).toContain("portfolio_db");
     expect(resolved).toContain("sql");
   });
+
+  test("readiness query uses inline IN list, not bind params (#154 regression guard)", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation(async () => []);
+    mockQuerySingle.mockReset();
+    mockQuerySingle.mockImplementation(async () => ({ count: 4 }));
+
+    const { initDb } = await import("../src/commands/init.js");
+    await initDb();
+
+    expect(mockQuerySingle).toHaveBeenCalledTimes(1);
+    const call = mockQuerySingle.mock.calls[0] as readonly [string, unknown[]?];
+    const sqlText = call[0];
+    const params = call[1];
+
+    expect(sqlText).toContain("IN (");
+    expect(sqlText).not.toContain("$1");
+    expect(sqlText).not.toContain("ANY(");
+    expect(sqlText).toContain("'transactions'");
+    expect(sqlText).toContain("'daily_returns'");
+    expect(sqlText).toContain("'prices'");
+    expect(sqlText).toContain("'service_state'");
+
+    expect(params === undefined || (Array.isArray(params) && params.length === 0)).toBe(true);
+  });
 });
