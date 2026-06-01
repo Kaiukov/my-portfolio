@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, jest, beforeEach } from "bun:test";
+import { describe, expect, test, mock, jest, beforeEach, afterEach } from "bun:test";
 import type { PriceRow } from "../src/providers/yahoo.js";
 
 const TODAY = new Date().toISOString().split("T")[0];
@@ -122,6 +122,10 @@ beforeEach(() => {
   ]);
 });
 
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 describe("refreshPortfolio service", () => {
   test("uses force:true for clean refreshes and surfaces the recalc result", async () => {
     configureRefreshDbMocks({ degradedRepair: false, staleBlock: false });
@@ -198,35 +202,38 @@ describe("refresh CLI dispatch", () => {
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    await mod.dispatch(["bun", "src/cli.ts", "refresh"]);
+    logSpy.mockClear();
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "refresh"]);
 
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output).toMatchObject({
-      ok: true,
-      command: "refresh",
-      data: {
-        recalculated: true,
-        recalc: {
-          rows_affected: 10,
-          recalc_type: "full",
-          from_date: null,
+      expect(logSpy).toHaveBeenCalled();
+      const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+      expect(output).toMatchObject({
+        ok: true,
+        command: "refresh",
+        data: {
+          recalculated: true,
+          recalc: {
+            rows_affected: 10,
+            recalc_type: "full",
+            from_date: null,
+          },
+          refreshed: {
+            status: "ok",
+          },
+          summary: {
+            holding_count: 5,
+            portfolio_value_usd: 25000,
+          },
         },
-        refreshed: {
-          status: "ok",
+        meta: {
+          prices_as_of: TODAY,
         },
-        summary: {
-          holding_count: 5,
-          portfolio_value_usd: 25000,
-        },
-      },
-      meta: {
-        prices_as_of: TODAY,
-      },
-    });
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+      });
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 
   test("dispatches refresh and returns the degraded refresh JSON envelope", async () => {
@@ -236,37 +243,40 @@ describe("refresh CLI dispatch", () => {
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    await mod.dispatch(["bun", "src/cli.ts", "refresh"]);
+    logSpy.mockClear();
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "refresh"]);
 
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output).toMatchObject({
-      ok: true,
-      command: "refresh",
-      data: {
-        recalculated: false,
-        recalc: {
-          rows_affected: 0,
-          recalc_type: "full",
-          from_date: null,
-          prices_stale: true,
-          stale_tickers: ["AAPL"],
+      expect(logSpy).toHaveBeenCalled();
+      const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+      expect(output).toMatchObject({
+        ok: true,
+        command: "refresh",
+        data: {
+          recalculated: false,
+          recalc: {
+            rows_affected: 0,
+            recalc_type: "full",
+            from_date: null,
+            prices_stale: true,
+            stale_tickers: ["AAPL"],
+          },
+          refreshed: {
+            status: "degraded",
+          },
+          summary: {
+            holding_count: 5,
+            portfolio_value_usd: 25000,
+          },
         },
-        refreshed: {
-          status: "degraded",
+        meta: {
+          prices_as_of: TODAY,
         },
-        summary: {
-          holding_count: 5,
-          portfolio_value_usd: 25000,
-        },
-      },
-      meta: {
-        prices_as_of: TODAY,
-      },
-    });
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+      });
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 
   test("dispatches refresh --dry-run and returns preview", async () => {
@@ -276,18 +286,21 @@ describe("refresh CLI dispatch", () => {
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    await mod.dispatch(["bun", "src/cli.ts", "refresh", "--dry-run"]);
+    logSpy.mockClear();
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "refresh", "--dry-run"]);
 
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(output.command).toBe("refresh");
-    expect(output.data.dry_run).toBe(true);
-    expect(output.data.recalculated).toBe(false);
-    expect(output.data.refreshed.would_repair).toEqual(["USD"]);
-    expect(output.data.summary).toBeDefined();
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+      expect(logSpy).toHaveBeenCalled();
+      const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+      expect(output.ok).toBe(true);
+      expect(output.command).toBe("refresh");
+      expect(output.data.dry_run).toBe(true);
+      expect(output.data.recalculated).toBe(false);
+      expect(output.data.refreshed.would_repair).toEqual(["USD"]);
+      expect(output.data.summary).toBeDefined();
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 });
