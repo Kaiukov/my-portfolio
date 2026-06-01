@@ -1,5 +1,4 @@
 node_modules/
-bun.lock
 .portfolio/
 /cloudflare/
 portfolio.restored-*.sql
