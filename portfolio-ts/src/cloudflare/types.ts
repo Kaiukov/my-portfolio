@@ -1,6 +1,7 @@
 export interface CloudflareConfig {
   account_id: string;
   kv_namespace_id?: string;
+  kv_key?: string;
   wrangler_project_name: string;
   initialized_at: string;
   widget_url?: string;
