@@ -41,8 +41,7 @@ export function toWriteErrorEnvelope(
   const msg = err instanceof Error ? err.message : String(err);
 
   if (err instanceof ValidationError) {
-    const code = msg.includes("requires explicit confirmation") ? "CONFIRM_REQUIRED" : err.code;
-    return { body: error(command, code, msg), status: 400 };
+    return { body: error(command, err.code, msg), status: 400 };
   }
 
   if (err instanceof NotFoundError) {

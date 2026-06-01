@@ -617,7 +617,7 @@ describe("handleRequest", () => {
     expect(mockDeleteTransaction).not.toHaveBeenCalled();
   });
 
-  test("DELETE /transactions/:id without confirm is rejected", async () => {
+  test("DELETE /transactions/:id without confirm returns VALIDATION_ERROR", async () => {
     mockDeleteTransaction.mockImplementation(async (_id: number, confirm: boolean) => {
       if (!confirm) {
         throw new ValidationError(
@@ -637,7 +637,7 @@ describe("handleRequest", () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.command).toBe("delete");
-    expect(body.error.code).toBe("CONFIRM_REQUIRED");
+    expect(body.error.code).toBe("VALIDATION_ERROR");
     expect(body.error.message).toContain("explicit confirmation");
   });
 
