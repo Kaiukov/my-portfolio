@@ -93,7 +93,7 @@ export async function deleteTransaction(
     throw new ValidationError(
       `Deletion of transaction ID ${transId} requires explicit confirmation.\n` +
         "Problem: --confirm flag was not provided.\n" +
-        `Expected: portfolio-ts delete --id ${transId} --confirm\n` +
+        `Expected: portfolio delete --id ${transId} --confirm\n` +
         "Tip:      use --dry-run first to preview what will be deleted",
     );
   }
@@ -104,7 +104,7 @@ export async function deleteTransaction(
   );
   if (!existing) {
     throw new NotFoundError(
-      `Transaction ID ${transId} not found.\nHint: run portfolio-ts transactions to list IDs`,
+      `Transaction ID ${transId} not found.\nHint: run portfolio transactions to list IDs`,
     );
   }
 

@@ -39,7 +39,7 @@ export async function exchangeCurrency(params: {
     throw new ValidationError(
       `--from and --to must be different assets; both are ${JSON.stringify(params.fromAsset)}.\n` +
         "Expected: --from <currency> --to <different currency>\n" +
-        "Example:  portfolio-ts exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92",
+        "Example:  portfolio exchange --date 01-01-2026 --from USD --to EURUSD=X --quantity 1000 --rate 0.92",
     );
   }
 
