@@ -297,6 +297,18 @@ describe("handleRequest", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
   });
+
+  test("GET /ready returns 200 with success envelope", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/ready");
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("ready");
+    expect(body.data.ready).toBe(true);
+  });
 });
 
 describe("createApiServer", () => {

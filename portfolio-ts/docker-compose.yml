@@ -1,0 +1,16 @@
+services:
+  portfolio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: portfolio-ts-service:latest
+    ports:
+      - "${PORT:-8787}:${PORT:-8787}"
+    env_file:
+      - ../.env
+    environment:
+      PORT: ${PORT:-8787}
+      PORTFOLIO_API_PORT: ${PORTFOLIO_API_PORT:-8787}
+    volumes:
+      - ./.portfolio:/app/.portfolio
+    restart: unless-stopped

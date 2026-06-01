@@ -8,7 +8,11 @@ import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 
-type Handler = (searchParams: URLSearchParams) => Promise<unknown>;
+type RequestContext = {
+  ready?: () => Promise<unknown> | unknown;
+};
+
+type Handler = (searchParams: URLSearchParams, ctx: RequestContext) => Promise<unknown>;
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -46,6 +50,10 @@ const ROUTES: Record<string, Handler> = {
     const maxAgeDays = parseIntParam(p, "max_age_days");
     return verifyPrices(maxAgeDays);
   },
+  "/ready": async (_p, ctx) => {
+    if (ctx.ready) return ctx.ready();
+    return { ready: true };
+  },
 };
 
 function strParam(p: URLSearchParams, key: string): string | undefined {
@@ -66,7 +74,7 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-export async function handleRequest(req: Request): Promise<Response> {
+export async function handleRequest(req: Request, ctx: RequestContext = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -86,7 +94,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   try {
-    const data = await handler(url.searchParams);
+    const data = await handler(url.searchParams, ctx);
     const command = path.slice(1); // strip leading /
     return jsonResponse(success(command, data), 200);
   } catch (err) {
@@ -95,11 +103,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 }
 
-export function createApiServer(opts?: { port?: number }) {
+export function createApiServer(opts?: { port?: number; ready?: () => Promise<unknown> | unknown }) {
   const port = opts?.port ?? 8787;
   const server = Bun.serve({
     port,
-    fetch: handleRequest,
+    fetch: (req) => handleRequest(req, { ready: opts?.ready }),
   });
   return server;
 }
