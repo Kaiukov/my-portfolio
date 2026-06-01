@@ -2,6 +2,7 @@ import { describe, expect, test, mock, jest } from "bun:test";
 
 const mockQuerySingle = mock();
 const mockQuery = mock();
+const mockGetPriceFreshness = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
@@ -15,6 +16,19 @@ mock.module("../src/tx.js", () => ({
     return fn({ unsafe: async (_sql: string, _params?: unknown[]) => [] });
   },
 }));
+
+mock.module("../src/commands/freshness.js", () => ({
+  getPriceFreshness: mockGetPriceFreshness,
+}));
+
+function setFreshness(overrides: Partial<{ prices_as_of: string | null; price_age_days: number | null; stale: boolean }> = {}) {
+  mockGetPriceFreshness.mockResolvedValue({
+    prices_as_of: "2026-01-14",
+    price_age_days: 1,
+    stale: false,
+    ...overrides,
+  });
+}
 
 function makeStatusRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -50,6 +64,7 @@ describe("handleRequest", () => {
       as_of_date: "2026-01-15",
     });
     mockQuery.mockResolvedValue([]);
+    setFreshness();
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/summary?as_of=2026-01-15");
@@ -67,6 +82,7 @@ describe("handleRequest", () => {
   test("GET /status returns 200 with success envelope", async () => {
     mockQuerySingle.mockResolvedValue(makeStatusRow());
     mockQuery.mockResolvedValue([]);
+    setFreshness();
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/status?as_of=2026-01-15");
@@ -85,6 +101,7 @@ describe("handleRequest", () => {
       { asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 10, value_usd: 1500, allocation_pct: 15 },
       { asset: "GOOGL", asset_type: "stock", asset_kind: "equity", net_quantity: 5, value_usd: 8500, allocation_pct: 85 },
     ]);
+    setFreshness();
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/allocation?as_of=2026-01-15");
@@ -102,6 +119,7 @@ describe("handleRequest", () => {
     mockQuery.mockResolvedValue([
       { cash_key: "USD:default", currency: "USD", display_bucket: "USD", balance: 5000, usd_value: 5000 },
     ]);
+    setFreshness();
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/cash?as_of=2026-01-15");
@@ -150,6 +168,7 @@ describe("handleRequest", () => {
       up_capture_ratio: 1.1,
       down_capture_ratio: 0.9,
     }]);
+    setFreshness();
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/performance?as_of=2026-01-01&benchmark=SPY&period=1y");
@@ -165,6 +184,7 @@ describe("handleRequest", () => {
 
   test("GET /mwr returns 200 with success envelope", async () => {
     mockQuerySingle.mockResolvedValue({ mwr: 0.15 });
+    setFreshness();
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/mwr?as_of=2026-01-01");
@@ -175,6 +195,76 @@ describe("handleRequest", () => {
     expect(body.ok).toBe(true);
     expect(body.command).toBe("mwr");
     expect(body.data.mwr_pct).toBe(15);
+  });
+
+  test("API reporting endpoints emit CLI price-freshness meta (#159 parity)", async () => {
+    setFreshness({ prices_as_of: "2026-01-14", price_age_days: 1, stale: false });
+
+    mockQuerySingle.mockResolvedValue({
+      holding_count: 5,
+      total_cash_usd: 5000,
+      portfolio_value_usd: 25000,
+      last_transaction_date: "2026-01-15",
+      transaction_count: 42,
+      as_of_date: "2026-01-15",
+    });
+    mockQuery.mockResolvedValue([]);
+
+    const { handleRequest } = await import("../src/api/server.js");
+
+    const summaryRes = await handleRequest(new Request("http://localhost/summary?as_of=2026-01-15"));
+    const summaryBody = await summaryRes.json();
+    expect(summaryRes.status).toBe(200);
+    expect(summaryBody.ok).toBe(true);
+    expect(summaryBody.command).toBe("summary");
+    expect(summaryBody.meta).toHaveProperty("prices_as_of", "2026-01-14");
+    expect(summaryBody.meta).toHaveProperty("price_age_days", 1);
+    expect(summaryBody.meta).toHaveProperty("stale", false);
+
+    mockQuery.mockResolvedValueOnce([{
+      total_days: 252,
+      start_date: "2025-01-01",
+      end_date: "2026-01-01",
+      start_value: 80000,
+      end_value: 100000,
+      total_gain: 20000,
+      avg_daily_return: 0.0008,
+      avg_investment_return: 0.0007,
+      std_dev: 0.012,
+      hist_volatility: 0.19,
+      var_95: -0.018,
+      var_99: -0.027,
+      cvar_95: -0.022,
+      cvar_99: -0.031,
+      max_drawdown: -0.15,
+      avg_drawdown: -0.03,
+      avg_drawdown_duration: 12,
+      time_weighted_return_pct: 25,
+      total_return_pct: 25,
+      median_monthly_return: 1.5,
+      cagr: 25,
+      beta: 1.1,
+      sharpe_ratio: 1.5,
+      sortino_ratio: 2.0,
+      treynor_ratio: 0.22,
+      information_ratio: 0.5,
+      jensens_alpha: 0.02,
+      relative_return: 10,
+      tracking_error: 0.08,
+      spy_twr_pct: 15,
+      spy_cagr_pct: 15,
+      up_capture_ratio: 1.1,
+      down_capture_ratio: 0.9,
+    }]);
+
+    const perfRes = await handleRequest(new Request("http://localhost/performance?as_of=2026-01-01&benchmark=SPY&period=1y"));
+    const perfBody = await perfRes.json();
+    expect(perfRes.status).toBe(200);
+    expect(perfBody.ok).toBe(true);
+    expect(perfBody.command).toBe("performance");
+    expect(perfBody.meta).toHaveProperty("prices_as_of", "2026-01-14");
+    expect(perfBody.meta).toHaveProperty("price_age_days", 1);
+    expect(perfBody.meta).toHaveProperty("stale", false);
   });
 
   test("GET /health returns 200 with success envelope", async () => {
