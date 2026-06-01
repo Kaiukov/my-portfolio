@@ -37,7 +37,7 @@ export type FetchFn = (
 
 async function getRequiredTickers(): Promise<string[]> {
   const rows = await query<{ ticker: string }>(
-    "SELECT ticker FROM discover_required_tickers_sql() WHERE ticker NOT LIKE 'CASH %' ORDER BY ticker",
+    "SELECT ticker FROM discover_required_tickers_sql() WHERE NOT is_cash_like_sql(ticker) ORDER BY ticker",
   );
   return rows.map((r) => r.ticker);
 }
