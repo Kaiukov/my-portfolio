@@ -1449,20 +1449,22 @@ describe("publishToKv — mocked services + spawn + config", () => {
   const TMP = join(import.meta.dir, "__publish_test_tmp__");
 
   let mockSpawn: ReturnType<typeof mock>;
+  let mockQuerySingle: ReturnType<typeof mock>;
+  let mockQuery: ReturnType<typeof mock>;
 
   beforeEach(() => {
     if (existsSync(TMP)) rmSync(TMP, { recursive: true });
     mkdirSync(TMP, { recursive: true });
 
     mockSpawn = mock();
-    mock.module("../src/cloudflare/spawn.js", () => ({
-      spawnWrangler: mockSpawn,
-    }));
+    mockQuerySingle = mock();
+    mockQuery = mock();
   });
 
   afterEach(() => {
     if (existsSync(TMP)) rmSync(TMP, { recursive: true });
-    mock.module("../src/cloudflare/spawn.js", () => require("../src/cloudflare/spawn.js"));
+    mock.module("../src/db.js", () => require("../src/db.js"));
+    mock.module("../src/tx.js", () => require("../src/tx.js"));
   });
 
   function writeConfig(kvNamespaceId?: string) {
@@ -1482,9 +1484,6 @@ describe("publishToKv — mocked services + spawn + config", () => {
     writeConfig("kv-namespace-12345");
 
     mockSpawn.mockReturnValue({ stdout: "OK", stderr: "", exitCode: 0 });
-
-    const mockQuerySingle = mock();
-    const mockQuery = mock();
 
     mockQuerySingle.mockResolvedValue({
       holding_count: 5,
@@ -1514,7 +1513,7 @@ describe("publishToKv — mocked services + spawn + config", () => {
     }));
 
     const { publishToKv } = await import("../src/cloudflare/publish.js");
-    const result = await publishToKv(TMP);
+    const result = await publishToKv(TMP, { spawnWrangler: mockSpawn });
 
     expect(result.success).toBe(true);
     expect(result.key).toBe("portfolio");
@@ -1544,14 +1543,87 @@ describe("publishToKv — mocked services + spawn + config", () => {
     expect(callArgs[0][5]).toBe("--namespace-id");
     expect(callArgs[0][6]).toBe("kv-namespace-12345");
     expect(callArgs[0][7]).toBe("--remote");
+  });
 
-    mock.module("../src/db.js", () => require("../src/db.js"));
-    mock.module("../src/tx.js", () => require("../src/tx.js"));
+  test("uses Cloudflare KV REST API when CLOUDFLARE_API_TOKEN is set", async () => {
+    writeConfig("kv-namespace-12345");
+
+    const originalApiToken = process.env.CLOUDFLARE_API_TOKEN;
+    const originalAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const fetchCalls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push([input, init]);
+      return new Response("", { status: 200 });
+    };
+
+    mockQuerySingle.mockResolvedValue({
+      holding_count: 5,
+      total_cash_usd: 500,
+      portfolio_value_usd: 15424.58,
+      last_transaction_date: "2026-05-30",
+      transaction_count: 42,
+      as_of_date: "2026-05-31",
+    });
+
+    mockQuery.mockResolvedValue([
+      { date: "2026-05-30", portfolio_value: 15424.58, investment_return: -1.12 },
+      { date: "2026-05-29", portfolio_value: 15599.41, investment_return: 0.80 },
+      { date: "2026-05-28", portfolio_value: 15475.10, investment_return: 0.35 },
+    ]);
+
+    mock.module("../src/db.js", () => ({
+      query: mockQuery,
+      querySingle: mockQuerySingle,
+      connect: () => {},
+      close: () => {},
+    }));
+
+    mock.module("../src/tx.js", () => ({
+      runTx: async <T>(fn: (tx: { unsafe: (...args: unknown[]) => unknown }) => Promise<T>): Promise<T> =>
+        fn({ unsafe: async () => [] }),
+    }));
+
+    process.env.CLOUDFLARE_API_TOKEN = "api-token-123";
+    process.env.CLOUDFLARE_ACCOUNT_ID = "abcdef1234567890abcdef1234567890";
+
+    try {
+      const { publishToKv } = await import("../src/cloudflare/publish.js");
+      const result = await publishToKv(TMP, { spawnWrangler: mockSpawn, fetchImpl });
+
+      expect(result.success).toBe(true);
+      expect(result.key).toBe("portfolio");
+      expect(result.namespaceId).toBe("kv-namespace-12345");
+      expect(result.snapshot).not.toBeNull();
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(fetchCalls).toHaveLength(1);
+
+      const [input, init] = fetchCalls[0];
+      expect(String(input)).toBe(
+        "https://api.cloudflare.com/client/v4/accounts/abcdef1234567890abcdef1234567890/storage/kv/namespaces/kv-namespace-12345/values/portfolio",
+      );
+
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer api-token-123");
+      expect(headers.get("content-type")).toBe("text/plain");
+      expect(init?.method).toBe("PUT");
+      expect(init?.body).toBe(JSON.stringify(result.snapshot));
+    } finally {
+      if (originalApiToken === undefined) {
+        delete process.env.CLOUDFLARE_API_TOKEN;
+      } else {
+        process.env.CLOUDFLARE_API_TOKEN = originalApiToken;
+      }
+      if (originalAccountId === undefined) {
+        delete process.env.CLOUDFLARE_ACCOUNT_ID;
+      } else {
+        process.env.CLOUDFLARE_ACCOUNT_ID = originalAccountId;
+      }
+    }
   });
 
   test("returns error when config is missing", async () => {
     const { publishToKv } = await import("../src/cloudflare/publish.js");
-    const result = await publishToKv(TMP);
+    const result = await publishToKv(TMP, { spawnWrangler: mockSpawn });
 
     expect(result.success).toBe(false);
     expect(result.namespaceId).toBeNull();
@@ -1564,7 +1636,7 @@ describe("publishToKv — mocked services + spawn + config", () => {
     writeConfig(undefined);
 
     const { publishToKv } = await import("../src/cloudflare/publish.js");
-    const result = await publishToKv(TMP);
+    const result = await publishToKv(TMP, { spawnWrangler: mockSpawn });
 
     expect(result.success).toBe(false);
     expect(result.namespaceId).toBeNull();
@@ -1612,15 +1684,12 @@ describe("publishToKv — mocked services + spawn + config", () => {
     }));
 
     const { publishToKv } = await import("../src/cloudflare/publish.js");
-    const result = await publishToKv(TMP);
+    const result = await publishToKv(TMP, { spawnWrangler: mockSpawn });
 
     expect(result.success).toBe(false);
     expect(result.namespaceId).toBe("kv-namespace-12345");
     expect(result.snapshot).not.toBeNull();
     expect(result.error).toContain("wrangler kv key put failed");
-
-    mock.module("../src/db.js", () => require("../src/db.js"));
-    mock.module("../src/tx.js", () => require("../src/tx.js"));
   });
 });
 

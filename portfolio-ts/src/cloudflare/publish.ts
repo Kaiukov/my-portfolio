@@ -5,6 +5,13 @@ import { getSummary } from "../commands/summary.js";
 import { getWidget } from "../commands/widget.js";
 import { getStatus } from "../commands/status.js";
 import { getPriceFreshness } from "../commands/freshness.js";
+import { putKvValueViaApi, type FetchLike } from "./kv_api.js";
+
+export interface PublishOptions {
+  fetchImpl?: FetchLike;
+  spawnWrangler?: typeof spawnWrangler;
+  putKvValueViaApi?: typeof putKvValueViaApi;
+}
 
 export async function buildSnapshot(): Promise<PortfolioSnapshot> {
   const [summary, widget, status, freshness] = await Promise.all([
@@ -56,14 +63,17 @@ export function validateSnapshot(snapshot: PortfolioSnapshot): string | null {
   return null;
 }
 
-export async function publishToKv(projectRoot?: string): Promise<PublishResult> {
+export async function publishToKv(projectRoot?: string, deps: PublishOptions = {}): Promise<PublishResult> {
   const root = projectRoot ?? process.cwd();
   const config = loadLocalConfig(root);
+  const key = "portfolio";
+  const spawn = deps.spawnWrangler ?? spawnWrangler;
+  const putValueViaApi = deps.putKvValueViaApi ?? putKvValueViaApi;
 
   if (!config) {
     return {
       success: false,
-      key: "portfolio",
+      key,
       namespaceId: null,
       snapshot: null,
       error:
@@ -75,7 +85,7 @@ export async function publishToKv(projectRoot?: string): Promise<PublishResult> 
   if (!namespaceId) {
     return {
       success: false,
-      key: "portfolio",
+      key,
       namespaceId: null,
       snapshot: null,
       error:
@@ -89,7 +99,7 @@ export async function publishToKv(projectRoot?: string): Promise<PublishResult> 
   if (validationError) {
     return {
       success: false,
-      key: "portfolio",
+      key,
       namespaceId,
       snapshot,
       error: `Validation failed: ${validationError}`,
@@ -97,11 +107,53 @@ export async function publishToKv(projectRoot?: string): Promise<PublishResult> 
   }
 
   const payload = JSON.stringify(snapshot);
-  const proc = spawnWrangler([
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  if (apiToken) {
+    const configAccountId = (config as Partial<typeof config>).account_id;
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || configAccountId;
+
+    if (!accountId) {
+      return {
+        success: false,
+        key,
+        namespaceId,
+        snapshot,
+        error: "CLOUDFLARE_ACCOUNT_ID/account_id required for API publish",
+      };
+    }
+
+    const apiResult = await putValueViaApi({
+      accountId,
+      namespaceId,
+      key,
+      value: payload,
+      apiToken,
+      fetchImpl: deps.fetchImpl,
+    });
+
+    if (!apiResult.ok) {
+      return {
+        success: false,
+        key,
+        namespaceId,
+        snapshot,
+        error: apiResult.error,
+      };
+    }
+
+    return {
+      success: true,
+      key,
+      namespaceId,
+      snapshot,
+    };
+  }
+
+  const proc = spawn([
     "kv",
     "key",
     "put",
-    "portfolio",
+    key,
     payload,
     "--namespace-id",
     namespaceId,
@@ -111,7 +163,7 @@ export async function publishToKv(projectRoot?: string): Promise<PublishResult> 
   if (proc.exitCode !== 0) {
     return {
       success: false,
-      key: "portfolio",
+      key,
       namespaceId,
       snapshot,
       error: `wrangler kv key put failed (exit code ${proc.exitCode}): ${proc.stderr}`.trim(),
@@ -120,7 +172,7 @@ export async function publishToKv(projectRoot?: string): Promise<PublishResult> 
 
   return {
     success: true,
-    key: "portfolio",
+    key,
     namespaceId,
     snapshot,
   };
