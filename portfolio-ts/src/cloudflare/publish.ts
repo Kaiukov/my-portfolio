@@ -11,6 +11,7 @@ export interface PublishOptions {
   fetchImpl?: FetchLike;
   spawnWrangler?: typeof spawnWrangler;
   putKvValueViaApi?: typeof putKvValueViaApi;
+  buildSnapshot?: typeof buildSnapshot;
 }
 
 export async function buildSnapshot(): Promise<PortfolioSnapshot> {
@@ -66,9 +67,10 @@ export function validateSnapshot(snapshot: PortfolioSnapshot): string | null {
 export async function publishToKv(projectRoot?: string, deps: PublishOptions = {}): Promise<PublishResult> {
   const root = projectRoot ?? process.cwd();
   const config = loadLocalConfig(root);
-  const key = "portfolio";
+  const key = process.env.PORTFOLIO_KV_KEY ?? "portfolio";
   const spawn = deps.spawnWrangler ?? spawnWrangler;
   const putValueViaApi = deps.putKvValueViaApi ?? putKvValueViaApi;
+  const buildSnapshotFn = deps.buildSnapshot ?? buildSnapshot;
 
   if (!config) {
     return {
@@ -93,7 +95,7 @@ export async function publishToKv(projectRoot?: string, deps: PublishOptions = {
     };
   }
 
-  const snapshot = await buildSnapshot();
+  const snapshot = await buildSnapshotFn();
 
   const validationError = validateSnapshot(snapshot);
   if (validationError) {
