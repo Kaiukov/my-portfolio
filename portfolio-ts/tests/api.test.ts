@@ -1,7 +1,14 @@
-import { describe, expect, test, mock, jest } from "bun:test";
+import { describe, expect, test, mock, jest, beforeEach } from "bun:test";
+import { NotFoundError, ValidationError } from "../src/validators.js";
 
 const mockQuerySingle = mock();
 const mockQuery = mock();
+const mockAddTransaction = mock();
+const mockEditTransaction = mock();
+const mockEditDryRun = mock();
+const mockDeleteTransaction = mock();
+const mockDeletePreview = mock();
+const mockExchangeCurrency = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
@@ -15,6 +22,17 @@ mock.module("../src/tx.js", () => ({
     return fn({ unsafe: async (_sql: string, _params?: unknown[]) => [] });
   },
 }));
+
+beforeEach(() => {
+  mockQuerySingle.mockReset();
+  mockQuery.mockReset();
+  mockAddTransaction.mockReset();
+  mockEditTransaction.mockReset();
+  mockEditDryRun.mockReset();
+  mockDeleteTransaction.mockReset();
+  mockDeletePreview.mockReset();
+  mockExchangeCurrency.mockReset();
+});
 
 const DEFAULT_FRESHNESS = {
   prices_as_of: "2026-01-14",
@@ -234,7 +252,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/performance?as_of=2026-01-01&benchmark=SPY&period=1y");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deletePreview: mockDeletePreview, deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -261,7 +281,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/mwr?as_of=2026-01-01");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -374,7 +396,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/health?max_age_days=5");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -410,7 +434,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/verify_prices?max_age_days=5");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { exchangeCurrency: mockExchangeCurrency },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -431,7 +457,7 @@ describe("handleRequest", () => {
     expect(body.error.message).toContain("nonexistent");
   });
 
-  test("POST returns 405 error envelope", async () => {
+  test("POST /summary remains method-not-allowed", async () => {
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/summary", { method: "POST" });
     const res = await handleRequest(req);
@@ -441,6 +467,277 @@ describe("handleRequest", () => {
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("METHOD_NOT_ALLOWED");
     expect(body.error.message).toContain("POST");
+  });
+
+  test("POST /transactions maps to addTransaction", async () => {
+    mockAddTransaction.mockResolvedValue({
+      transaction: { id: 101, asset: "AAPL", action: "BUY" },
+      recalculated: true,
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: "2026-01-20",
+        asset: "AAPL",
+        action: "BUY",
+        quantity: 10,
+        price: 150.25,
+        currency: "USD",
+        fees: 1.5,
+        fee_currency: "USD",
+        exchange: "Interactive Brokers",
+        account: "Main",
+      }),
+    });
+    const res = await handleRequest(req, {
+      write: { addTransaction: mockAddTransaction },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("add");
+    expect(mockAddTransaction).toHaveBeenCalledWith({
+      dateStr: "2026-01-20",
+      asset: "AAPL",
+      action: "BUY",
+      quantity: 10,
+      price: 150.25,
+      currency: "USD",
+      fees: 1.5,
+      feeCurrency: "USD",
+      exchange: "Interactive Brokers",
+      account: "Main",
+    });
+  });
+
+  test("PATCH /transactions/:id maps partial edit to editTransaction", async () => {
+    mockEditTransaction.mockResolvedValue({
+      before: { id: 42, price: 150 },
+      transaction: { id: 42, price: 155.5 },
+      recalculated: true,
+      from_date: "2026-01-20",
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/42", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price: 155.5 }),
+    });
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction, editDryRun: mockEditDryRun },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("edit");
+    expect(mockEditTransaction).toHaveBeenCalledTimes(1);
+    expect(mockEditTransaction).toHaveBeenCalledWith(42, expect.objectContaining({ price: 155.5 }));
+    expect(mockEditDryRun).not.toHaveBeenCalled();
+  });
+
+  test("PATCH /transactions/:id dry-run routes to editDryRun", async () => {
+    mockEditDryRun.mockResolvedValue({
+      dry_run: true,
+      transaction_id: 42,
+      current: { id: 42, price: 150 },
+      proposed_changes: { price: "155.5" },
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/42", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price: 155.5, dry_run: true }),
+    });
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction, editDryRun: mockEditDryRun },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("edit");
+    expect(mockEditDryRun).toHaveBeenCalledWith(42, expect.objectContaining({ price: 155.5 }));
+    expect(mockEditTransaction).not.toHaveBeenCalled();
+  });
+
+  test("PUT /transactions/:id also routes through editTransaction", async () => {
+    mockEditTransaction.mockResolvedValue({
+      before: { id: 42, price: 150 },
+      transaction: { id: 42, price: 160 },
+      recalculated: true,
+      from_date: "2026-01-20",
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/42", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: "2026-01-20", asset: "AAPL", action: "BUY", quantity: 10, price: 160 }),
+    });
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction, editDryRun: mockEditDryRun },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("edit");
+    expect(mockEditTransaction).toHaveBeenCalledTimes(1);
+    expect(mockEditTransaction).toHaveBeenCalledWith(42, expect.objectContaining({ price: 160 }));
+  });
+
+  test("DELETE /transactions/:id dry-run routes to deletePreview", async () => {
+    mockDeletePreview.mockResolvedValue({
+      dry_run: true,
+      transaction_id: 42,
+      would_delete: [{ id: 42, date: "2026-01-20", asset: "AAPL", action: "BUY", quantity: 10 }],
+      is_exchange_group: false,
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/42?dry_run=true", {
+      method: "DELETE",
+    });
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction, deletePreview: mockDeletePreview },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("delete");
+    expect(mockDeletePreview).toHaveBeenCalledWith(42);
+    expect(mockDeleteTransaction).not.toHaveBeenCalled();
+  });
+
+  test("DELETE /transactions/:id without confirm is rejected", async () => {
+    mockDeleteTransaction.mockImplementation(async (_id: number, confirm: boolean) => {
+      if (!confirm) {
+        throw new ValidationError(
+          "Deletion of transaction ID 42 requires explicit confirmation.",
+        );
+      }
+      return { deleted_ids: [42], recalculated: true };
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/42", { method: "DELETE" });
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.command).toBe("delete");
+    expect(body.error.code).toBe("CONFIRM_REQUIRED");
+    expect(body.error.message).toContain("explicit confirmation");
+  });
+
+  test("DELETE /transactions/:id with confirm routes to deleteTransaction", async () => {
+    mockDeleteTransaction.mockResolvedValue({
+      deleted_ids: [42],
+      recalculated: true,
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/42?confirm=true", {
+      method: "DELETE",
+    });
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("delete");
+    expect(mockDeleteTransaction).toHaveBeenCalledWith(42, true);
+  });
+
+  test("POST /exchange maps to exchangeCurrency", async () => {
+    mockExchangeCurrency.mockResolvedValue({
+      from: { asset: "USD", quantity: 1000 },
+      to: { asset: "EURUSD=X", quantity: 920 },
+      rate: 0.92,
+      date: "2026-01-20",
+      transaction_ids: [201, 202],
+      exchange_group_id: "group-1",
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: "2026-01-20",
+        fromAsset: "USD",
+        toAsset: "EURUSD=X",
+        quantity: 1000,
+        rate: 0.92,
+      }),
+    });
+    const res = await handleRequest(req, {
+      write: { exchangeCurrency: mockExchangeCurrency },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("exchange");
+    expect(mockExchangeCurrency).toHaveBeenCalledWith({
+      dateStr: "2026-01-20",
+      fromAsset: "USD",
+      toAsset: "EURUSD=X",
+      quantity: 1000,
+      rate: 0.92,
+    });
+  });
+
+  test("write validation errors return 400 envelope", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: "2026-01-20",
+        asset: "AAPL",
+      }),
+    });
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.command).toBe("add");
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  test("write not-found errors return 404 envelope", async () => {
+    mockEditTransaction.mockRejectedValue(new NotFoundError("Transaction ID 999 not found"));
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/transactions/999", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price: 100 }),
+    });
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction },
+    });
+
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.command).toBe("edit");
+    expect(body.error.code).toBe("NOT_FOUND");
   });
 
   test("service throws -> 500 error envelope", async () => {
