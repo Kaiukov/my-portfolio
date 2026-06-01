@@ -1,14 +1,7 @@
 import { getSql } from "./db.js";
+import { beginTx } from "./tx_core.js";
 
-export async function runTx(fn: any): Promise<any> {
-  const sql = getSql();
-  return sql.begin(async (txSql: any) => {
-    const unsafe = (sqlStr: string, params?: unknown[]) => {
-      if (params && params.length > 0) {
-        return txSql.unsafe(sqlStr, params);
-      }
-      return txSql.unsafe(sqlStr);
-    };
-    return fn({ unsafe });
-  });
+export async function runTx(fn: any, sqlOverride?: any): Promise<any> {
+  const sql = sqlOverride ?? getSql();
+  return beginTx(sql, fn);
 }
