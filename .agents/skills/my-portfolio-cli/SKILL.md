@@ -5,7 +5,7 @@ description: Use when working on the `portfolio-ts` CLI (TypeScript/Bun), its JS
 
 # my-portfolio-cli
 
-A navigation guide, not a copy of canonical docs. **This is the active runtime** — TypeScript/Bun (`portfolio-ts/`, run with `bun`). Python/uv/`portfolio_db/cli.py` is historical only (full purge tracked in #147). Do not add Python instructions here.
+A navigation guide, not a copy of canonical docs. **This is the active runtime** — TypeScript/Bun (`portfolio-ts/`, run with `bun`). Do not add Python instructions here.
 
 ## Canonical docs (read these first)
 
@@ -32,12 +32,20 @@ Pointers only — read the actual files; do not paste excerpts into this skill.
 - `portfolio_db/sql/` — all financial math.
 - `portfolio-ts/tests/*.test.ts` — Bun test coverage; mirrors the public contract.
 
+## Running commands
+
+- Local dev DB: `cd portfolio-ts && bun src/cli.ts <command> [flags]`
+- Linked bin: `portfolio <command> [flags]` after `bun link` in `portfolio-ts/`
+- Dockerized service: `docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts <command> [flags]`
+- Read-only HTTP: `curl localhost:8787/summary`
+
 ## Agent workflow rules (not in the docs above)
 
 1. **Inspect code first.** If docs and code disagree, **the code wins** — fix the docs, do not copy more content into this skill.
 2. **Confirm the current CLI surface** before editing:
    - `cd portfolio-ts && bun src/cli.ts --help`
    - `bun src/cli.ts <command> --help`
+   - `docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts <command> --help`
 3. **Classify the command** before editing (read-only / mutating / file-level — see `AGENTS.md` for the canonical lists; do not fork them here).
 4. **Do not invent features, flags, or defaults.** If the code does not prove it, leave it out.
 5. **One canonical list per concern.** If you find yourself restating a list from `AGENTS.md` / `PARITY.md` / `transaction-spec.md` here, stop and link instead.
@@ -53,7 +61,7 @@ bun test <related-test-file>         # narrow loop
 bun src/cli.ts --help                # help-text sanity
 ```
 
-For price/reporting behavior changes, also smoke-test `bun src/cli.ts health`, `bun src/cli.ts verify_prices`, and one read-only snapshot command.
+For price/reporting behavior changes, also smoke-test `bun src/cli.ts health`, `bun src/cli.ts verify_prices`, and one read-only snapshot command. If you are targeting the Dockerized service, repeat the relevant read-only check via `docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts health` or `curl localhost:8787/summary`.
 
 ## Related files
 

@@ -98,6 +98,22 @@ portfolio health
 
 All examples below use the `portfolio` form. Substitute `bun src/cli.ts` (run from `portfolio-ts/`) or `./bin/portfolio` (run from the repo root) if you have not linked the bin.
 
+### Running the CLI against the Dockerized service
+
+Use your local `bun` invocation when you want to target your own `PORTFOLIO_DB_URL` during development. Use `docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts <command> [flags]` when you want to run against the running container's PostgreSQL database.
+
+Examples:
+
+```bash
+docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts summary
+docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts backup push
+docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts cloudflare publish
+```
+
+Read-only commands such as `summary`, `status`, `cash`, `allocation`, `performance`, `mwr`, `verify_prices`, and `health` are safe to run this way. Mutating commands such as `add`, `edit`, `delete`, `exchange`, `recalculate`, and `repair_prices` write to the live database.
+
+The deployed Dockerized service already runs `refresh`, `cloudflare publish`, and `backup` on its own schedule, so you usually do not need to trigger those manually. For read-only checks, the service also exposes a local HTTP endpoint on `:8787`, so `curl localhost:8787/summary` is an alternative to `docker compose exec`.
+
 ## Verify the install
 
 ```bash
@@ -193,7 +209,7 @@ portfolio recalculate --force
 # One-shot daily maintenance: stale check + repair + recalculate
 portfolio sync
 
-# Fetch prices via HTTPS, recalculate, and return a summary (OS-cron entry)
+# Fetch prices via HTTPS, recalculate, and return a summary (scheduled job; the Dockerized service runs this itself)
 portfolio refresh
 portfolio refresh --dry-run
 ```
@@ -203,6 +219,8 @@ Stale-price enforcement: `recalculate` and `sync` refuse to run when required ti
 ## Scheduling (OS crontab)
 
 `portfolio schedule` manages an idempotent OS crontab block. The block invokes the CLI through Bun using the path of the `portfolio-ts/` directory.
+
+The deployed Dockerized service runs its own in-container scheduler for `refresh`, `cloudflare publish`, and `backup`, so this section is mainly for standalone local installs.
 
 ```bash
 # Print the crontab block (for review or manual install)
