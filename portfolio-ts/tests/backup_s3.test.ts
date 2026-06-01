@@ -58,11 +58,13 @@ function clearAllS3Env() {
   delete process.env["PORTFOLIO_S3_ACCESS_KEY_ID"];
   delete process.env["PORTFOLIO_S3_SECRET_ACCESS_KEY"];
   delete process.env["PORTFOLIO_S3_REGION"];
+  delete process.env["PORTFOLIO_S3_PREFIX"];
   delete process.env["S3_ENDPOINT"];
   delete process.env["S3_BUCKET"];
   delete process.env["S3_ACCESS_KEY_ID"];
   delete process.env["S3_SECRET_ACCESS_KEY"];
   delete process.env["S3_REGION"];
+  delete process.env["S3_PREFIX"];
 }
 
 describe("loadS3Config", () => {
@@ -298,6 +300,103 @@ describe("pullBackupFromS3", () => {
       "Empty response body",
     );
   });
+});
+
+describe("S3 prefix handling", () => {
+  let envBackup: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    envBackup = { ...process.env };
+    clearAllS3Env();
+    s3SendMock.mockClear();
+    mockBunFile.mockClear();
+    mockBunWrite.mockClear();
+    fakeBackupDb.mockClear();
+  });
+
+  afterEach(() => {
+    process.env = envBackup;
+  });
+
+  const cases = [
+    {
+      name: "unset prefix",
+      prefix: undefined,
+      expectedTimestampedKey: "portfolio.backup-2026-05-31.sql",
+      expectedLatestKey: "latest.sql",
+      expectedPullKey: "latest.sql",
+    },
+    {
+      name: "prefixed with trailing slash",
+      prefix: "prod/",
+      expectedTimestampedKey: "prod/portfolio.backup-2026-05-31.sql",
+      expectedLatestKey: "prod/latest.sql",
+      expectedPullKey: "prod/latest.sql",
+    },
+    {
+      name: "prefixed without trailing slash",
+      prefix: "prod",
+      expectedTimestampedKey: "prod/portfolio.backup-2026-05-31.sql",
+      expectedLatestKey: "prod/latest.sql",
+      expectedPullKey: "prod/latest.sql",
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    test(`push prefixes keys correctly when ${testCase.name}`, async () => {
+      s3SendMock.mockResolvedValue({});
+      if (testCase.prefix !== undefined) {
+        process.env["PORTFOLIO_S3_PREFIX"] = testCase.prefix;
+      }
+
+      const { pushBackupToS3, createS3Client } = await import("../src/commands/backup_s3.js");
+
+      const client = createS3Client({
+        endpoint: "https://r2.example.com",
+        bucket: "my-bucket",
+        accessKeyId: "key",
+        secretAccessKey: "secret",
+        region: "auto",
+      });
+
+      const result = await pushBackupToS3(client, "my-bucket", "postgresql://localhost/db");
+
+      expect(result.objects).toEqual([testCase.expectedTimestampedKey, testCase.expectedLatestKey]);
+      expect(s3SendMock).toHaveBeenCalledTimes(2);
+
+      const firstCall = s3SendMock.mock.calls[0][0];
+      const secondCall = s3SendMock.mock.calls[1][0];
+      expect(firstCall.input.Key).toBe(testCase.expectedTimestampedKey);
+      expect(secondCall.input.Key).toBe(testCase.expectedLatestKey);
+    });
+
+    test(`pull prefixes keys correctly when ${testCase.name}`, async () => {
+      s3SendMock.mockResolvedValue({
+        Body: {
+          transformToByteArray: async () => new Uint8Array([1, 2, 3, 4]),
+        },
+      });
+      if (testCase.prefix !== undefined) {
+        process.env["PORTFOLIO_S3_PREFIX"] = testCase.prefix;
+      }
+
+      const { pullBackupFromS3, createS3Client } = await import("../src/commands/backup_s3.js");
+
+      const client = createS3Client({
+        endpoint: "https://r2.example.com",
+        bucket: "my-bucket",
+        accessKeyId: "key",
+        secretAccessKey: "secret",
+        region: "auto",
+      });
+
+      const result = await pullBackupFromS3(client, "my-bucket", "postgresql://localhost/db");
+
+      expect(result.key).toBe(testCase.expectedPullKey);
+      expect(s3SendMock).toHaveBeenCalledTimes(1);
+      expect(s3SendMock.mock.calls[0][0].input.Key).toBe(testCase.expectedPullKey);
+    });
+  }
 });
 
 describe("CLI integration — backup push", () => {

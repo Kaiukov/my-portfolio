@@ -1,9 +1,16 @@
-import { describe, expect, test, mock, jest, afterEach, beforeEach } from "bun:test";
+import { describe, expect, test, mock, jest, afterEach, beforeEach, afterAll } from "bun:test";
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { CloudflareConfig, InitResult } from "../src/cloudflare/types.js";
+import * as publishModuleNs from "../src/cloudflare/publish.js";
+
+const realPublishModule = { ...publishModuleNs };
 
 const tmpDir = join(import.meta.dir, "__cloudflare_test_tmp__");
+
+afterAll(() => {
+  mock.module("../src/cloudflare/publish.js", () => realPublishModule);
+});
 
 function setupTmpDir() {
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
@@ -1699,7 +1706,7 @@ describe("cloudflare publish CLI — mocked publishToKv", () => {
   let mockPublish: ReturnType<typeof mock>;
 
   afterEach(() => {
-    mock.module("../src/cloudflare/publish.js", () => require("../src/cloudflare/publish.js"));
+    mock.module("../src/cloudflare/publish.js", () => realPublishModule);
   });
 
   test("returns success envelope on publish", async () => {
@@ -1951,7 +1958,7 @@ describe("syncOnce", () => {
     expect(result.namespaceId).toBe("kv-123");
     expect(result.snapshot).toEqual(snapshot);
 
-    mock.module("../src/cloudflare/publish.js", () => require("../src/cloudflare/publish.js"));
+    mock.module("../src/cloudflare/publish.js", () => realPublishModule);
   });
 
   test("syncOnce without projectRoot calls publishToKv with undefined", async () => {
@@ -1974,7 +1981,7 @@ describe("syncOnce", () => {
 
     expect(mockPublish).toHaveBeenCalledWith(undefined);
 
-    mock.module("../src/cloudflare/publish.js", () => require("../src/cloudflare/publish.js"));
+    mock.module("../src/cloudflare/publish.js", () => realPublishModule);
   });
 });
 

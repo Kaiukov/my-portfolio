@@ -30,6 +30,14 @@ function envVar(key: string): string | undefined {
   return primary !== undefined ? primary : process.env[key];
 }
 
+function getS3Prefix(): string {
+  const prefix = envVar("S3_PREFIX") ?? "";
+  if (prefix === "") {
+    return "";
+  }
+  return prefix.endsWith("/") ? prefix : `${prefix}/`;
+}
+
 export function loadS3Config(): { ok: true; config: S3Config } | { ok: false; error: string } {
   const endpoint = envVar("S3_ENDPOINT");
   const bucket = envVar("S3_BUCKET");
@@ -79,8 +87,9 @@ export async function pushBackupToS3(
   const body = await f.arrayBuffer();
 
   const baseName = dump.backup.split("/").pop() ?? dump.backup;
-  const timestampedKey = baseName;
-  const latestKey = "latest.sql";
+  const prefix = getS3Prefix();
+  const timestampedKey = `${prefix}${baseName}`;
+  const latestKey = `${prefix}latest.sql`;
 
   await client.send(
     new PutObjectCommand({
@@ -114,7 +123,8 @@ export async function pullBackupFromS3(
   dbUrl: string,
   key?: string,
 ): Promise<PullResult> {
-  const objectKey = key ?? "latest.sql";
+  const prefix = getS3Prefix();
+  const objectKey = `${prefix}${key ?? "latest.sql"}`;
 
   const response = await client.send(
     new GetObjectCommand({
