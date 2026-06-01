@@ -37,13 +37,25 @@ function makeSummaryRow(overrides: Record<string, unknown> = {}) {
 
 describe("refreshPortfolio service", () => {
   test("composes repairPrices + recalculate + getSummary + has correct shape", async () => {
-    mockQuerySingle
-      .mockResolvedValueOnce({ start_date: "2026-01-01", end_date: "2026-01-31" });
-    mockQuery
-      .mockResolvedValueOnce([{ ticker: "AAPL" }]) // getRequiredTickers
-      .mockResolvedValue([{ refresh_daily_returns_sql: 10 }]); // recalculate + insert logs
-    mockQuerySingle
-      .mockResolvedValueOnce(makeSummaryRow());
+    // getDateRange
+    mockQuerySingle.mockResolvedValueOnce({ start_date: "2026-01-01", end_date: "2026-01-31" });
+    // getRequiredTickers
+    mockQuery.mockResolvedValueOnce([{ ticker: "AAPL" }]);
+    // upsertPrices / recordRepair / markRefreshSuccess (refresh_log + service_state x2)
+    mockQuery.mockResolvedValue([]);
+    // verifyPrices: price stats
+    mockQuerySingle.mockResolvedValueOnce({ total_rows: 1, min_date: "2026-01-15", max_date: "2026-01-15" });
+    // verifyPrices: distinct tickers, required tickers, checkpoints
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
+    // verifyPrices: needs_recalc
+    mockQuerySingle.mockResolvedValueOnce({ needs_recalc: false });
+    // recalculate: refresh_daily_returns_sql + insert logs
+    mockQuery.mockResolvedValueOnce([{ refresh_daily_returns_sql: 10 }]);
+    mockQuery.mockResolvedValue([]);
+    // getSummary
+    mockQuerySingle.mockResolvedValueOnce(makeSummaryRow());
 
     const { refreshPortfolio } = await import("../src/commands/refresh.js");
     const result = await refreshPortfolio();
@@ -85,15 +97,27 @@ describe("refreshPortfolioDryRun service", () => {
 
 describe("refresh CLI dispatch", () => {
   test("dispatches refresh and returns success envelope", async () => {
-    mockQuerySingle
-      .mockResolvedValueOnce({ start_date: "2026-01-01", end_date: "2026-01-31" });
-    mockQuery
-      .mockResolvedValueOnce([{ ticker: "AAPL" }])
-      .mockResolvedValue([{ refresh_daily_returns_sql: 10 }]); // recalculate
-    mockQuerySingle
-      .mockResolvedValueOnce(makeSummaryRow());
-    mockQuerySingle
-      .mockResolvedValueOnce({ prices_as_of: TODAY });
+    // getDateRange
+    mockQuerySingle.mockResolvedValueOnce({ start_date: "2026-01-01", end_date: "2026-01-31" });
+    // getRequiredTickers
+    mockQuery.mockResolvedValueOnce([{ ticker: "AAPL" }]);
+    // upsertPrices / recordRepair / markRefreshSuccess
+    mockQuery.mockResolvedValue([]);
+    // verifyPrices: price stats
+    mockQuerySingle.mockResolvedValueOnce({ total_rows: 1, min_date: "2026-01-15", max_date: "2026-01-15" });
+    // verifyPrices: distinct, required, checkpoints
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
+    // verifyPrices: needs_recalc
+    mockQuerySingle.mockResolvedValueOnce({ needs_recalc: false });
+    // recalculate: refresh_daily_returns_sql + insert logs
+    mockQuery.mockResolvedValueOnce([{ refresh_daily_returns_sql: 10 }]);
+    mockQuery.mockResolvedValue([]);
+    // getSummary
+    mockQuerySingle.mockResolvedValueOnce(makeSummaryRow());
+    // getPriceFreshness
+    mockQuerySingle.mockResolvedValueOnce({ prices_as_of: TODAY });
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
