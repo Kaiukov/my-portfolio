@@ -24,6 +24,9 @@ mock.module("../src/providers/yahoo.js", () => ({
   fetchPrices: mockFetchPrices,
 }));
 
+import { refreshPortfolio, refreshPortfolioDryRun } from "../src/commands/refresh.js";
+import * as cli from "../src/cli.js";
+
 function makeSummaryRow(overrides: Record<string, unknown> = {}) {
   return {
     holding_count: 5,
@@ -63,7 +66,7 @@ function configureRefreshDbMocks(options: {
   });
 
   mockQuery.mockImplementation((sql: string) => {
-    if (sql.includes("SELECT ticker FROM discover_required_tickers_sql() WHERE ticker NOT LIKE 'CASH %' ORDER BY ticker")) {
+    if (sql.includes("SELECT ticker FROM discover_required_tickers_sql() WHERE NOT is_cash_like_sql(ticker) ORDER BY ticker")) {
       return Promise.resolve([{ ticker: "USD" }]);
     }
     if (sql.includes("INSERT INTO prices")) {
@@ -130,7 +133,6 @@ describe("refreshPortfolio service", () => {
   test("uses force:true for clean refreshes and surfaces the recalc result", async () => {
     configureRefreshDbMocks({ degradedRepair: false, staleBlock: false });
 
-    const { refreshPortfolio } = await import("../src/commands/refresh.js");
     const result = await refreshPortfolio();
 
     expect(mockQuerySingle.mock.calls.some((call) => String(call[0]).includes("SELECT needs_recalc() AS needs_recalc"))).toBe(true);
@@ -148,7 +150,6 @@ describe("refreshPortfolio service", () => {
   test("uses force:false for degraded refreshes and blocks stale revaluation", async () => {
     configureRefreshDbMocks({ degradedRepair: true, staleBlock: true });
 
-    const { refreshPortfolio } = await import("../src/commands/refresh.js");
     const result = await refreshPortfolio();
 
     expect(result.refreshed.status).toBe("degraded");
@@ -167,7 +168,6 @@ describe("refreshPortfolio service", () => {
   test("never reports recalculated:true when the stale guard blocks recalc", async () => {
     configureRefreshDbMocks({ degradedRepair: true, staleBlock: true });
 
-    const { refreshPortfolio } = await import("../src/commands/refresh.js");
     const result = await refreshPortfolio();
 
     expect(result.recalculated).toBe(false);
@@ -179,7 +179,6 @@ describe("refreshPortfolioDryRun service", () => {
   test("composes repairPricesDryRun + getSummary + has correct shape", async () => {
     configureRefreshDbMocks({ degradedRepair: false, staleBlock: false });
 
-    const { refreshPortfolioDryRun } = await import("../src/commands/refresh.js");
     const result = await refreshPortfolioDryRun();
 
     expect(result).toHaveProperty("dry_run");
@@ -198,13 +197,12 @@ describe("refresh CLI dispatch", () => {
   test("dispatches refresh and returns the clean refresh JSON envelope", async () => {
     configureRefreshDbMocks({ degradedRepair: false, staleBlock: false });
 
-    const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     logSpy.mockClear();
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "refresh"]);
+      await cli.dispatch(["bun", "src/cli.ts", "refresh"]);
 
       expect(logSpy).toHaveBeenCalled();
       const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
@@ -239,13 +237,12 @@ describe("refresh CLI dispatch", () => {
   test("dispatches refresh and returns the degraded refresh JSON envelope", async () => {
     configureRefreshDbMocks({ degradedRepair: true, staleBlock: true });
 
-    const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     logSpy.mockClear();
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "refresh"]);
+      await cli.dispatch(["bun", "src/cli.ts", "refresh"]);
 
       expect(logSpy).toHaveBeenCalled();
       const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
@@ -282,13 +279,12 @@ describe("refresh CLI dispatch", () => {
   test("dispatches refresh --dry-run and returns preview", async () => {
     configureRefreshDbMocks({ degradedRepair: false, staleBlock: false });
 
-    const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     logSpy.mockClear();
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "refresh", "--dry-run"]);
+      await cli.dispatch(["bun", "src/cli.ts", "refresh", "--dry-run"]);
 
       expect(logSpy).toHaveBeenCalled();
       const output = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
