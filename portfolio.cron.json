@@ -1,0 +1,52 @@
+{
+  "jobs": [
+    {
+      "name": "refresh-weekday",
+      "command": "refresh",
+      "schedule": "30 18 * * 1-5",
+      "enabled": true,
+      "log_path": "logs/refresh.log",
+      "order": 10
+    },
+    {
+      "name": "refresh-saturday",
+      "command": "refresh",
+      "schedule": "0 10 * * 6",
+      "enabled": true,
+      "log_path": "logs/refresh.log",
+      "order": 20
+    },
+    {
+      "name": "refresh-sunday",
+      "command": "refresh",
+      "schedule": "0 3 * * 0",
+      "enabled": true,
+      "log_path": "logs/refresh.log",
+      "order": 30
+    },
+    {
+      "name": "health-daily",
+      "command": "health",
+      "schedule": "5 7 * * *",
+      "enabled": true,
+      "log_path": "logs/health.log",
+      "order": 40
+    },
+    {
+      "name": "performance-monthly",
+      "command": "performance",
+      "schedule": "0 6 1 * *",
+      "enabled": true,
+      "log_path": "logs/performance-$(date +\\%Y-\\%m).log",
+      "order": 50
+    },
+    {
+      "name": "cloudflare-sync",
+      "command": "cloudflare sync",
+      "schedule": "15 6 1 * *",
+      "enabled": true,
+      "log_path": "logs/cloudflare-sync.log",
+      "order": 60
+    }
+  ]
+}

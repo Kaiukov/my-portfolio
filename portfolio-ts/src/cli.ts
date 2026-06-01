@@ -32,6 +32,7 @@ import { cronInstall, cronList, cronRemove } from "./commands/cron.js";
 import { getPriceFreshness } from "./commands/freshness.js";
 import { refreshPortfolio, refreshPortfolioDryRun } from "./commands/refresh.js";
 import { scheduleEmit, scheduleInstall, scheduleRemove } from "./commands/schedule.js";
+import { cronOsEmit, cronOsInstall, cronOsRemove, cronOsList } from "./commands/cron_os.js";
 import { cloudflareInit } from "./cloudflare/init.js";
 import { deployWorker } from "./cloudflare/deploy.js";
 import { getWidgetUrl } from "./cloudflare/url.js";
@@ -69,6 +70,7 @@ Commands:
   sync            repair_prices + recalculate (daily maintenance)
   refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
+  cron-os         Unified OS-cron from portfolio.cron.json (emit / install / remove / list)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
   init            Verify database schema is ready
@@ -519,6 +521,52 @@ export async function dispatch(argv: string[]): Promise<void> {
           console.log(
             JSON.stringify(
               error("cron", "UNKNOWN_SUBCOMMAND", `Unknown: cron ${sub}. Use: cron install | cron list | cron remove`),
+              null,
+              2,
+            ),
+          );
+          process.exit(1);
+          return;
+        }
+      }
+    }
+
+    case "cron-os": {
+      const projectDir = str(flags, "project-dir") ?? str(flags, "project_dir");
+      const configPath = str(flags, "config");
+      const sub = argv[3] as string | undefined;
+
+      if (!sub || sub === "emit" || sub.startsWith("--")) {
+        const result = cronOsEmit({ projectDir, configPath });
+        console.log(JSON.stringify(success("cron-os:emit", { cron_block: result.block, job_count: result.job_count }), null, 2));
+        return;
+      }
+
+      switch (sub) {
+        case "install": {
+          const result = cronOsInstall({ projectDir, configPath });
+          if (result.installed) {
+            console.log(JSON.stringify(success("cron-os:install", result), null, 2));
+          } else {
+            console.log(JSON.stringify(error("cron-os:install", "CRON_OS_INSTALL_FAILED", result.message), null, 2));
+            process.exit(1);
+          }
+          return;
+        }
+        case "remove": {
+          const result = cronOsRemove({ projectDir, configPath });
+          console.log(JSON.stringify(success("cron-os:remove", result), null, 2));
+          return;
+        }
+        case "list": {
+          const result = cronOsList({ projectDir, configPath });
+          console.log(JSON.stringify(success("cron-os:list", result, result.jobs.length), null, 2));
+          return;
+        }
+        default: {
+          console.log(
+            JSON.stringify(
+              error("cron-os", "UNKNOWN_SUBCOMMAND", `Unknown: cron-os ${sub}. Use: cron-os emit | install | remove | list`),
               null,
               2,
             ),
