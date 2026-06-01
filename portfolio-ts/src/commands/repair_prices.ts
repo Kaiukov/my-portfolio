@@ -3,8 +3,14 @@ import { STALE_MAX_AGE_DAYS } from "../validators.js";
 import type { PriceRow } from "../providers/yahoo.js";
 import { fetchAssetMetadata } from "../asset_kind.js";
 import type { AssetMetadata } from "../asset_kind.js";
+import { verifyPrices } from "./verify_prices.js";
 
 export type MetadataFetchFn = (ticker: string) => Promise<AssetMetadata | null>;
+
+export interface RepairPricesUnresolved {
+  missing: Array<{ ticker: string; issues: string[] }>;
+  stale: Array<{ ticker: string; last_price_date: string; age_days: number }>;
+}
 
 export interface RepairPricesResult {
   tickers: string[];
@@ -12,6 +18,8 @@ export interface RepairPricesResult {
   rows_per_ticker: Record<string, number>;
   range: { start: string; end: string };
   skipped_fresh: string[];
+  status: "ok" | "degraded";
+  unresolved: RepairPricesUnresolved;
 }
 
 export interface RepairPricesDryRunResult {
@@ -190,12 +198,39 @@ export async function repairPrices(
     await markRefreshSuccess(totalRows);
   }
 
+  // Final coverage/freshness check (issue #144). Only meaningful for
+  // full-portfolio runs -- an explicit --ticker subset is not a coverage
+  // guarantee. dry-run path is handled by repairPricesDryRun and stays
+  // unchanged.
+  const isFullPortfolio = (params.tickers?.length ?? 0) === 0;
+  if (!isFullPortfolio) {
+    return {
+      tickers: targetTickers,
+      rows_loaded: totalRows,
+      rows_per_ticker: rowsPerTicker,
+      range: { start, end },
+      skipped_fresh: skippedFresh,
+      status: "ok",
+      unresolved: { missing: [], stale: [] },
+    };
+  }
+
+  const coverage = await verifyPrices(params.maxAgeDays);
+  const missing = coverage.coverage_issues;
+  const stale = params.maxAgeDays !== undefined && params.maxAgeDays > 0
+    ? coverage.stale_tickers
+    : [];
+  const status: "ok" | "degraded" =
+    missing.length > 0 || stale.length > 0 ? "degraded" : "ok";
+
   return {
     tickers: targetTickers,
     rows_loaded: totalRows,
     rows_per_ticker: rowsPerTicker,
     range: { start, end },
     skipped_fresh: skippedFresh,
+    status,
+    unresolved: { missing, stale },
   };
 }
 

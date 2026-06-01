@@ -364,7 +364,12 @@ export async function dispatch(argv: string[]): Promise<void> {
         const recalcResult = await recalculate({ force: true, maxAgeDays });
         console.log(
           JSON.stringify(
-            success("sync", { repair_prices: repairResult, recalculate: recalcResult }),
+            success("sync", {
+              status: repairResult.status,
+              unresolved: repairResult.unresolved,
+              repair_prices: repairResult,
+              recalculate: recalcResult,
+            }),
             null,
             2,
           ),
