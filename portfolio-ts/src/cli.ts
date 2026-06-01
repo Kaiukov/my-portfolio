@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { loadEnv } from "./env.js";
 import { success, error, buildPagination } from "./response.js";
 import { getStatus } from "./commands/status.js";
 import { getTransactions } from "./commands/transactions.js";
@@ -910,6 +911,7 @@ export async function dispatch(argv: string[]): Promise<void> {
 }
 
 if (import.meta.main) {
+  loadEnv();
   dispatch(process.argv)
     .catch((err: unknown) => {
       const cmd = process.argv[2] ?? "_";
