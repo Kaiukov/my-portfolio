@@ -1,0 +1,11 @@
+**/node_modules
+.git
+**/coverage
+**/*.test.ts
+portfolio-ts/tests
+**/*.log
+.env
+.env.*
+**/.portfolio
+docs
+*.md

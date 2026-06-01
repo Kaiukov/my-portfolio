@@ -17,8 +17,8 @@ services:
 
   portfolio:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: portfolio-ts/Dockerfile
     image: portfolio-ts-service:latest
     depends_on:
       postgres:

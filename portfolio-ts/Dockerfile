@@ -4,10 +4,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-COPY package.json bun.lock ./
+COPY portfolio-ts/package.json portfolio-ts/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-COPY . .
+COPY portfolio-ts/ ./
+COPY portfolio_db/sql/ ./portfolio_db/sql/
 
 EXPOSE 8787
 
