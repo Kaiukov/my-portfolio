@@ -1,41 +1,22 @@
 # my-portfolio
 
-A Python CLI tool for portfolio tracking powered by PostgreSQL.
+A TypeScript/Bun CLI for portfolio tracking, backed by PostgreSQL.
 
 ## Features
 
-- **Pure JSON Output**: All commands output pure JSON, making it perfect for programmatic use, automation, and API integrations.
-- **PostgreSQL Powered**: Uses PostgreSQL for durable portfolio storage, reporting snapshots, and derived calculations.
-- **Deterministic Valuation**: Time-Weighted Return (TWR) is the primary portfolio return metric. Read-path valuation relies exclusively on cached price and FX series to ensure fast, deterministic reporting without silent outside API calls.
+- **Pure JSON Output**: All commands emit JSON envelopes, making the CLI ideal for scripting, automation, and downstream integrations.
+- **PostgreSQL Powered**: All financial data — transactions, daily returns, price cache, and FIFO cost basis — lives in PostgreSQL. The CLI never recomputes what the database already owns.
+- **Deterministic Valuation**: Time-Weighted Return (TWR) is the primary portfolio return metric. Read commands consume cached prices and FX only; they never trigger network calls.
 - **Comprehensive Tracking**: Supports standard trade actions (`BUY`, `SELL`), cash flows (`DEPOSIT`, `WITHDRAW`, `TRANSFER`), income (`DIVIDEND`, `INTEREST`), expenses (`FEE`, `TAX`), and currency exchanges.
-- **Multi-Currency**: Base currency is USD, with robust support and FX-conversion tracking for international assets.
+- **Multi-Currency**: Base currency is USD, with FX-converted reporting and FIFO cost basis for international assets.
 
 ## Prerequisites
 
-- Python >= 3.13
-- [uv](https://docs.astral.sh/uv/) package manager
+- [Bun](https://bun.sh) `>= 1.3` — the JavaScript/TypeScript runtime that executes the CLI directly from source. No build step is required.
+- PostgreSQL `>= 14` — local install (e.g. `brew install postgresql@16`) or a hosted instance (Supabase, Neon, etc.).
+- `psql` (optional, recommended) — for one-time schema bootstrap before first `portfolio health`.
 
-## Database Setup
-
-This project runs on PostgreSQL only at runtime.
-
-- Set `PORTFOLIO_DB_URL` to a local PostgreSQL DSN for development or tests.
-- Set `PORTFOLIO_DB_URL` to a Supabase PostgreSQL DSN for hosted development.
-- Keep `sslmode=require` on the Supabase URL.
-- DuckDB is not supported as a runtime database; it remains only as a migration and verification fixture.
-- The CLI auto-loads a `.env` file from the current directory or any parent directory before reading `PORTFOLIO_DB_URL`.
-
-Example local DSN:
-
-```bash
-export PORTFOLIO_DB_URL=postgresql://postgres:postgres@localhost:5433/postgres
-```
-
-Example Supabase DSN:
-
-```bash
-export PORTFOLIO_DB_URL='postgresql://postgres:[YOUR-PASSWORD]@db.<project-ref>.supabase.co:5432/postgres?sslmode=require'
-```
+Bun runs the TypeScript source directly via the shebang in `portfolio-ts/src/cli.ts`, so a separate `tsc` build is not required for normal use. `bun run typecheck` is available for static validation.
 
 ## Installation
 
@@ -44,96 +25,241 @@ export PORTFOLIO_DB_URL='postgresql://postgres:[YOUR-PASSWORD]@db.<project-ref>.
 git clone <repository-url>
 cd my-portfolio
 
-# Install using uv
-uv sync
+# Install CLI dependencies (Bun reads bun.lock)
+cd portfolio-ts
+bun install
+cd ..
 ```
 
-The CLI will be available as `portfolio`.
+That's it for the runtime. The CLI source ships as TypeScript and is executed by Bun directly.
 
-## Usage
+## Configure the database
 
-Interact with the portfolio database through the `portfolio` CLI.
+The CLI talks to PostgreSQL through a single environment variable: `PORTFOLIO_DB_URL`.
 
-### Initialization & Setup
+You can set it in your shell, or — more conveniently — drop it in a `.env` file. The CLI auto-loads `.env` from the current working directory or any parent directory before reading `PORTFOLIO_DB_URL` (issue #142), so you usually do not need to `export` anything.
 
-Initialize a new portfolio DB (safe to run on an existing DB; idempotent):
+Create a `.env` at the repository root (or copy from `.env.example`):
+
 ```bash
-portfolio init
+# .env  (gitignored — never commit real credentials)
+PORTFOLIO_DB_URL=postgresql://postgres:postgres@localhost:5432/portfolio
 ```
 
-### Mutating State
+Or for a hosted instance:
 
-Add or edit transactions:
 ```bash
-# Add a transaction
-portfolio add --help
-
-# Edit an existing transaction (supports --dry-run)
-portfolio edit --id <txn-id> --dry-run
+PORTFOLIO_DB_URL='postgresql://postgres:[YOUR-PASSWORD]@db.<project-ref>.supabase.co:5432/postgres?sslmode=require'
 ```
 
-Supported transaction types:
-- `BUY` / `SELL`
-- `DEPOSIT` / `WITHDRAW`
-- `DIVIDEND` / `INTEREST`
-- `FEE` / `TAX`
-- `TRANSFER`
-- `EXCHANGE` (via the dedicated `portfolio exchange` command)
+### One-time schema bootstrap
 
-### Reporting & Analysis
-
-All read commands output purely in JSON and do not trigger hidden network calls. They use the most recent cached prices/FX rates up to the `--as-of-date`.
+The CLI's `init` command only **verifies** that the schema is in place — it does not create tables. On a fresh database, apply the SQL files under `portfolio_db/sql/` once:
 
 ```bash
-# View current portfolio status
-portfolio status
-
-# Check cash balances
-portfolio cash
-
-# Get portfolio allocation
-portfolio allocation
-
-# View performance metrics (TWR, CAGR, gains)
-portfolio performance
-
-# Comprehensive portfolio summary
-portfolio summary
-
-# List transactions
-portfolio transactions
+psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/schema.sql
+psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/functions.sql
+psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/procedures.sql
+psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/views.sql
+psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/triggers.sql
 ```
 
-### Maintenance & Price Management
+DuckDB is no longer a runtime database. The `portfolio_db/sql/` files are pure PostgreSQL and remain the source of truth for the schema. See [Legacy / migration notes](#legacy--migration-notes) below for one-off DuckDB import tooling.
 
-Mutating commands generally trigger a recalculation automatically, but maintenance commands are available:
+## Quick start
+
+There are two equivalent ways to invoke the CLI.
+
+**1. From the `portfolio-ts/` directory (development form):**
 
 ```bash
-# Verify integrity of price caches
-portfolio verify_prices
+cd portfolio-ts
+bun src/cli.ts --help          # or: bun start -- --help
+bun src/cli.ts health
+```
 
-# Fetch missing/incomplete price series and cache them
-# Use --dry-run to preview what will be fetched
-portfolio repair_prices --dry-run
-portfolio repair_prices
+**2. As the `portfolio` binary:**
 
-# Force recalculation of daily returns
-portfolio recalculate --force
+A wrapper script lives at `bin/portfolio` at the repo root and can be invoked directly:
 
-# Check overall DB health, reachability, and price coverage
+```bash
+./bin/portfolio --help
+./bin/portfolio health
+```
+
+The `package.json` also declares `"bin": {"portfolio": "src/cli.ts"}`, so after `bun link` (run inside `portfolio-ts/`) the `portfolio` command is on your `PATH` globally:
+
+```bash
+cd portfolio-ts
+bun link                      # one-time, registers the `portfolio` bin
+portfolio --help
 portfolio health
 ```
 
-## Documentation
+All examples below use the `portfolio` form. Substitute `bun src/cli.ts` (run from `portfolio-ts/`) or `./bin/portfolio` (run from the repo root) if you have not linked the bin.
 
-Additional design notes and operational references live in `docs/`:
+## Verify the install
 
-- [API Response Standardization Plan](docs/api-response-standardization-plan.md)
-- [Cloudflare Widget](docs/widget-contract.md) — data contract served by the Worker; see also the [Cloudflare widget section](#cloudflare-widget) below for the deployment flow
-- [Crontab Schedule](docs/crontab-schedule.md)
-- [Platform Adapters](docs/platform-adapters.md) — architecture overview of all adapters (CLI, API, dashboard, Scriptable widget)
-- [Production Ready Plan](docs/production-ready-plan.md)
-- [Transaction Specification](docs/transaction-spec.md)
+```bash
+portfolio health
+```
+
+`health` checks DB reachability and price coverage. It returns a JSON envelope and exits non-zero on any problem. If you see `ok: true`, you are ready to go.
+
+## Initialization & setup
+
+```bash
+# Verify the database schema is in place (does NOT create tables)
+portfolio init
+```
+
+## Add and edit transactions
+
+```bash
+# Add a transaction (--exchange is required)
+portfolio add --date 2026-01-01 --asset AAPL --action BUY \
+              --quantity 10 --price 150 --exchange Interactive
+
+# Edit an existing transaction (supports --dry-run)
+portfolio edit --id 42 --price 155.50
+portfolio edit --id 42 --dry-run
+
+# Delete a transaction (--confirm required, --dry-run previews)
+portfolio delete --id 42 --confirm
+portfolio delete --id 42 --dry-run
+
+# Record a currency exchange (two linked transactions)
+portfolio exchange --date 2026-01-01 \
+                   --from USD --to EURUSD=X \
+                   --quantity 1000 --rate 0.92
+```
+
+Supported transaction types: `BUY`, `SELL`, `DEPOSIT`, `WITHDRAW`, `TRANSFER`, `DIVIDEND`, `INTEREST`, `FEE`, `TAX`, and `EXCHANGE` (via the dedicated `portfolio exchange` command).
+
+## Reporting & analysis
+
+All read commands emit pure JSON, do not trigger hidden network calls, and use the most recent cached prices/FX rates up to `--as-of-date`.
+
+```bash
+# Current portfolio status
+portfolio status
+portfolio status --as-of-date 2026-01-31
+
+# Cash balances by currency with USD conversion
+portfolio cash
+
+# Portfolio allocation breakdown
+portfolio allocation
+
+# High-level summary metrics
+portfolio summary
+
+# Concentration metrics (HHI + top holdings)
+portfolio concentration
+portfolio concentration --top-n 10
+
+# Performance: TWR, CAGR, Sharpe, max drawdown, benchmark
+portfolio performance
+portfolio performance --benchmark QQQ --period ytd
+portfolio performance --from-date 2025-01-01
+
+# Money-weighted return (XIRR) accounting for deposit/withdraw timing
+portfolio mwr
+
+# Paginated transaction list
+portfolio transactions --limit 20 --offset 40
+
+# Paginated daily returns
+portfolio report --limit 20 --offset 0
+```
+
+## Maintenance & price management
+
+Mutating commands auto-recalculate. Maintenance commands give you explicit control.
+
+```bash
+# Price coverage diagnostics (read-only, no network)
+portfolio verify_prices
+
+# Fetch missing prices from Yahoo Finance and cache them
+portfolio repair_prices --dry-run
+portfolio repair_prices
+portfolio repair_prices --ticker AAPL,MSFT
+
+# Rebuild daily_returns from cached prices (refuses on stale data)
+portfolio recalculate --dry-run
+portfolio recalculate --force
+
+# One-shot daily maintenance: stale check + repair + recalculate
+portfolio sync
+
+# Fetch prices via HTTPS, recalculate, and return a summary (OS-cron entry)
+portfolio refresh
+portfolio refresh --dry-run
+```
+
+Stale-price enforcement: `recalculate` and `sync` refuse to run when required tickers lack prices within `STALE_MAX_AGE_DAYS` (default 5) unless `--force` is passed. `sync` and `refresh` run the daily maintenance check first.
+
+## Scheduling (OS crontab)
+
+`portfolio schedule` manages an idempotent OS crontab block. The block invokes the CLI through Bun using the path of the `portfolio-ts/` directory.
+
+```bash
+# Print the crontab block (for review or manual install)
+portfolio schedule emit
+
+# Install the managed crontab block (idempotent)
+portfolio schedule install
+
+# Remove the managed crontab block
+portfolio schedule remove
+```
+
+The installed block uses `bun run portfolio-ts/src/cli.ts <cmd>` so no global install is required for cron to work — it just needs Bun on `PATH` and a working `portfolio-ts/` checkout. See [docs/crontab-schedule.md](docs/crontab-schedule.md) for the full lifecycle and the pg_cron alternative.
+
+## JSON envelope contract
+
+Every command emits the same envelope:
+
+```json
+{
+  "ok": true,
+  "command": "status",
+  "data": { /* command-specific payload */ },
+  "meta": { "generated_at": "2026-06-01T12:00:00Z", "count": null }
+}
+```
+
+Errors:
+
+```json
+{
+  "ok": false,
+  "command": "status",
+  "error": { "code": "INTERNAL_ERROR", "message": "..." },
+  "meta": { "generated_at": "...", "count": null }
+}
+```
+
+The canonical implementation is in `portfolio-ts/src/response.ts`; see [docs/api-response-standardization-plan.md](docs/api-response-standardization-plan.md) for the design history.
+
+## Date format
+
+- **Write and read commands** accept ISO `YYYY-MM-DD` (primary).
+- Legacy `DD-MM-YYYY` is still accepted on write commands (`--date`, `--start-date`, `--end-date`, `--from-date`) with a stderr deprecation warning. Remove legacy support after the migration window closes.
+- The historical `migrate` command (DuckDB import, Python-era) ingests semicolon-separated CSV with `DD-MM-YYYY` dates; see [Legacy / migration notes](#legacy--migration-notes).
+
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `PORTFOLIO_DB_URL` | Yes | PostgreSQL connection string (local or hosted). |
+| `PORTFOLIO_BENCHMARK_TICKERS` | No (default: `SPY`) | Comma-separated benchmark tickers for `performance`. |
+| `PORTFOLIO_LOG_PATH` | Reserved | Reserved for the legacy Python logger; not used by the TypeScript CLI. |
+| `PORTFOLIO_PRICE_PROVIDER` | Reserved | Reserved/legacy. The TypeScript CLI uses `yahoo-finance2` directly; this variable is ignored. |
+| `PORTFOLIO_S3_*` / `S3_*` | For `backup push` / `backup pull` | S3-compatible backup storage (see [Backups](#backups-s3--cloudflare-r2)). |
+
+See [`.env.example`](.env.example) for a ready-to-copy template. `.env` is auto-loaded from the current directory or any parent directory.
 
 ## Cloudflare Widget
 
@@ -152,7 +278,7 @@ Auth commands:
 | `portfolio cloudflare whoami` | Shows authenticated account name, ID, email; delegates to `wrangler whoami` |
 | `portfolio cloudflare logout` | Clears wrangler OAuth session; delegates to `wrangler logout` |
 
-### Required Environment
+### Required environment
 
 ```bash
 export PORTFOLIO_DB_URL=postgresql://user:pass@host:5432/portfolio
@@ -160,7 +286,7 @@ export PORTFOLIO_DB_URL=postgresql://user:pass@host:5432/portfolio
 
 `publish` needs the database to compose the snapshot from shared service commands (`summary`, `widget`, `status`, `freshness`). Cloudflare auth is handled by wrangler OAuth — no Cloudflare API token env var is needed for the basic flow.
 
-### Command Flow
+### Command flow
 
 The lifecycle is `init → deploy → publish`. All commands emit pure JSON with the standard envelope (`success()` / `error()` from `response.ts`).
 
@@ -194,7 +320,17 @@ Reads the saved widget URL from `.portfolio/config.json` and prints it.
 
 JSON output: `{ "ok": true, "data": { "url": "https://portfolio-widget.<your-subdomain>.workers.dev/portfolio" } }`.
 
-### Widget URL Example
+#### `portfolio cloudflare sync`
+
+Composes a snapshot and writes it to KV in a single step. Supports a watch loop:
+
+```bash
+portfolio cloudflare sync                          # one-shot
+portfolio cloudflare sync --watch                   # loop, default 5m interval
+portfolio cloudflare sync --interval 1h --watch     # loop, custom interval
+```
+
+### Widget URL example
 
 ```
 https://portfolio-widget.<your-subdomain>.workers.dev/portfolio
@@ -206,7 +342,7 @@ Replace `<your-subdomain>` with your Cloudflare Workers subdomain (shown in the 
 - **`Access-Control-Allow-Origin: *`** — CORS enabled for cross-origin fetches.
 - **404 fallback** — if no snapshot exists in KV, returns `{"error": "portfolio not published"}`.
 
-### Offline / Phone Widget
+### Offline / phone widget
 
 The Worker's `Cache-Control: public, max-age=300` gives a 5-minute browser-cache window. The Scriptable iOS widget (see [`examples/scriptable/README.md`](examples/scriptable/README.md)) caches the last good response on-device — if the fetch fails (network down, server unreachable) it displays the cached data and a stale indicator rather than a blank error.
 
@@ -238,12 +374,12 @@ These paths and files are **already gitignored** — keep them so:
 
 S3-compatible backup storage for PostgreSQL dumps. Implemented as `portfolio backup push` and `portfolio backup pull`.
 
-### What It Does
+### What it does
 
 - **`portfolio backup push`** — runs `pg_dump` against `$PORTFOLIO_DB_URL`, uploads the dump to an S3-compatible bucket as both `portfolio.backup-<timestamp>.sql` and `latest.sql`.
 - **`portfolio backup pull [--key <name>]`** — downloads a dump and prints a restore command (`psql "$PORTFOLIO_DB_URL" -f <file>`). Defaults to `latest.sql`.
 
-### Required Environment
+### Required environment
 
 The command reads `PORTFOLIO_S3_*` variables first, falling back to bare `S3_*`:
 
@@ -255,7 +391,7 @@ The command reads `PORTFOLIO_S3_*` variables first, falling back to bare `S3_*`:
 | `PORTFOLIO_S3_SECRET_ACCESS_KEY` / `S3_SECRET_ACCESS_KEY` | Yes | S3 API secret key |
 | `PORTFOLIO_S3_REGION` / `S3_REGION` | No (default: `auto`) | AWS region or `auto` for R2 |
 
-Plus `PORTFOLIO_DB_URL` (see [Database Setup](#database-setup)).
+Plus `PORTFOLIO_DB_URL` (see [Configuration](#configure-the-database)).
 
 Example `.env` block (placeholders only — never commit real keys):
 
@@ -309,9 +445,7 @@ Push JSON output:
 ```bash
 # Pull the latest backup
 portfolio backup pull
-```
 
-```bash
 # Pull a specific backup
 portfolio backup pull --key portfolio.backup-2026-05-30T120000.sql
 ```
@@ -336,6 +470,12 @@ Pull JSON output:
 }
 ```
 
+A local `pg_dump` to a file is also available:
+
+```bash
+portfolio backup --out /tmp/portfolio.sql
+```
+
 ### Security
 
 - Secrets must **never** be committed. Keep them in `.env` (gitignored) or a secrets manager.
@@ -343,14 +483,37 @@ Pull JSON output:
 - R2 API tokens can be rotated or revoked at any time from Cloudflare Dashboard → R2 → "Manage R2 API Tokens".
 - Database credentials (`PORTFOLIO_DB_URL`) are never stored in the backup itself.
 
-### Cross-Reference
-
-The original S3 backup spec is in [`docs/platform-adapters.md`](docs/platform-adapters.md) (§5). The implementation has evolved since that draft — the README above is the source of truth.
-
 ## Testing
 
-The project uses `pytest`. Run tests locally with `uv`:
+The project uses `bun test`. Run all tests from the `portfolio-ts/` directory:
 
 ```bash
-uv run pytest
+cd portfolio-ts
+bun test
 ```
+
+Type-check the TypeScript source without producing output:
+
+```bash
+bun run typecheck
+```
+
+## Documentation
+
+Additional design notes and operational references live in `docs/`:
+
+- [API Response Standardization Plan](docs/api-response-standardization-plan.md)
+- [Cloudflare Widget](docs/widget-contract.md) — data contract served by the Worker; see also the [Cloudflare Widget section](#cloudflare-widget) above for the deployment flow
+- [Crontab Schedule](docs/crontab-schedule.md)
+- [Platform Adapters](docs/platform-adapters.md) — architecture overview of all adapters (CLI, API, dashboard, Scriptable widget)
+- [Production Ready Plan](docs/production-ready-plan.md)
+- [Transaction Specification](docs/transaction-spec.md)
+- [TypeScript Migration](docs/typescript-migration/README.md) — history of the Python → TypeScript/Bun cutover
+
+> **Note:** Some historical docs (and the `portfolio-db/` and `scripts/` directories) still reference the old `portfolio-py` Python CLI or the `portfolio-ts` bin name. The current binary is **`portfolio`** (issue #141, completed). When in doubt, follow the JSON-envelope contract and the command list in [`bun src/cli.ts --help`](portfolio-ts/src/cli.ts) — those are the source of truth.
+
+## Legacy / migration notes
+
+- **DuckDB is no longer a runtime database.** The CLI no longer ships a `migrate-duckdb-to-postgres` command (see `portfolio-ts/PARITY.md`). If you have historical data in a DuckDB file, the Python-era migration script in git history may still work with `uv`, but the supported runtime is PostgreSQL.
+- **The `portfolio_db/` directory contains SQL only** (no Python source). Apply these files with `psql` during one-time schema bootstrap — see [One-time schema bootstrap](#one-time-schema-bootstrap).
+- **Reserved env vars** `PORTFOLIO_PRICE_PROVIDER` and `PORTFOLIO_LOG_PATH` are kept in `.env.example` for compatibility with downstream tooling but are ignored by the TypeScript CLI. They can be removed once no caller references them.
