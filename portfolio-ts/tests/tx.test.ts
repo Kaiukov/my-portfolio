@@ -1,153 +1,127 @@
-import { describe, expect, test, mock, beforeEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { runTx } from "../src/tx.js";
 
-const fakeTxUnsafe = mock();
-const mockSqlBegin = mock();
-
-const fakeSql = {
-  begin: mockSqlBegin,
-};
-
-mock.module("../src/db.js", () => ({
-  getSql: () => fakeSql,
-  query: mock(),
-  querySingle: mock(),
-  connect: () => {},
-  close: () => {},
-}));
-
-beforeEach(() => {
-  mockSqlBegin.mockClear();
-  fakeTxUnsafe.mockClear();
-});
+// These tests inject a fake `sql` directly via runTx's second argument instead
+// of mocking db.js. A transitive `mock.module("../src/db.js")` is not reliably
+// applied inside tx.js on Linux Bun (it passed on macOS but failed in CI), so
+// the DI seam is the portable way to stub `.begin()`.
 
 describe("runTx (pinned-connection transaction)", () => {
   test("commits and returns result when fn succeeds", async () => {
     let committed = false;
-    mockSqlBegin.mockImplementation(async (fn: any) => {
-      const result = await fn({ unsafe: fakeTxUnsafe });
-      committed = true;
-      return result;
-    });
-    fakeTxUnsafe.mockResolvedValue([{ id: 42 }]);
+    let beginCalls = 0;
+    const fakeSql = {
+      begin: async (fn: any) => {
+        beginCalls++;
+        const result = await fn({ unsafe: async () => [{ id: 42 }] });
+        committed = true;
+        return result;
+      },
+    };
 
-    const { runTx } = await import("../src/tx.js");
     const result = await runTx(async (tx: any) => {
       const rows = await tx.unsafe("SELECT 1");
       return { ok: true, rows };
-    });
+    }, fakeSql);
 
     expect(committed).toBe(true);
     expect(result.ok).toBe(true);
     expect(result.rows).toEqual([{ id: 42 }]);
-    expect(mockSqlBegin).toHaveBeenCalledTimes(1);
+    expect(beginCalls).toBe(1);
   });
 
   test("rolls back and rethrows when fn throws partway", async () => {
     let committed = false;
+    let beginCalls = 0;
     const tempResults: string[] = [];
-
-    mockSqlBegin.mockImplementation(async (fn: any) => {
-      try {
+    const fakeSql = {
+      begin: async (fn: any) => {
+        beginCalls++;
+        // Mirror Bun's sql.begin: if the callback rejects, the transaction is
+        // rolled back and the error propagates; commit (here `committed`) is
+        // never reached.
         const result = await fn({
-          unsafe: mock(async (sql: string) => {
+          unsafe: async (sql: string) => {
             tempResults.push(sql);
             return [];
-          }),
+          },
         });
         committed = true;
         return result;
-      } catch (e) {
-        throw e;
-      }
-    });
-
-    const { runTx } = await import("../src/tx.js");
+      },
+    };
 
     await expect(
       runTx(async (tx: any) => {
         await tx.unsafe("INSERT INTO transactions (...) VALUES (...)");
         throw new Error("BOOM");
-      }),
+      }, fakeSql),
     ).rejects.toThrow("BOOM");
 
     expect(committed).toBe(false);
     expect(tempResults).toEqual(["INSERT INTO transactions (...) VALUES (...)"]);
-    expect(mockSqlBegin).toHaveBeenCalledTimes(1);
+    expect(beginCalls).toBe(1);
   });
 
   test("unsafe routes params through when provided", async () => {
     let capturedParams: unknown[] | undefined;
-    mockSqlBegin.mockImplementation(async (fn: any) => {
-      const txDup = {
-        unsafe: mock(async (_sql: string, params?: unknown[]) => {
-          capturedParams = params;
-          return [{ id: 1 }];
+    const fakeSql = {
+      begin: async (fn: any) =>
+        fn({
+          unsafe: async (_sql: string, params?: unknown[]) => {
+            capturedParams = params;
+            return [{ id: 1 }];
+          },
         }),
-      };
-      return fn(txDup);
-    });
+    };
 
-    const { runTx } = await import("../src/tx.js");
     await runTx(async (tx: any) => {
       return tx.unsafe("INSERT INTO t VALUES ($1, $2)", ["a", 42]);
-    });
+    }, fakeSql);
 
     expect(capturedParams).toEqual(["a", 42]);
-    expect(mockSqlBegin).toHaveBeenCalledTimes(1);
   });
 
   test("unsafe skips empty params array (matches query() behavior)", async () => {
-    let paramsReceived: boolean = false;
-    mockSqlBegin.mockImplementation(async (fn: any) => {
-      const txDup = {
-        unsafe: mock(async (_sql: string, params?: unknown[]) => {
-          paramsReceived = params !== undefined;
-          return [];
+    let paramsReceived = false;
+    const fakeSql = {
+      begin: async (fn: any) =>
+        fn({
+          unsafe: async (_sql: string, params?: unknown[]) => {
+            paramsReceived = params !== undefined;
+            return [];
+          },
         }),
-      };
-      return fn(txDup);
-    });
+    };
 
-    const { runTx } = await import("../src/tx.js");
     await runTx(async (tx: any) => {
       return tx.unsafe("SELECT refresh_daily_returns_sql($1)", []);
-    });
+    }, fakeSql);
 
     expect(paramsReceived).toBe(false);
-    expect(mockSqlBegin).toHaveBeenCalledTimes(1);
   });
 
-  test("does NOT issue COMMIT/ROLLBACK via query() — uses begin() only", async () => {
+  test("uses begin() exactly once per call, on both success and failure", async () => {
     let beginCalls = 0;
-
-    const comp = async () => {
-      mockSqlBegin.mockImplementationOnce(async (fn: any) => {
+    const fakeSql = {
+      begin: async (fn: any) => {
         beginCalls++;
-        return fn({ unsafe: mock(async () => []) });
-      });
-      const { runTx } = await import("../src/tx.js");
-      return runTx(async (tx: any) => {
-        await tx.unsafe("INSERT ...");
-        return 42;
-      });
+        return fn({ unsafe: async () => [] });
+      },
     };
 
-    await comp();
+    await runTx(async (tx: any) => {
+      await tx.unsafe("INSERT ...");
+      return 42;
+    }, fakeSql);
     expect(beginCalls).toBe(1);
 
-    const compFail = async () => {
-      mockSqlBegin.mockImplementationOnce(async (fn: any) => {
-        beginCalls++;
-        return fn({ unsafe: mock(async () => []) });
-      });
-      const { runTx } = await import("../src/tx.js");
-      return runTx(async (tx: any) => {
+    await expect(
+      runTx(async (tx: any) => {
         await tx.unsafe("INSERT ...");
         throw new Error("fail");
-      });
-    };
-
-    await expect(compFail()).rejects.toThrow("fail");
+      }, fakeSql),
+    ).rejects.toThrow("fail");
     expect(beginCalls).toBe(2);
   });
 });
