@@ -126,7 +126,7 @@ describe("mcpWrite", () => {
     });
   });
 
-  test("delete_transaction maps explicit-confirmation validation to CONFIRM_REQUIRED", async () => {
+  test("delete_transaction maps explicit-confirmation validation to VALIDATION_ERROR", async () => {
     mockDeleteTransaction.mockImplementation(async () => {
       throw new ValidationError("Deletion of transaction ID 42 requires explicit confirmation.");
     });
@@ -137,7 +137,7 @@ describe("mcpWrite", () => {
     if (result.ok) throw new Error("Expected error envelope");
     expect(result.ok).toBe(false);
     expect(result.command).toBe("delete");
-    expect(result.error.code).toBe("CONFIRM_REQUIRED");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
   });
 
   test("edit_transaction maps not-found errors", async () => {
