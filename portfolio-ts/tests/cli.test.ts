@@ -21,7 +21,7 @@ describe("CLI parsing", () => {
 
     expect(logSpy).toHaveBeenCalled();
     const output = logSpy.mock.calls[0][0];
-    expect(output).toContain("portfolio-ts");
+    expect(output).toContain("portfolio");
     expect(output).toContain("status");
     expect(output).toContain("transactions");
 
@@ -38,7 +38,7 @@ describe("CLI parsing", () => {
 
     expect(logSpy).toHaveBeenCalled();
     const output = logSpy.mock.calls[0][0];
-    expect(output).toContain("portfolio-ts");
+    expect(output).toContain("portfolio");
     expect(output).toContain("status");
 
     logSpy.mockRestore();
@@ -72,7 +72,7 @@ describe("CLI parsing", () => {
 
     expect(logSpy).toHaveBeenCalled();
     const output = logSpy.mock.calls[0][0];
-    expect(output).toContain("portfolio-ts");
+    expect(output).toContain("portfolio");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

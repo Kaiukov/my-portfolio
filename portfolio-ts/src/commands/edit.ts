@@ -61,7 +61,7 @@ export async function editDryRun(
   if (!hasChanges) {
     throw new ValidationError(
       "Provide at least one field to update.\n" +
-        "Example: portfolio-ts edit --id 42 --price 155.50",
+        "Example: portfolio edit --id 42 --price 155.50",
     );
   }
 
@@ -86,7 +86,7 @@ export async function editTransaction(
   if (!hasChanges) {
     throw new ValidationError(
       "Provide at least one field to update.\n" +
-        "Example: portfolio-ts edit --id 42 --price 155.50",
+        "Example: portfolio edit --id 42 --price 155.50",
     );
   }
 
@@ -101,7 +101,7 @@ export async function editTransaction(
   if (!existing) {
     throw new NotFoundError(
       `Transaction ID ${transId} not found.\n` +
-        "Hint: run portfolio-ts transactions to list IDs",
+        "Hint: run portfolio transactions to list IDs",
     );
   }
 

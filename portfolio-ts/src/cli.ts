@@ -45,7 +45,7 @@ const HELP_TEXT = `
 Portfolio tracking with TypeScript/Bun.
 
 Usage:
-  portfolio-ts <command> [options]
+  portfolio <command> [options]
 
 Commands:
   status          Current portfolio status snapshot (--as-of-date YYYY-MM-DD)
@@ -83,18 +83,18 @@ Environment:
   PORTFOLIO_DB_URL  PostgreSQL connection string
 
 Examples:
-  portfolio-ts status
-  portfolio-ts transactions --limit 20 --offset 40
-  portfolio-ts add --date 2026-01-01 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive
-  portfolio-ts edit --id 42 --price 155.50
-  portfolio-ts delete --id 42 --confirm
-  portfolio-ts exchange --date 2026-01-01 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
-  portfolio-ts schedule emit
-  portfolio-ts schedule install / schedule remove
-  portfolio-ts refresh
-  portfolio-ts backup push
-  portfolio-ts backup pull
-  portfolio-ts --help
+  portfolio status
+  portfolio transactions --limit 20 --offset 40
+  portfolio add --date 2026-01-01 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive
+  portfolio edit --id 42 --price 155.50
+  portfolio delete --id 42 --confirm
+  portfolio exchange --date 2026-01-01 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
+  portfolio schedule emit
+  portfolio schedule install / schedule remove
+  portfolio refresh
+  portfolio backup push
+  portfolio backup pull
+  portfolio --help
 `.trim();
 
 type FlagValue = string | true;

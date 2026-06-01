@@ -38,7 +38,7 @@ export async function addTransaction(params: {
     throw new ValidationError(
       "--exchange is required.\n" +
         "Expected: --exchange <broker or exchange name>\n" +
-        "Example:  portfolio-ts add --date 01-01-2026 --asset AAPL --action BUY " +
+        "Example:  portfolio add --date 01-01-2026 --asset AAPL --action BUY " +
         "--quantity 10 --price 150 --exchange Interactive",
     );
   }
