@@ -30,7 +30,7 @@ Every adapter and utility in this document respects these invariants:
 
 ## 1. CLI Adapter
 
-The CLI is the current primary interface. It exists in two implementations: the original Python CLI (`portfolio`) and the TypeScript/Bun CLI (`portfolio-ts`). Both share the same JSON contract. The TypeScript implementation is the current active one; `PARITY.md` documents the migration status of each command.
+The CLI is the current primary interface. It has one historical Python implementation and one current TypeScript/Bun implementation (`portfolio-ts` during migration, `portfolio` as the active binary). Both share the same JSON contract. The TypeScript/Bun runtime is the current active one; `PARITY.md` documents the migration status of each command.
 
 ### Command Groups
 
