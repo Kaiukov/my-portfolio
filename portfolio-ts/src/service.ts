@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { loadEnv } from "./env.js";
 import { createApiServer, type ReadyRouteResult } from "./api/server.js";
+import * as backupS3Module from "./commands/backup_s3.js";
 import * as initModule from "./commands/init.js";
 import * as refreshModule from "./commands/refresh.js";
 import * as publishModule from "./cloudflare/publish.js";
@@ -35,6 +36,19 @@ export interface RefreshJobDeps {
 export interface PublishJobDeps {
   publishToKv?: (projectRoot?: string) => Promise<unknown>;
   projectRoot?: string;
+  now?: () => Date;
+}
+
+export interface BackupJobDeps {
+  loadS3Config?: typeof backupS3Module.loadS3Config;
+  createS3Client?: (config: Parameters<typeof backupS3Module.createS3Client>[0]) => {
+    destroy: () => void;
+  };
+  pushBackupToS3?: (
+    client: { destroy: () => void },
+    bucket: string,
+    dbUrl: string,
+  ) => Promise<unknown>;
   now?: () => Date;
 }
 
@@ -88,6 +102,86 @@ export async function runCloudflarePublishJob(
     return {
       ok: false,
       job: "cloudflare_publish",
+      started_at: startedAt.toISOString(),
+      finished_at: finishedAt.toISOString(),
+      duration_ms: finishedAt.getTime() - startedAt.getTime(),
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export async function runBackupJob(
+  deps: BackupJobDeps = {},
+): Promise<ServiceJobResult<unknown>> {
+  const startedAt = (deps.now ?? (() => new Date()))();
+  try {
+    const loadS3Config = deps.loadS3Config ?? backupS3Module.loadS3Config;
+    const createS3Client: NonNullable<BackupJobDeps["createS3Client"]> =
+      deps.createS3Client ??
+      (backupS3Module.createS3Client as NonNullable<BackupJobDeps["createS3Client"]>);
+    const pushBackupToS3: NonNullable<BackupJobDeps["pushBackupToS3"]> =
+      deps.pushBackupToS3 ??
+      (backupS3Module.pushBackupToS3 as NonNullable<BackupJobDeps["pushBackupToS3"]>);
+    const cfg = loadS3Config();
+    if (!cfg.ok) {
+      const finishedAt = (deps.now ?? (() => new Date()))();
+      return {
+        ok: false,
+        job: "backup",
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        error: cfg.error,
+      };
+    }
+
+    const dbUrl = process.env.PORTFOLIO_DB_URL;
+    if (!dbUrl) {
+      const finishedAt = (deps.now ?? (() => new Date()))();
+      return {
+        ok: false,
+        job: "backup",
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        error: "PORTFOLIO_DB_URL is not set",
+      };
+    }
+
+    const client = createS3Client(cfg.config);
+    try {
+      const data = await pushBackupToS3(client, cfg.config.bucket, dbUrl);
+      const finishedAt = (deps.now ?? (() => new Date()))();
+      return {
+        ok: true,
+        job: "backup",
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        data,
+      };
+    } catch (err) {
+      const finishedAt = (deps.now ?? (() => new Date()))();
+      return {
+        ok: false,
+        job: "backup",
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        error: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      try {
+        client.destroy();
+      } catch {
+        // Ignore destroy errors so the job still reports its original result.
+      }
+    }
+  } catch (err) {
+    const finishedAt = (deps.now ?? (() => new Date()))();
+    return {
+      ok: false,
+      job: "backup",
       started_at: startedAt.toISOString(),
       finished_at: finishedAt.toISOString(),
       duration_ms: finishedAt.getTime() - startedAt.getTime(),
@@ -247,6 +341,8 @@ export interface ServiceConfig {
   refreshIntervalMs: number;
   publishEnabled: boolean;
   publishIntervalMs: number;
+  backupEnabled: boolean;
+  backupIntervalMs: number;
   initOnBoot: boolean;
   projectRoot: string;
 }
@@ -259,6 +355,8 @@ function serviceStatusBody(config: ServiceConfig, startedAt: Date, ready: boolea
     refresh_interval_ms: config.refreshIntervalMs,
     cloudflare_publish: config.publishEnabled,
     publish_interval_ms: config.publishEnabled ? config.publishIntervalMs : null,
+    backup_enabled: config.backupEnabled,
+    backup_interval_ms: config.backupEnabled ? config.backupIntervalMs : null,
     init_on_boot: config.initOnBoot,
     ...(error ? { error } : {}),
   };
@@ -324,6 +422,10 @@ export function readServiceConfig(
   const publishIntervalMs = env.PORTFOLIO_PUBLISH_INTERVAL
     ? syncModule.parseInterval(env.PORTFOLIO_PUBLISH_INTERVAL)
     : refreshIntervalMs;
+  const backupEnabled = parseBooleanEnv(env.PORTFOLIO_BACKUP_ENABLED, false);
+  const backupIntervalMs = env.PORTFOLIO_BACKUP_INTERVAL
+    ? syncModule.parseInterval(env.PORTFOLIO_BACKUP_INTERVAL)
+    : 86_400_000;
   const initOnBoot = parseBooleanEnv(env.PORTFOLIO_INIT_ON_BOOT, false);
 
   if (refreshIntervalMs <= 0) {
@@ -332,12 +434,17 @@ export function readServiceConfig(
   if (publishIntervalMs <= 0) {
     throw new Error("PORTFOLIO_PUBLISH_INTERVAL must be greater than zero");
   }
+  if (backupIntervalMs <= 0) {
+    throw new Error("PORTFOLIO_BACKUP_INTERVAL must be greater than zero");
+  }
 
   return {
     port,
     refreshIntervalMs,
     publishEnabled,
     publishIntervalMs,
+    backupEnabled,
+    backupIntervalMs,
     initOnBoot,
     projectRoot,
   };
@@ -365,6 +472,12 @@ export async function startPortfolioService(
         enabled: true,
         intervalMs: config.refreshIntervalMs,
         run: () => runRefreshJob(),
+      },
+      {
+        name: "backup",
+        enabled: config.backupEnabled,
+        intervalMs: config.backupIntervalMs,
+        run: () => runBackupJob(),
       },
       {
         name: "cloudflare_publish",
@@ -395,6 +508,8 @@ export async function startPortfolioService(
       refresh_interval_ms: config.refreshIntervalMs,
       cloudflare_publish: config.publishEnabled,
       publish_interval_ms: config.publishEnabled ? config.publishIntervalMs : null,
+      backup_enabled: config.backupEnabled,
+      backup_interval_ms: config.backupEnabled ? config.backupIntervalMs : null,
       init_on_boot: config.initOnBoot,
       project_root: config.projectRoot,
     }),
