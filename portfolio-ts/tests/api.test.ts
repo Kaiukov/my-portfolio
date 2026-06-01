@@ -23,24 +23,6 @@ mock.module("../src/tx.js", () => ({
   },
 }));
 
-mock.module("../src/commands/add.js", () => ({
-  addTransaction: mockAddTransaction,
-}));
-
-mock.module("../src/commands/edit.js", () => ({
-  editTransaction: mockEditTransaction,
-  editDryRun: mockEditDryRun,
-}));
-
-mock.module("../src/commands/delete.js", () => ({
-  deleteTransaction: mockDeleteTransaction,
-  deletePreview: mockDeletePreview,
-}));
-
-mock.module("../src/commands/exchange.js", () => ({
-  exchangeCurrency: mockExchangeCurrency,
-}));
-
 beforeEach(() => {
   mockQuerySingle.mockReset();
   mockQuery.mockReset();
@@ -270,7 +252,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/performance?as_of=2026-01-01&benchmark=SPY&period=1y");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deletePreview: mockDeletePreview, deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -297,7 +281,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/mwr?as_of=2026-01-01");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -410,7 +396,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/health?max_age_days=5");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -446,7 +434,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/verify_prices?max_age_days=5");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { exchangeCurrency: mockExchangeCurrency },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -502,7 +492,9 @@ describe("handleRequest", () => {
         account: "Main",
       }),
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { addTransaction: mockAddTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -536,7 +528,9 @@ describe("handleRequest", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ price: 155.5 }),
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction, editDryRun: mockEditDryRun },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -561,7 +555,9 @@ describe("handleRequest", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ price: 155.5, dry_run: true }),
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction, editDryRun: mockEditDryRun },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -585,7 +581,9 @@ describe("handleRequest", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ date: "2026-01-20", asset: "AAPL", action: "BUY", quantity: 10, price: 160 }),
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction, editDryRun: mockEditDryRun },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -607,7 +605,9 @@ describe("handleRequest", () => {
     const req = new Request("http://localhost/transactions/42?dry_run=true", {
       method: "DELETE",
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction, deletePreview: mockDeletePreview },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -629,7 +629,9 @@ describe("handleRequest", () => {
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/transactions/42", { method: "DELETE" });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -649,7 +651,9 @@ describe("handleRequest", () => {
     const req = new Request("http://localhost/transactions/42?confirm=true", {
       method: "DELETE",
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { deleteTransaction: mockDeleteTransaction },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -680,7 +684,9 @@ describe("handleRequest", () => {
         rate: 0.92,
       }),
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { exchangeCurrency: mockExchangeCurrency },
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -723,7 +729,9 @@ describe("handleRequest", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ price: 100 }),
     });
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      write: { editTransaction: mockEditTransaction },
+    });
 
     expect(res.status).toBe(404);
     const body = await res.json();

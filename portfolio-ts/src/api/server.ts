@@ -14,8 +14,18 @@ import { deleteTransaction, deletePreview } from "../commands/delete.js";
 import { exchangeCurrency } from "../commands/exchange.js";
 import { NotFoundError, ValidationError } from "../validators.js";
 
+type WriteHandlers = {
+  addTransaction: typeof addTransaction;
+  editTransaction: typeof editTransaction;
+  editDryRun: typeof editDryRun;
+  deleteTransaction: typeof deleteTransaction;
+  deletePreview: typeof deletePreview;
+  exchangeCurrency: typeof exchangeCurrency;
+};
+
 type RequestContext = {
   ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
+  write?: Partial<WriteHandlers>;
 };
 
 type Handler = (searchParams: URLSearchParams) => Promise<SuccessEnvelope>;
@@ -161,6 +171,17 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
+function resolveWriteHandlers(ctx: RequestContext): WriteHandlers {
+  return {
+    addTransaction: ctx.write?.addTransaction ?? addTransaction,
+    editTransaction: ctx.write?.editTransaction ?? editTransaction,
+    editDryRun: ctx.write?.editDryRun ?? editDryRun,
+    deleteTransaction: ctx.write?.deleteTransaction ?? deleteTransaction,
+    deletePreview: ctx.write?.deletePreview ?? deletePreview,
+    exchangeCurrency: ctx.write?.exchangeCurrency ?? exchangeCurrency,
+  };
+}
+
 function toErrorResponse(command: string, err: unknown): { body: ErrorEnvelope; status: number } {
   const msg = err instanceof Error ? err.message : String(err);
 
@@ -198,6 +219,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
   const url = new URL(req.url);
   const path = url.pathname;
   const allowedMethods = allowedMethodsForPath(path);
+  const write = resolveWriteHandlers(ctx);
 
   if (!allowedMethods) {
     return jsonResponse(
@@ -241,7 +263,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         );
       }
 
-      const result = await addTransaction({
+      const result = await write.addTransaction({
         dateStr,
         asset,
         action,
@@ -271,7 +293,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         );
       }
 
-      const result = await exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
+      const result = await write.exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
       return jsonResponse(success("exchange", result), 200);
     }
 
@@ -300,24 +322,24 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
 
       const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
       if (isDryRun) {
-        const result = await editDryRun(transId, changes);
+        const result = await write.editDryRun(transId, changes);
         return jsonResponse(success("edit", result), 200);
       }
 
       // PUT and PATCH both route through editTransaction to preserve a single mutation path.
-      const result = await editTransaction(transId, changes);
+      const result = await write.editTransaction(transId, changes);
       return jsonResponse(success("edit", result), 200);
     }
 
     if (req.method === "DELETE") {
       const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
       if (isDryRun) {
-        const result = await deletePreview(transId);
+        const result = await write.deletePreview(transId);
         return jsonResponse(success("delete", result, result.would_delete.length), 200);
       }
 
       const confirm = boolFlag(url.searchParams, body, "confirm");
-      const result = await deleteTransaction(transId, confirm);
+      const result = await write.deleteTransaction(transId, confirm);
       return jsonResponse(success("delete", result, result.deleted_ids.length), 200);
     }
   } catch (err) {
