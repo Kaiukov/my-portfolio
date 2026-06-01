@@ -1,4 +1,4 @@
-import { success, error } from "../response.js";
+import { success, error, type SuccessEnvelope } from "../response.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -7,44 +7,59 @@ import { getPerformance } from "../commands/performance.js";
 import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
+import { getPriceFreshness } from "../commands/freshness.js";
 
-type Handler = (searchParams: URLSearchParams) => Promise<unknown>;
+type Handler = (searchParams: URLSearchParams) => Promise<SuccessEnvelope>;
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
     const maxAgeDays = parseIntParam(p, "max_age_days");
-    return getHealth(maxAgeDays);
+    const data = await getHealth(maxAgeDays);
+    return success("health", data);
   },
   "/status": async (p) => {
     const asOf = strParam(p, "as_of");
-    return getStatus(asOf);
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getStatus(asOf);
+    return success("status", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/summary": async (p) => {
     const asOf = strParam(p, "as_of");
-    return getSummary(asOf);
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getSummary(asOf);
+    return success("summary", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/allocation": async (p) => {
     const asOf = strParam(p, "as_of");
-    return getAllocation(asOf);
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getAllocation(asOf);
+    return success("allocation", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/cash": async (p) => {
     const asOf = strParam(p, "as_of");
-    return getCash(asOf);
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getCash(asOf);
+    return success("cash", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/performance": async (p) => {
     const asOfDate = strParam(p, "as_of");
     const benchmark = strParam(p, "benchmark");
     const fromDate = strParam(p, "from_date");
     const period = strParam(p, "period");
-    return getPerformance({ asOfDate, benchmark, fromDate, period });
+    const freshnessMeta = await getPriceFreshness(asOfDate);
+    const data = await getPerformance({ asOfDate, benchmark, fromDate, period });
+    return success("performance", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/mwr": async (p) => {
     const asOf = strParam(p, "as_of");
-    return getMwr(asOf);
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getMwr(asOf);
+    return success("mwr", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/verify_prices": async (p) => {
     const maxAgeDays = parseIntParam(p, "max_age_days");
-    return verifyPrices(maxAgeDays);
+    const data = await verifyPrices(maxAgeDays);
+    return success("verify_prices", data);
   },
 };
 
@@ -86,9 +101,8 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   try {
-    const data = await handler(url.searchParams);
-    const command = path.slice(1); // strip leading /
-    return jsonResponse(success(command, data), 200);
+    const envelope = await handler(url.searchParams);
+    return jsonResponse(envelope, 200);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return jsonResponse(error("api", "INTERNAL_ERROR", msg), 500);
