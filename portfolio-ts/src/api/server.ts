@@ -1,4 +1,4 @@
-import { success, error, type SuccessEnvelope, type ErrorEnvelope } from "../response.js";
+import { success, error, type SuccessEnvelope } from "../response.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -8,20 +8,8 @@ import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 import { getPriceFreshness } from "../commands/freshness.js";
-import { addTransaction } from "../commands/add.js";
-import { editTransaction, editDryRun } from "../commands/edit.js";
-import { deleteTransaction, deletePreview } from "../commands/delete.js";
-import { exchangeCurrency } from "../commands/exchange.js";
-import { NotFoundError, ValidationError } from "../validators.js";
-
-type WriteHandlers = {
-  addTransaction: typeof addTransaction;
-  editTransaction: typeof editTransaction;
-  editDryRun: typeof editDryRun;
-  deleteTransaction: typeof deleteTransaction;
-  deletePreview: typeof deletePreview;
-  exchangeCurrency: typeof exchangeCurrency;
-};
+import { ValidationError } from "../validators.js";
+import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
 type RequestContext = {
   ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
@@ -171,32 +159,6 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-function resolveWriteHandlers(ctx: RequestContext): WriteHandlers {
-  return {
-    addTransaction: ctx.write?.addTransaction ?? addTransaction,
-    editTransaction: ctx.write?.editTransaction ?? editTransaction,
-    editDryRun: ctx.write?.editDryRun ?? editDryRun,
-    deleteTransaction: ctx.write?.deleteTransaction ?? deleteTransaction,
-    deletePreview: ctx.write?.deletePreview ?? deletePreview,
-    exchangeCurrency: ctx.write?.exchangeCurrency ?? exchangeCurrency,
-  };
-}
-
-function toErrorResponse(command: string, err: unknown): { body: ErrorEnvelope; status: number } {
-  const msg = err instanceof Error ? err.message : String(err);
-
-  if (err instanceof ValidationError) {
-    const code = msg.includes("requires explicit confirmation") ? "CONFIRM_REQUIRED" : err.code;
-    return { body: error(command, code, msg), status: 400 };
-  }
-
-  if (err instanceof NotFoundError) {
-    return { body: error(command, err.code, msg), status: 404 };
-  }
-
-  return { body: error(command, "INTERNAL_ERROR", msg), status: 500 };
-}
-
 async function parseJsonBody(req: Request): Promise<JsonObject> {
   const raw = await req.text();
   if (!raw.trim()) return {};
@@ -219,7 +181,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
   const url = new URL(req.url);
   const path = url.pathname;
   const allowedMethods = allowedMethodsForPath(path);
-  const write = resolveWriteHandlers(ctx);
+  const write = resolveWriteHandlers(ctx.write);
 
   if (!allowedMethods) {
     return jsonResponse(
@@ -351,7 +313,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
           : TRANSACTION_ID_ROUTE.test(path)
             ? (req.method === "DELETE" ? "delete" : "edit")
             : "api";
-    const mapped = toErrorResponse(routeCommand, err);
+    const mapped = toWriteErrorEnvelope(routeCommand, err);
     return jsonResponse(mapped.body, mapped.status);
   }
 
