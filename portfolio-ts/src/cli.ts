@@ -38,6 +38,7 @@ import { getWidgetUrl } from "./cloudflare/url.js";
 import { runWranglerLogin, runWranglerLogout, runWranglerWhoami } from "./cloudflare/auth.js";
 import { publishToKv } from "./cloudflare/publish.js";
 import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
+import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -75,6 +76,7 @@ Commands:
   backup push     Upload portfolio snapshot to S3-compatible storage
   backup pull     Restore latest snapshot from S3-compatible storage
   cron            Manage pg_cron scheduled jobs (install / list / remove)
+  api             Start a local read-only REST API server (--port 8787)
   --help          Show this help message
 
 Dates: ISO YYYY-MM-DD (legacy DD-MM-YYYY also accepted on write commands)
@@ -905,6 +907,15 @@ export async function dispatch(argv: string[]): Promise<void> {
           return;
         }
       }
+    }
+
+    case "api":
+    case "serve": {
+      const port = int(flags, "port") ?? 8787;
+      const server = createApiServer({ port });
+      console.log(JSON.stringify(success("api", { port, url: `http://localhost:${port}` }), null, 2));
+      // keep-alive: Bun.serve blocks the event loop; no explicit await needed
+      return;
     }
 
     default: {
