@@ -18,49 +18,20 @@ cmux tree                      # show all workspaces/panes
 - for most task utilize `deepseek v4 flash` (fast, cheap, good for lint, imports, mechanical edits)
 - for complex reasoning, architecture, bug fixes, use `deepseek v4 pro` (more expensive, better at reasoning and code generation)
 - use `--yolo` flag to bypass all permission prompts for maximum speed (only for trusted commands)
-- agents must be pro-active and creating for speed up proccess. 
+- agents must be pro-active and creating for speed up proccess.
 - main agent must deligatee task to agents via cmux cli commands and to be an orcestrator of the process.
 - orcestrator agent must spawn, steer and kill agents as needed, and be responsible for final output.
 
-## Command Code (`cmd`) in split view
-
-**IMPORTANT**: Never use `-p "..."` via cmux — long prompts sent as a single string get stuck in the shell buffer and never execute. Always open cmd interactively first, then send the prompt as a separate step.
-
-```bash
-# Step 1: open a new split and start cmd interactively
-cmux new-split right
-cmux send --surface surface:N "cmd --model deepseek/deepseek-v4-pro --yolo"
-cmux send-key --surface surface:N "Enter"
-
-# Step 2: wait for cmd REPL to be ready (look for "Ask your question..." prompt)
-until cmux read-screen --surface surface:N --lines 3 | grep -q "Ask your question"; do sleep 2; done
-
-# Step 3: send the prompt text, then Enter
-cmux send --surface surface:N "your task description here"
-cmux send-key --surface surface:N "Enter"
-
-# Step 4: wait for response (look for "❯" prompt returning)
-until cmux read-screen --surface surface:N --lines 3 | grep -q "^❯"; do sleep 3; done
-cmux read-screen --surface surface:N --lines 40
-```
-
-Key flags:
-- `--yolo` — bypass all permission prompts (alias for `--dangerously-skip-permissions`)
-- `--auto-accept` — auto-accept tool calls (softer than `--yolo`)
-- `--model deepseek/deepseek-v4-pro` — intelligent tasks: architecture, bug fixes, reasoning
-- `--model deepseek/deepseek-v4-flash` — dirty tasks: lint, imports, ruff fixes, mechanical edits
-- `--list-models` — show available models
-- `-p "query"` — non-interactive single-shot mode (**do NOT use via cmux**, only from the main terminal directly)
-
 ## Overview
 
-Python CLI (`portfolio`) for portfolio tracking with PostgreSQL. Source lives in `portfolio_db/`, not `src/`.
+TypeScript/Bun CLI (`portfolio`) for portfolio tracking with PostgreSQL. Source lives in `portfolio-ts/src/`; `portfolio_db/sql/` is SQL-only and remains the financial source of truth.
 
-- package manager: `uv`
-- build backend: hatchling
-- Python >= 3.13
-- database: PostgreSQL (required; DuckDB support removed)
-- library dependencies: click, psycopg[binary], numpy, pandas, yfinance
+- runtime: Bun + TypeScript
+- package manager: Bun
+- install: `bun install`
+- test: `bun test`
+- typecheck: `bun run typecheck`
+- binary: `portfolio`
 
 ## Database Setup
 
@@ -98,59 +69,40 @@ export PORTFOLIO_DB_URL="postgresql://portfolio_user:password@localhost:5432/por
    export PORTFOLIO_DB_URL="postgresql://postgres:password@db.xxx.supabase.co:5432/postgres"
    ```
 
-### DuckDB Migration (from legacy)
+### Legacy DuckDB migration (historical only)
 
-If migrating from DuckDB:
-```bash
-# Install DuckDB support (optional)
-# Note: duckdb is no longer a core dependency; install separately if needed
-pip install duckdb
-
-# Run migration (requires PORTFOLIO_DB_URL set to target PostgreSQL)
-uv run portfolio migrate-duckdb-to-postgres \
-  --from ~/portfolio.duckdb \
-  --to $PORTFOLIO_DB_URL
-```
-
-The migration command:
-- Copies `transactions`, `daily_returns`, `price_cache` tables
-- Validates row counts match after copy
-- Resets PostgreSQL sequences for safe future inserts
-- Emits JSON progress report (dry-run available with `--dry-run`)
+DuckDB is no longer a runtime database. The Bun CLI does not ship `migrate-duckdb-to-postgres` or `migrate`; those paths are historical and documented only for archaeology. If you need migration context, consult `portfolio-ts/PARITY.md` and git history. Do not treat DuckDB recovery as a normal workflow step.
 
 ## Key commands
 
 ```bash
-uv sync              # install dependencies
-uv run pytest -q     # run tests (CI: uv run pytest -q --tb=short)
-uv run ruff check .  # lint
-uv run portfolio     # run CLI
+bun install
+bun run typecheck
+bun test
+bun run start
+portfolio --help
 ```
 
 ## Architecture layers
 
 Three layers. Each owns its domain. No layer reaches into a layer below it that is not its direct dependency.
 
-### PostgreSQL persistence (portfolio_db/database.py)
-Owns: SQL, psycopg driver, schema setup, migrations, connection lifecycle, PORTFOLIO_DB_URL resolution, all repository/query methods.
-Rule: No caller outside this file may use `db.con` directly.
+### PostgreSQL persistence (`portfolio-ts/src/db.ts`)
+Owns: SQL, Bun SQL driver, connection lifecycle, `PORTFOLIO_DB_URL` resolution, repository/query helpers, and schema/bootstrap access. The schema and SQL functions in `portfolio_db/sql/` are the financial source of truth.
+Rule: No caller outside `src/db.ts` may use the raw SQL handle directly.
 
 ### Shared service / use-case layer
-Files: portfolio_service.py, transaction_service.py, reporting_service.py, recalculation_service.py, performance_service.py, price_service.py, price_cache_service.py, calculator.py, domain.py, validators.py
-Owns: business logic, financial invariants, transaction rules (SELL-as-of-date, exchange validation), recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior.
-Rule: No financial invariant lives in CLI or API adapters. This layer is callable by CLI now and by MCP/API adapters later without modification.
+Files: `portfolio-ts/src/commands/*`, `portfolio-ts/src/validators.ts`, `portfolio-ts/src/asset_kind.ts`, `portfolio-ts/src/tx.ts`, `portfolio-ts/src/tx_core.ts`, `portfolio-ts/src/sql_apply.ts`
+Owns: business logic, financial invariants, transaction rules (SELL-as-of-date, exchange validation), recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior, asset/currency normalization.
+Rule: No financial invariant lives in adapters. This layer is reused by both CLI and REST API without duplication.
 
-### Adapter layer (current: CLI only)
-Files: portfolio_db/cli.py
-Owns: Click argument parsing, light user-facing validation (format checks, required flags), calling shared use-case layer, serializing pure JSON responses via response.py.
+### Adapter layer (`portfolio-ts/src/cli.ts`, `portfolio-ts/src/api/server.ts`)
+Owns: CLI argument parsing, HTTP routing, light user-facing validation (format checks, required flags), calling the shared use-case layer, serializing pure JSON responses via `src/response.ts`.
 Rules:
-- No SQL or psycopg imports.
+- No SQL or Bun SQL imports.
 - No business/financial logic.
 - No duplication of service logic.
-- Future MCP/API adapters must be able to reuse all shared use-case layer directly without copying CLI code.
-
-### Future adapters (NOT in this PR)
-MCP and REST API are future adapters. They will call the same shared service/use-case layer. No implementation in this PR; no new heavy dependencies.
+- CLI and REST API are peer adapters and must stay behavior-aligned. See `portfolio-ts/PARITY.md` and `src/api/server.ts`.
 
 ## CLI JSON contract
 
@@ -163,24 +115,23 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 ## Date format
 
 - **All commands**: `YYYY-MM-DD` (ISO 8601, primary format)
-- **Legacy `DD-MM-YYYY`** is still accepted on write commands (`--date`, `--from-date`) but deprecated — a stderr warning is emitted via `console.warn`. Remove legacy support after migration window closes.
-- `migrate` ingests semicolon-separated CSV with `DD-MM-YYYY` dates
+- **Legacy `DD-MM-YYYY`** is still accepted on write commands (`--date`, `--from-date`) but deprecated - a stderr warning is emitted via `console.warn`.
 
 ## Command classification
 
-- **Read-only** (never trigger network calls): `report`, `transactions`, `status`, `allocation`, `cash`, `summary`, `performance`, `mwr`, `verify_prices`, `health`
-- **Mutating** (auto-recalculate after write): `add`, `edit`, `delete`, `exchange`, `migrate`, `repair_prices`, `recalculate`
-- **File-level**: `backup`, `init`
+- **Read-only** (never trigger network calls): `report`, `transactions`, `status`, `allocation`, `cash`, `summary`, `concentration`, `performance`, `mwr`, `verify_prices`, `health`, `widget`
+- **Mutating** (auto-recalculate after write): `add`, `edit`, `delete`, `exchange`
+- **Maintenance / file-level**: `repair_prices`, `recalculate`, `sync`, `refresh`, `backup`, `init`, `cron`, `schedule`
 
 ## Common traps
 
 - `add` requires `--exchange` (non-optional)
 - `delete` requires `--confirm` (unless `--dry-run`)
 - `edit`, `repair_prices`, `recalculate` support `--dry-run`
-- `error()` calls `sys.exit(1)` — code after it is unreachable
-- `migrate` is destructive: clears existing transactions and daily_returns before import
+- `process.exit(1)` makes code after it unreachable in `src/cli.ts`
+- Historical migration commands (`migrate`, `migrate-duckdb-to-postgres`) are intentionally dropped in the Bun runtime
 - `recalculate` uses cached prices only; `repair_prices` fetches from network
-- `performance --benchmark` falls back to `PORTFOLIO_BENCHMARK_TICKERS` env var → `SPY`
+- `performance --benchmark` falls back to `PORTFOLIO_BENCHMARK_TICKERS` env var -> `SPY`
 - `status`, `cash`, `summary`, `allocation`, `performance`, `mwr` must stay aligned to one reporting snapshot
 - `verify_prices` is diagnostic only; `repair_prices` is remediation
 - CLI help text vs code: code is the source of truth when they conflict
@@ -189,9 +140,9 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 
 These are the invariants future changes must preserve.
 
-### Single source of truth — domain.py
+### Single source of truth - `validators.ts`, `asset_kind.ts`, and PostgreSQL SQL
 
-All currencies, FX tickers, cash bucket defaults, cash display names, and action groupings live in `domain.py`. Service and calculator code may import or re-export those symbols, but they must not maintain parallel copies or drift from `domain.py`.
+All currencies, FX tickers, cash bucket defaults, cash display names, and action groupings live in `portfolio-ts/src/validators.ts`, `portfolio-ts/src/asset_kind.ts`, and the SQL functions under `portfolio_db/sql/`. Service and adapter code may import or re-export those symbols, but they must not maintain parallel copies or drift from the canonical definitions.
 
 ### Metric documentation
 
@@ -215,7 +166,7 @@ Public performance output uses `median_monthly_return`. Do not reintroduce `avg_
 
 ### Transaction rules
 
-SELL validation is as-of-date based. `exchange_currency` validation lives in the service layer. CLI checks are only UX validation.
+SELL validation is as-of-date based. `exchange_currency` validation lives in the service layer. CLI and API checks are only UX validation.
 
 ### Mutation safety
 
@@ -238,19 +189,29 @@ Every calculation bug fix needs:
 
 ### Open issue #22 items
 
-- **DONE**: Time-based stale-price max-age enforced — `recalculate` checks `prices_need_fetch` via `maintenance_check`, refuses unless `--force`; `sync` runs `daily_maintenance_check()` before repair. Default threshold: `STALE_MAX_AGE_DAYS = 5` (#84, supersedes #22 finding #9, #66 findings #6/#7).
-- **DONE**: Date-format split was unified — all commands accept ISO `YYYY-MM-DD`; legacy `DD-MM-YYYY` accepted with deprecation warning.
+- **DONE**: Time-based stale-price max-age enforced - `recalculate` checks `prices_need_fetch` via `maintenance_check`, refuses unless `--force`; `sync` runs `daily_maintenance_check()` before repair. Default threshold: `STALE_MAX_AGE_DAYS = 5` (#84, supersedes #22 finding #9, #66 findings #6/#7).
+- **DONE**: Date-format split was unified - all commands accept ISO `YYYY-MM-DD`; legacy `DD-MM-YYYY` accepted with deprecation warning.
 
 ## Style
 
-```python
-# snake_case for variables, methods, functions
-# UPPER_SNAKE_CASE for constants
-# PascalCase for classes
-# ruff: py313 target, line-length 100
+```ts
+// camelCase for variables, methods, and functions
+// UPPER_SNAKE_CASE for constants
+// PascalCase for classes and types
+// 2-space indentation
+// Keep `bun run typecheck` green under strict TypeScript
 ```
 
 ## Related files
 
-- Skill: `.agents/skills/my-portfolio-cli/SKILL.md` — detailed workflow for CLI changes
-- Docs: `docs/transaction-spec.md`, `docs/api-response-standardization-plan.md`
+- `portfolio-ts/src/cli.ts` - CLI entrypoint and command dispatch
+- `portfolio-ts/src/api/server.ts` - REST API adapter
+- `portfolio-ts/src/db.ts` - Bun SQL connection lifecycle and query helpers
+- `portfolio-ts/src/commands/*` - command/use-case implementations
+- `portfolio-ts/src/validators.ts` - validation rules and shared action/currency sets
+- `portfolio-ts/src/asset_kind.ts` - asset metadata and kind normalization
+- `portfolio-ts/src/tx.ts`, `portfolio-ts/src/tx_core.ts`, `portfolio-ts/src/sql_apply.ts` - shared transaction helpers
+- `portfolio-ts/src/response.ts` - canonical JSON envelope helpers
+- `portfolio-ts/PARITY.md` - command parity and dropped legacy commands
+- `portfolio_db/sql/*` - PostgreSQL schema and financial source of truth; do not modify casually
+- `docs/transaction-spec.md`, `docs/api-response-standardization-plan.md` - output and behavior specs

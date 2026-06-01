@@ -566,7 +566,7 @@ Wrap each command output with `success()` / `error()`:
   - Run a separate `COUNT(*)` query (same filter, no limit) for `pagination.total`
 - Update `get_daily_returns(limit, offset, start_date, end_date)` in `portfolio_service.py`
   - Same pattern: filtered query + count query
-- Both queries order by `date DESC` for the fetch (latest first), then reverse in Python before returning so the response is ascending by date within each page
+- Both queries order by `date DESC` for the fetch (latest first), then reverse before returning so the response is ascending by date within each page
 
 ### Phase 4 — Error handling
 - Wrap all command bodies in try/except
