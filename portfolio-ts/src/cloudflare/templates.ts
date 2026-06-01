@@ -18,14 +18,20 @@ export function generateWranglerJsonc(config: CloudflareConfig): string {
     `  "account_id": "${config.account_id}",`,
   ];
 
+  if (config.kv_key) {
+    lines.push(`  "vars": {`);
+    lines.push(`    "KV_KEY": "${config.kv_key}"`);
+    lines.push(`  },`);
+  }
+
   if (config.kv_namespace_id) {
     lines.push(`  "kv_namespaces": [`);
     lines.push(`    { "binding": "PORTFOLIO_KV", "id": "${config.kv_namespace_id}" }`);
-    lines.push(`  ],`);
+    lines.push(`  ]`);
   } else {
     lines.push(`  "kv_namespaces": [`);
     lines.push(`    { "binding": "PORTFOLIO_KV", "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }`);
-    lines.push(`  ],`);
+    lines.push(`  ]`);
   }
 
   lines.push("}");
@@ -53,7 +59,8 @@ function json(data, status = 200, extraHeaders = {}) {
 
 const routes = {
   "/portfolio": async (_request, env) => {
-    const data = await env.PORTFOLIO_KV.get("portfolio", "json");
+    const key = env.KV_KEY || "portfolio";
+    const data = await env.PORTFOLIO_KV.get(key, "json");
     if (!data) {
       return json({ error: "portfolio not published" }, 404);
     }
@@ -61,7 +68,8 @@ const routes = {
   },
 
   "/widget": async (_request, env) => {
-    const data = await env.PORTFOLIO_KV.get("portfolio", "json");
+    const key = env.KV_KEY || "portfolio";
+    const data = await env.PORTFOLIO_KV.get(key, "json");
     if (!data) {
       return json({ error: "portfolio not published" }, 404);
     }
