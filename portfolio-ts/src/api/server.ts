@@ -1,4 +1,4 @@
-import { success, error, type SuccessEnvelope } from "../response.js";
+import { success, error, type SuccessEnvelope, type ErrorEnvelope } from "../response.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -8,6 +8,11 @@ import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 import { getPriceFreshness } from "../commands/freshness.js";
+import { addTransaction } from "../commands/add.js";
+import { editTransaction, editDryRun } from "../commands/edit.js";
+import { deleteTransaction, deletePreview } from "../commands/delete.js";
+import { exchangeCurrency } from "../commands/exchange.js";
+import { NotFoundError, ValidationError } from "../validators.js";
 
 type RequestContext = {
   ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
@@ -15,10 +20,14 @@ type RequestContext = {
 
 type Handler = (searchParams: URLSearchParams) => Promise<SuccessEnvelope>;
 
+type JsonObject = Record<string, unknown>;
+
 export interface ReadyRouteResult {
   status: 200 | 503;
   body: unknown;
 }
+
+const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -83,6 +92,68 @@ function parseIntParam(p: URLSearchParams, key: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function strField(body: JsonObject, key: string): string | undefined {
+  const val = body[key];
+  return typeof val === "string" ? val : undefined;
+}
+
+function floatField(body: JsonObject, key: string): number | undefined {
+  const raw = body[key];
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : undefined;
+  }
+  if (typeof raw === "string") {
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function parseBoolValue(raw: unknown): boolean | undefined {
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") {
+    if (raw === 1) return true;
+    if (raw === 0) return false;
+    return undefined;
+  }
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+    return undefined;
+  }
+  return undefined;
+}
+
+function boolFlag(search: URLSearchParams, body: JsonObject, ...keys: string[]): boolean {
+  for (const key of keys) {
+    if (search.has(key)) {
+      const queryVal = search.get(key);
+      if (queryVal === "" || queryVal === null) return true;
+      const parsed = parseBoolValue(queryVal);
+      return parsed ?? true;
+    }
+  }
+
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      const parsed = parseBoolValue(body[key]);
+      return parsed ?? false;
+    }
+  }
+
+  return false;
+}
+
+function allowedMethodsForPath(path: string): string[] | null {
+  if (path === "/ready") return ["GET"];
+  if (path === "/transactions") return ["POST"];
+  if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
+  if (path === "/exchange") return ["POST"];
+  if (ROUTES[path]) return ["GET"];
+  return null;
+}
+
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -90,13 +161,54 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
+function toErrorResponse(command: string, err: unknown): { body: ErrorEnvelope; status: number } {
+  const msg = err instanceof Error ? err.message : String(err);
+
+  if (err instanceof ValidationError) {
+    const code = msg.includes("requires explicit confirmation") ? "CONFIRM_REQUIRED" : err.code;
+    return { body: error(command, code, msg), status: 400 };
+  }
+
+  if (err instanceof NotFoundError) {
+    return { body: error(command, err.code, msg), status: 404 };
+  }
+
+  return { body: error(command, "INTERNAL_ERROR", msg), status: 500 };
+}
+
+async function parseJsonBody(req: Request): Promise<JsonObject> {
+  const raw = await req.text();
+  if (!raw.trim()) return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new ValidationError("Request body must be valid JSON");
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ValidationError("Request body must be a JSON object");
+  }
+
+  return parsed as JsonObject;
+}
+
 export async function handleRequest(req: Request, ctx: RequestContext = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
+  const allowedMethods = allowedMethodsForPath(path);
 
-  if (req.method !== "GET") {
+  if (!allowedMethods) {
     return jsonResponse(
-      error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed. Only GET is supported.`),
+      error("api", "NOT_FOUND", `Route ${path} not found`),
+      404,
+    );
+  }
+
+  if (!allowedMethods.includes(req.method)) {
+    return jsonResponse(
+      error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed for ${path}. Allowed: ${allowedMethods.join(", ")}`),
       405,
     );
   }
@@ -109,21 +221,122 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
     return jsonResponse({ ready: true }, 200);
   }
 
-  const handler = ROUTES[path];
-  if (!handler) {
-    return jsonResponse(
-      error("api", "NOT_FOUND", `Route ${path} not found`),
-      404,
-    );
+  try {
+    if (req.method === "GET") {
+      const handler = ROUTES[path];
+      const envelope = await handler(url.searchParams);
+      return jsonResponse(envelope, 200);
+    }
+
+    if (path === "/transactions" && req.method === "POST") {
+      const body = await parseJsonBody(req);
+      const dateStr = strField(body, "date");
+      const asset = strField(body, "asset");
+      const action = strField(body, "action");
+      const quantity = floatField(body, "quantity");
+
+      if (!dateStr || !asset || !action || quantity === undefined) {
+        throw new ValidationError(
+          "Required: date, asset, action, quantity, exchange",
+        );
+      }
+
+      const result = await addTransaction({
+        dateStr,
+        asset,
+        action,
+        quantity,
+        price: floatField(body, "price"),
+        currency: strField(body, "currency"),
+        fees: floatField(body, "fees"),
+        feeCurrency: strField(body, "feeCurrency") ?? strField(body, "fee_currency"),
+        exchange: strField(body, "exchange") ?? "",
+        account: strField(body, "account"),
+      });
+
+      return jsonResponse(success("add", result), 200);
+    }
+
+    if (path === "/exchange" && req.method === "POST") {
+      const body = await parseJsonBody(req);
+      const dateStr = strField(body, "date");
+      const fromAsset = strField(body, "fromAsset") ?? strField(body, "from_asset") ?? strField(body, "from");
+      const toAsset = strField(body, "toAsset") ?? strField(body, "to_asset") ?? strField(body, "to");
+      const quantity = floatField(body, "quantity");
+      const rate = floatField(body, "rate");
+
+      if (!dateStr || !fromAsset || !toAsset || quantity === undefined || rate === undefined) {
+        throw new ValidationError(
+          "Required: date, fromAsset, toAsset, quantity, rate",
+        );
+      }
+
+      const result = await exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
+      return jsonResponse(success("exchange", result), 200);
+    }
+
+    const transMatch = TRANSACTION_ID_ROUTE.exec(path);
+    if (!transMatch) {
+      return jsonResponse(error("api", "NOT_FOUND", `Route ${path} not found`), 404);
+    }
+
+    const transId = parseInt(transMatch[1], 10);
+    const body = await parseJsonBody(req);
+
+    if (req.method === "PATCH" || req.method === "PUT") {
+      const changes = {
+        dateStr: strField(body, "date"),
+        asset: strField(body, "asset"),
+        action: strField(body, "action"),
+        quantity: floatField(body, "quantity"),
+        price: floatField(body, "price"),
+        currency: strField(body, "currency"),
+        fees: floatField(body, "fees"),
+        feeCurrency: strField(body, "feeCurrency") ?? strField(body, "fee_currency"),
+        exchange: strField(body, "exchange"),
+        dataSource: strField(body, "dataSource") ?? strField(body, "data_source"),
+        account: strField(body, "account"),
+      };
+
+      const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
+      if (isDryRun) {
+        const result = await editDryRun(transId, changes);
+        return jsonResponse(success("edit", result), 200);
+      }
+
+      // PUT and PATCH both route through editTransaction to preserve a single mutation path.
+      const result = await editTransaction(transId, changes);
+      return jsonResponse(success("edit", result), 200);
+    }
+
+    if (req.method === "DELETE") {
+      const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
+      if (isDryRun) {
+        const result = await deletePreview(transId);
+        return jsonResponse(success("delete", result, result.would_delete.length), 200);
+      }
+
+      const confirm = boolFlag(url.searchParams, body, "confirm");
+      const result = await deleteTransaction(transId, confirm);
+      return jsonResponse(success("delete", result, result.deleted_ids.length), 200);
+    }
+  } catch (err) {
+    const routeCommand =
+      path === "/transactions"
+        ? "add"
+        : path === "/exchange"
+          ? "exchange"
+          : TRANSACTION_ID_ROUTE.test(path)
+            ? (req.method === "DELETE" ? "delete" : "edit")
+            : "api";
+    const mapped = toErrorResponse(routeCommand, err);
+    return jsonResponse(mapped.body, mapped.status);
   }
 
-  try {
-    const envelope = await handler(url.searchParams);
-    return jsonResponse(envelope, 200);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return jsonResponse(error("api", "INTERNAL_ERROR", msg), 500);
-  }
+  return jsonResponse(
+    error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed for ${path}`),
+    405,
+  );
 }
 
 export function createApiServer(opts?: { port?: number; ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult }) {
