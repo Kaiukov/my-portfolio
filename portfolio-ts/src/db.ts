@@ -15,6 +15,11 @@ export function connect(url?: string): void {
   sql = new SQL(url ?? getUrl());
 }
 
+export function getSql(): SQL {
+  if (!sql) connect();
+  return sql!;
+}
+
 export async function query<T = Record<string, unknown>>(
   sqlStr: string,
   params?: unknown[],
