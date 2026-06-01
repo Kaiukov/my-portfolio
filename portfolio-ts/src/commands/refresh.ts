@@ -1,5 +1,5 @@
 import { repairPrices, repairPricesDryRun, type RepairPricesResult, type RepairPricesDryRunResult, type FetchFn } from "./repair_prices.js";
-import { recalculate } from "./recalculate.js";
+import { recalculate, type RecalculateResult } from "./recalculate.js";
 import { getSummary, type SummaryData } from "./summary.js";
 import { getPriceFreshness, type PriceFreshness } from "./freshness.js";
 import { fetchPrices } from "../providers/yahoo.js";
@@ -7,6 +7,7 @@ import { fetchPrices } from "../providers/yahoo.js";
 export interface RefreshResult {
   refreshed: RepairPricesResult;
   recalculated: boolean;
+  recalc: RecalculateResult;
   summary: SummaryData;
 }
 
@@ -21,9 +22,11 @@ export { getPriceFreshness, type PriceFreshness };
 
 export async function refreshPortfolio(): Promise<RefreshResult> {
   const refreshed = await repairPrices({}, fetchPrices as FetchFn);
-  await recalculate({ force: true });
+  const force = refreshed.status === "ok";
+  const recalc = await recalculate({ force });
   const summary = await getSummary();
-  return { refreshed, recalculated: true, summary };
+  const recalculated = recalc.prices_stale ? false : true;
+  return { refreshed, recalc, recalculated, summary };
 }
 
 export async function refreshPortfolioDryRun(): Promise<RefreshDryRunResult> {
