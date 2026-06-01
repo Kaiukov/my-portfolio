@@ -298,16 +298,54 @@ describe("handleRequest", () => {
     expect(body.ok).toBe(true);
   });
 
-  test("GET /ready returns 200 with success envelope", async () => {
+  test("GET /ready returns 200 with readiness body", async () => {
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/ready");
-    const res = await handleRequest(req);
+    const res = await handleRequest(req, {
+      ready: async () => ({
+        status: 200 as const,
+        body: {
+          ready: true,
+          started_at: "2026-06-01T00:00:00.000Z",
+          port: 8787,
+          refresh_interval_ms: 3600000,
+          cloudflare_publish: false,
+          publish_interval_ms: null,
+          init_on_boot: true,
+        },
+      }),
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.command).toBe("ready");
-    expect(body.data.ready).toBe(true);
+    expect(body.ready).toBe(true);
+    expect(body.port).toBe(8787);
+    expect(body.init_on_boot).toBe(true);
+  });
+
+  test("GET /ready returns 503 when the DB probe fails", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/ready");
+    const res = await handleRequest(req, {
+      ready: async () => ({
+        status: 503 as const,
+        body: {
+          ready: false,
+          started_at: "2026-06-01T00:00:00.000Z",
+          port: 8787,
+          refresh_interval_ms: 3600000,
+          cloudflare_publish: false,
+          publish_interval_ms: null,
+          init_on_boot: true,
+          error: "connection refused",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.ready).toBe(false);
+    expect(body.error).toBe("connection refused");
   });
 });
 

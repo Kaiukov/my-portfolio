@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 import { loadEnv } from "./env.js";
-import { createApiServer } from "./api/server.js";
-import { initDb } from "./commands/init.js";
-import { refreshPortfolio } from "./commands/refresh.js";
-import { publishToKv } from "./cloudflare/publish.js";
-import { DEFAULT_SYNC_INTERVAL_MS, parseInterval } from "./cloudflare/sync.js";
-import { close } from "./db.js";
+import { createApiServer, type ReadyRouteResult } from "./api/server.js";
+import * as initModule from "./commands/init.js";
+import * as refreshModule from "./commands/refresh.js";
+import * as publishModule from "./cloudflare/publish.js";
+import * as syncModule from "./cloudflare/sync.js";
+import * as db from "./db.js";
 
 export interface ServiceJobSuccess<T> {
   ok: true;
@@ -43,7 +43,7 @@ export async function runRefreshJob(
 ): Promise<ServiceJobResult<unknown>> {
   const startedAt = (deps.now ?? (() => new Date()))();
   try {
-    const refresh = deps.refreshPortfolio ?? refreshPortfolio;
+    const refresh = deps.refreshPortfolio ?? refreshModule.refreshPortfolio;
     const data = await refresh();
     const finishedAt = (deps.now ?? (() => new Date()))();
     return {
@@ -72,7 +72,7 @@ export async function runCloudflarePublishJob(
 ): Promise<ServiceJobResult<unknown>> {
   const startedAt = (deps.now ?? (() => new Date()))();
   try {
-    const publish = deps.publishToKv ?? publishToKv;
+    const publish = deps.publishToKv ?? publishModule.publishToKv;
     const data = await publish(deps.projectRoot);
     const finishedAt = (deps.now ?? (() => new Date()))();
     return {
@@ -251,6 +251,40 @@ export interface ServiceConfig {
   projectRoot: string;
 }
 
+function serviceStatusBody(config: ServiceConfig, startedAt: Date, ready: boolean, error?: string) {
+  return {
+    ready,
+    started_at: startedAt.toISOString(),
+    port: config.port,
+    refresh_interval_ms: config.refreshIntervalMs,
+    cloudflare_publish: config.publishEnabled,
+    publish_interval_ms: config.publishEnabled ? config.publishIntervalMs : null,
+    init_on_boot: config.initOnBoot,
+    ...(error ? { error } : {}),
+  };
+}
+
+export function createReadyProbe(
+  config: ServiceConfig,
+  startedAt: Date,
+): () => Promise<ReadyRouteResult> {
+  return async () => {
+    try {
+      await db.getSql().unsafe("SELECT 1");
+      return {
+        status: 200,
+        body: serviceStatusBody(config, startedAt, true),
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return {
+        status: 503,
+        body: serviceStatusBody(config, startedAt, false, error),
+      };
+    }
+  };
+}
+
 function parseBooleanEnv(raw: string | undefined, defaultValue: boolean): boolean {
   if (raw === undefined || raw.trim() === "") return defaultValue;
   switch (raw.trim().toLowerCase()) {
@@ -284,11 +318,11 @@ export function readServiceConfig(
 ): ServiceConfig {
   const port = parsePortEnv(env.PORT ?? env.PORTFOLIO_API_PORT, 8787);
   const refreshIntervalMs = env.PORTFOLIO_REFRESH_INTERVAL
-    ? parseInterval(env.PORTFOLIO_REFRESH_INTERVAL)
-    : DEFAULT_SYNC_INTERVAL_MS;
+    ? syncModule.parseInterval(env.PORTFOLIO_REFRESH_INTERVAL)
+    : syncModule.DEFAULT_SYNC_INTERVAL_MS;
   const publishEnabled = parseBooleanEnv(env.PORTFOLIO_CLOUDFLARE_PUBLISH, false);
   const publishIntervalMs = env.PORTFOLIO_PUBLISH_INTERVAL
-    ? parseInterval(env.PORTFOLIO_PUBLISH_INTERVAL)
+    ? syncModule.parseInterval(env.PORTFOLIO_PUBLISH_INTERVAL)
     : refreshIntervalMs;
   const initOnBoot = parseBooleanEnv(env.PORTFOLIO_INIT_ON_BOOT, false);
 
@@ -320,7 +354,7 @@ export async function startPortfolioService(
   config: ServiceConfig = readServiceConfig(),
 ): Promise<PortfolioServiceHandle> {
   if (config.initOnBoot) {
-    await initDb();
+    await initModule.initDb();
   }
 
   const startedAt = new Date();
@@ -349,15 +383,7 @@ export async function startPortfolioService(
 
   const server = createApiServer({
     port: config.port,
-    ready: () => ({
-      ready: true,
-      started_at: startedAt.toISOString(),
-      port: config.port,
-      refresh_interval_ms: config.refreshIntervalMs,
-      cloudflare_publish: config.publishEnabled,
-      publish_interval_ms: config.publishEnabled ? config.publishIntervalMs : null,
-      init_on_boot: config.initOnBoot,
-    }),
+    ready: createReadyProbe(config, startedAt),
   });
 
   console.log(
@@ -381,7 +407,7 @@ export async function startPortfolioService(
     stop: async () => {
       scheduler.stop();
       server.stop();
-      await close();
+      await db.close();
       console.log(
         JSON.stringify({
           source: "portfolio-service",

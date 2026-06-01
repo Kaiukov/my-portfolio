@@ -1,16 +1,39 @@
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: portfolio_user
+      POSTGRES_PASSWORD: portfolio_password
+      POSTGRES_DB: portfolio
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   portfolio:
     build:
       context: .
       dockerfile: Dockerfile
     image: portfolio-ts-service:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${PORT:-8787}:${PORT:-8787}"
-    env_file:
-      - ../.env
     environment:
       PORT: ${PORT:-8787}
       PORTFOLIO_API_PORT: ${PORTFOLIO_API_PORT:-8787}
+      PORTFOLIO_DB_URL: postgresql://portfolio_user:portfolio_password@postgres:5432/portfolio
+      PORTFOLIO_CLOUDFLARE_PUBLISH: "false"
+      PORTFOLIO_INIT_ON_BOOT: "true"
     volumes:
       - ./.portfolio:/app/.portfolio
     restart: unless-stopped
+
+volumes:
+  pgdata:

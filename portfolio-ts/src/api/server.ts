@@ -9,10 +9,15 @@ import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 
 type RequestContext = {
-  ready?: () => Promise<unknown> | unknown;
+  ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
 };
 
 type Handler = (searchParams: URLSearchParams, ctx: RequestContext) => Promise<unknown>;
+
+export interface ReadyRouteResult {
+  status: 200 | 503;
+  body: Record<string, unknown>;
+}
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -52,7 +57,10 @@ const ROUTES: Record<string, Handler> = {
   },
   "/ready": async (_p, ctx) => {
     if (ctx.ready) return ctx.ready();
-    return { ready: true };
+    return {
+      status: 200,
+      body: { ready: true },
+    };
   },
 };
 
@@ -95,6 +103,10 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
 
   try {
     const data = await handler(url.searchParams, ctx);
+    if (path === "/ready") {
+      const readyResponse = data as ReadyRouteResult;
+      return jsonResponse(readyResponse.body, readyResponse.status);
+    }
     const command = path.slice(1); // strip leading /
     return jsonResponse(success(command, data), 200);
   } catch (err) {
@@ -103,7 +115,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
   }
 }
 
-export function createApiServer(opts?: { port?: number; ready?: () => Promise<unknown> | unknown }) {
+export function createApiServer(opts?: { port?: number; ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult }) {
   const port = opts?.port ?? 8787;
   const server = Bun.serve({
     port,
