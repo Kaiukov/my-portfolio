@@ -12,7 +12,10 @@ A navigation guide, not a copy of canonical docs. **This is the active runtime**
 Single source of truth — do not duplicate their content into this skill:
 
 - `AGENTS.md` — project architecture layers, command classification, common traps, financial correctness invariants, style. **The richest single reference.**
-- `README.md` — setup, prerequisites, `.env` / `PORTFOLIO_DB_URL`, schema bootstrap, full command list, JSON envelope, smoke tests, legacy/migration notes.
+- `docs/wiki/index.md` — wiki entry point; contains `getting-started.md` (setup, env, `PORTFOLIO_DB_URL`), `cli-reference.md` (full command list, flags, JSON envelope), and other wiki pages.
+- `docs/wiki/getting-started.md` — setup, prerequisites, `.env` / `PORTFOLIO_DB_URL`, schema bootstrap.
+- `docs/wiki/cli-reference.md` — command surface, flags, JSON envelope, common options.
+- `docs/platform-adapters.md` — HTTP API and MCP adapter surface, shared write layer, envelope parity.
 - `portfolio-ts/PARITY.md` — per-command CLI↔SQL behavior, accepted changes vs parity-tested commands, `sync` (TS-only), intentionally dropped Python commands.
 - `docs/transaction-spec.md` — supported actions, validation rules, action groupings, exchange two-leg rules.
 - `docs/api-response-standardization-plan.md` — JSON response contract and standardization plan.
@@ -24,6 +27,9 @@ Single source of truth — do not duplicate their content into this skill:
 Pointers only — read the actual files; do not paste excerpts into this skill.
 
 - `portfolio-ts/src/cli.ts` — command names, help text, `parseArgs`, dispatch.
+- `portfolio-ts/src/api/server.ts` — HTTP API adapter (read GET routes + write POST/PATCH/PUT/DELETE routes via `handleRequest`).
+- `portfolio-ts/src/mcp/adapter.ts` — MCP write adapter (`mcpWrite` with tools: add_transaction, edit_transaction, delete_transaction, exchange_currency).
+- `portfolio-ts/src/adapters/shared.ts` — shared `WriteHandlers` interface + `resolveWriteHandlers` + `toWriteErrorEnvelope` (used by both API and MCP adapters; guarantees identical error codes).
 - `portfolio-ts/src/commands/*.ts` — per-command orchestration (status, add, edit, delete, exchange, recalculate, repair_prices, verify_prices, sync, report, cash, allocation, summary, concentration, performance, mwr, health, init, backup, transactions).
 - `portfolio-ts/src/db.ts` + `portfolio-ts/src/tx.ts` + `portfolio-ts/src/tx_core.ts` — connection lifecycle, `query` / `querySingle`, pinned-connection `runTx` (BEGIN/COMMIT/ROLLBACK). No raw SQL outside `db.ts`.
 - `portfolio-ts/src/validators.ts` — domain constants (`USER_ACTIONS`, `ALLOWED_CURRENCIES`, `STALE_MAX_AGE_DAYS`), `parseDate`.
@@ -38,6 +44,12 @@ Pointers only — read the actual files; do not paste excerpts into this skill.
 - Linked bin: `portfolio <command> [flags]` after `bun link` in `portfolio-ts/`
 - Dockerized service: `docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts <command> [flags]`
 - Read-only HTTP: `curl localhost:8787/summary`
+- Write HTTP: `curl -X POST localhost:8787/transactions -H 'Content-Type: application/json' -d '{"date":"2026-06-01","asset":"AAPL","action":"buy","quantity":10,"price":150,"exchange":"NYSE"}'`
+- Edit HTTP (dry-run): `curl -X PATCH localhost:8787/transactions/42 -H 'Content-Type: application/json' -d '{"quantity":5,"dry_run":true}'`
+- Delete HTTP: `curl -X DELETE localhost:8787/transactions/42 -H 'Content-Type: application/json' -d '{"confirm":true}'`
+- Exchange HTTP: `curl -X POST localhost:8787/exchange -H 'Content-Type: application/json' -d '{"date":"2026-06-01","from":"USD","to":"EUR","quantity":1000,"rate":0.92}'`
+- MCP write adapter: call `mcpWrite("add_transaction", args, ctx)` directly (tool names: add_transaction, edit_transaction, delete_transaction, exchange_currency)
+- **Envelope parity:** CLI, HTTP API, and MCP all return identical JSON envelopes (`src/response.ts`). See `docs/platform-adapters.md` §1 and §3.2 for the shared contract.
 
 ## Agent workflow rules (not in the docs above)
 
@@ -67,7 +79,10 @@ For price/reporting behavior changes, also smoke-test `bun src/cli.ts health`, `
 
 - Skill: `.agents/skills/my-portfolio-cli/SKILL.md` (this file)
 - Project rules: `AGENTS.md`
-- Runtime + commands: `README.md`
+- Wiki entry point: `docs/wiki/index.md`
+- Setup + DB: `docs/wiki/getting-started.md`
+- CLI command reference: `docs/wiki/cli-reference.md`
+- HTTP + MCP adapters: `docs/platform-adapters.md`
 - CLI↔SQL behavior: `portfolio-ts/PARITY.md`
 - Transaction model: `docs/transaction-spec.md`
 - JSON response plan: `docs/api-response-standardization-plan.md`
