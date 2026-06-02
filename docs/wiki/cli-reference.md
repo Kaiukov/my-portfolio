@@ -8,6 +8,20 @@ All commands emit JSON with this envelope:
 
 Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."}, "meta": {...}}`
 
+### Freshness Meta Fields
+
+Snapshot commands (`status`, `summary`, `cash`, `allocation`, `performance`, `mwr`) include freshness metadata in the `meta` envelope:
+
+| Field | Type | Always present | Description |
+|---|---|---|---|
+| `meta.needs_recalc` | boolean | Yes | `true` when prices were refreshed but daily returns are not yet recalculated |
+| `meta.recalc_warning` | string | Only when `needs_recalc` is true | `"Prices were refreshed but daily returns are not recalculated — snapshot commands (status/summary/allocation/cash) and performance may report different values for this date. Run 'recalculate' to sync."` |
+| `meta.prices_as_of` | string \| null | Yes | Most recent price date in the cache |
+| `meta.price_age_days` | number \| null | Yes | Days since `prices_as_of` |
+| `meta.stale` | boolean | Yes | `true` when missing price checkpoints or stale tickers exist |
+
+When `needs_recalc` is true, snapshot commands and `performance` may disagree for that date until `recalculate` is run. See [Recalculation](recalculation.md) for details.
+
 Dates: ISO `YYYY-MM-DD` is the primary format on all commands. Legacy `DD-MM-YYYY` is still accepted on write commands (`--date`, `--from-date`) with a deprecation warning.
 
 ## Read-Only Commands

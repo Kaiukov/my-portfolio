@@ -1,27 +1,5 @@
 # Project specific instructions
 
-## CMUX environment
-
-```bash
-cmux -v                        # version
-cmux new-split right           # split right in current workspace
-cmux new-split down            # split down
-cmux close-surface --surface surface:N   # close a split
-cmux send --surface surface:N "cmd"      # send text to split
-cmux send-key --surface surface:N "Enter"
-cmux read-screen --surface surface:N --lines 20   # read split output
-cmux tree                      # show all workspaces/panes
-```
-
-### Agetns deployment
-
-- for most task utilize `deepseek v4 flash` (fast, cheap, good for lint, imports, mechanical edits)
-- for complex reasoning, architecture, bug fixes, use `deepseek v4 pro` (more expensive, better at reasoning and code generation)
-- use `--yolo` flag to bypass all permission prompts for maximum speed (only for trusted commands)
-- agents must be pro-active and creating for speed up proccess.
-- main agent must deligatee task to agents via cmux cli commands and to be an orcestrator of the process.
-- orcestrator agent must spawn, steer and kill agents as needed, and be responsible for final output.
-
 ## Overview
 
 TypeScript/Bun CLI (`portfolio`) for portfolio tracking with PostgreSQL. Source lives in `portfolio-ts/src/`; `portfolio_db/sql/` is SQL-only and remains the financial source of truth.
@@ -92,13 +70,13 @@ Files: `portfolio-ts/src/commands/*`, `portfolio-ts/src/validators.ts`, `portfol
 Owns: business logic, financial invariants, transaction rules (SELL-as-of-date, exchange validation), recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior, asset/currency normalization.
 Rule: No financial invariant lives in adapters. This layer is reused by both CLI and REST API without duplication.
 
-### Adapter layer (`portfolio-ts/src/cli.ts`, `portfolio-ts/src/api/server.ts`)
-Owns: CLI argument parsing, HTTP routing, light user-facing validation (format checks, required flags), calling the shared use-case layer, serializing pure JSON responses via `src/response.ts`.
+### Adapter layer (`portfolio-ts/src/cli.ts`, `portfolio-ts/src/api/server.ts`, `portfolio-ts/src/mcp/`)
+Owns: CLI argument parsing, HTTP routing, MCP tool dispatch, light user-facing validation (format checks, required flags), calling the shared use-case layer, serializing pure JSON responses via `src/response.ts`.
 Rules:
 - No SQL or Bun SQL imports.
 - No business/financial logic.
 - No duplication of service logic.
-- CLI and REST API are peer adapters and must stay behavior-aligned. See `portfolio-ts/PARITY.md` and `src/api/server.ts`.
+- CLI, REST API, and MCP are peer adapters and must stay behavior-aligned. See `portfolio-ts/PARITY.md` and `src/api/server.ts`.
 
 ## CLI JSON contract
 

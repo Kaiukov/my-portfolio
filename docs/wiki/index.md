@@ -9,6 +9,7 @@ Live deploys, KV writes, and DB migrations are orchestrator-only; delegated agen
 - [Index](index.md) - master map for the wiki library.
 - [Getting Started](getting-started.md) - setup, database configuration, and the first CLI run.
 - [CLI Reference](cli-reference.md) - command surface, flags, JSON envelopes, and date rules.
+- [MCP Reference](mcp-reference.md) - MCP adapter tools (read + write) for AI-agent integration.
 - [Transactions](transactions.md) - supported actions and validation.
 - [Performance Metrics](performance-metrics.md) - TWR, MWR, risk, and benchmark metric definitions.
 - [Architecture](architecture.md) - three-layer design and data flow.

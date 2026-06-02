@@ -14,15 +14,15 @@ Files: `portfolio-ts/src/commands/*`, `portfolio-ts/src/validators.ts`, `portfol
 
 Owns business logic, financial invariants, transaction rules (SELL-as-of-date, exchange validation), recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior, asset/currency normalization.
 
-**Rule**: No financial invariant lives in CLI or API adapters. This layer is reused by both CLI and REST API without duplication.
+**Rule**: No financial invariant lives in CLI, API, or MCP adapters. This layer is reused by all three without duplication.
 
 ## Adapter Layer
 
 - **CLI**: `portfolio-ts/src/cli.ts` — argument parsing, user-facing validation, calls shared service layer, serializes JSON via `src/response.ts`.
 - **REST API**: `portfolio-ts/src/api/server.ts` — HTTP routing, shared write handlers.
-- **MCP**: `portfolio-ts/src/mcp/adapter.ts` — AI-agent write integration via Model Context Protocol.
+- **MCP**: `portfolio-ts/src/mcp/` (`read.ts` = read tools via `mcpRead`, `adapter.ts` = write tools via `mcpWrite`, `index.ts` re-exports). Full read+write peer adapter alongside CLI and HTTP API.
 
-**Rules**: No SQL/Bun SQL imports. No business logic. No duplication of service logic. CLI and REST API are peer adapters and must stay behavior-aligned.
+**Rules**: No SQL/Bun SQL imports. No business logic. No duplication of service logic. CLI, REST API, and MCP are peer adapters and must stay behavior-aligned.
 
 ## Data Flow
 

@@ -25,6 +25,7 @@ EXCHANGE_FROM/TO are created automatically by the `exchange` command.
 - TRANSFER: cash asset, no price, quantity > 0, account required
 - DIVIDEND/INTEREST: cash asset, no price, quantity > 0
 - FEE/TAX: cash asset, no price, quantity > 0
+- BUY/SELL: a 3-letter symbol is rejected only when it matches `ALLOWED_CURRENCIES` (`USD`, `EUR`, `GBP`, `UAH`, `JPY`, `CHF`, `CAD`, `AUD`, `HKD`, `SGD`) — use FX pair format (`EURUSD=X`) instead. Any other 3-letter ticker (IWM, SPY, QQQ, etc.) is accepted as a normal asset symbol.
 
 ## Date Format Trap
 

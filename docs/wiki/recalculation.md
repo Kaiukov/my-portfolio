@@ -22,6 +22,17 @@ After any write operation (add, edit, delete, exchange), the system recalculates
 
 If recalculation fails during add/edit/delete/exchange, state is restored to before the mutation.
 
+## needs_recalc / recalc_warning
+
+After `repair_prices` or a price refresh adds new price data without automatically recalculating, the system enters a stale-recalc state. Read-only snapshot commands (`status`, `summary`, `cash`, `allocation`, `performance`, `mwr`) surface this state in their JSON `meta` envelope:
+
+- `meta.needs_recalc` (`boolean`): `true` when prices were refreshed but daily returns are not yet recalculated.
+- `meta.recalc_warning` (`string`, present only when `needs_recalc` is `true`): `"Prices were refreshed but daily returns are not recalculated — snapshot commands (status/summary/allocation/cash) and performance may report different values for this date. Run 'recalculate' to sync."`
+
+This allows callers to detect a stale-recalc state without running a mutation. Running `recalculate` clears the flag: `needs_recalc` becomes `false` and `recalc_warning` disappears from subsequent responses.
+
+See [CLI Reference](cli-reference.md) for the full freshness meta field table.
+
 ## Manual Trigger
 
 ```bash
