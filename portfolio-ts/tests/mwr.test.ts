@@ -16,9 +16,25 @@ mock.module("../src/tx.js", () => ({
   },
 }));
 
+mockQuery.mockResolvedValue([]);
+
+function summaryRow(portfolio_value_usd: number) {
+  return {
+    holding_count: 5,
+    total_cash_usd: 5000,
+    portfolio_value_usd,
+    last_transaction_date: "2026-01-15",
+    transaction_count: 42,
+    as_of_date: "2026-01-15",
+  };
+}
+
 describe("getMwr", () => {
   test("returns MWR row from portfolio_mwr_sql()", async () => {
-    mockQuerySingle.mockResolvedValue({ mwr: 0.1050 });
+    mockQuerySingle.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.1050 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(25000));
 
     const { getMwr } = await import("../src/commands/mwr.js");
     const result = await getMwr();
@@ -26,11 +42,14 @@ describe("getMwr", () => {
     expect(result.mwr_pct).toBe(10.5);
     expect(result.as_of_date).toBeDefined();
     expect(result.note).toContain("XIRR");
+    expect(result.portfolio_value).toBe(25000);
   });
 
   test("passes as_of_date parameter to SQL", async () => {
     mockQuerySingle.mockClear();
-    mockQuerySingle.mockResolvedValue({ mwr: 0.05 });
+
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.05 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(18000));
 
     const { getMwr } = await import("../src/commands/mwr.js");
     await getMwr("2026-01-15");
@@ -39,29 +58,58 @@ describe("getMwr", () => {
   });
 
   test("handles null/insufficient data gracefully", async () => {
-    mockQuerySingle.mockResolvedValue({ mwr: null });
+    mockQuerySingle.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ mwr: null });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(4500));
 
     const { getMwr } = await import("../src/commands/mwr.js");
     const result = await getMwr();
 
     expect(result.mwr_pct).toBe(0);
     expect(result.note).toContain("insufficient");
+    expect(result.portfolio_value).toBe(4500);
   });
 
   test("XIRR 10% fixture: -1000 on 2025-01-01 +1100 on 2026-01-01 via mocked DB", async () => {
-    mockQuerySingle.mockResolvedValue({ mwr: 0.10 });
+    mockQuerySingle.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.10 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(12500));
 
     const { getMwr } = await import("../src/commands/mwr.js");
     const result = await getMwr("2026-01-01");
 
     expect(result.mwr_pct).toBe(10.0);
+    expect(result.portfolio_value).toBe(12500);
+  });
+
+  test("reports real portfolio_value from getSummary, not hardcoded 0 (#193)", async () => {
+    mockQuerySingle.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.085 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(19120.12));
+
+    const { getMwr } = await import("../src/commands/mwr.js");
+    const result = await getMwr("2026-03-15");
+
+    expect(result.portfolio_value).toBe(19120.12);
+    expect(result.mwr_pct).toBe(8.5);
+    expect(result.as_of_date).toBe("2026-03-15");
   });
 });
 
 describe("getMwr — CLI integration", () => {
   test("dispatches mwr command and returns success envelope", async () => {
-    mockQuerySingle.mockResolvedValue({ mwr: 0.085 });
-    mockQuery.mockResolvedValue([]);
+    mockQuerySingle.mockClear();
+    mockQuery.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ prices_as_of: "2026-01-15" });
+    mockQuerySingle.mockResolvedValueOnce({ needs_recalc: false });
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.085 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(19120.12));
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -75,14 +123,22 @@ describe("getMwr — CLI integration", () => {
     expect(output.command).toBe("mwr");
     expect(output.data.mwr_pct).toBe(8.5);
     expect(output.data.note).toContain("XIRR");
+    expect(output.data.portfolio_value).toBe(19120.12);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
   test("dispatches mwr with --as-of-date", async () => {
-    mockQuerySingle.mockResolvedValue({ mwr: 0.12 });
-    mockQuery.mockResolvedValue([]);
+    mockQuerySingle.mockClear();
+    mockQuery.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ prices_as_of: "2026-01-01" });
+    mockQuerySingle.mockResolvedValueOnce({ needs_recalc: false });
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.12 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(22000));
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -95,6 +151,7 @@ describe("getMwr — CLI integration", () => {
     expect(output.ok).toBe(true);
     expect(output.command).toBe("mwr");
     expect(output.data.mwr_pct).toBe(12.0);
+    expect(output.data.portfolio_value).toBe(22000);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

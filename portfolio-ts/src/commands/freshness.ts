@@ -6,6 +6,8 @@ export interface PriceFreshness {
   prices_as_of: string | null;
   price_age_days: number | null;
   stale: boolean;
+  needs_recalc: boolean;
+  recalc_warning?: string;
 }
 
 function getMaxAgeDays(): number {
@@ -69,9 +71,27 @@ export async function getPriceFreshness(asOfDate?: string): Promise<PriceFreshne
     }
   }
 
+  let needs_recalc = false;
+  let recalc_warning: string | undefined;
+
+  try {
+    const recalcRow = await querySingle<{ needs_recalc: boolean }>(
+      "SELECT needs_recalc() AS needs_recalc",
+    );
+    needs_recalc = recalcRow?.needs_recalc ?? false;
+  } catch {
+    // Degrade gracefully: treat query failure as no recalc needed
+  }
+
+  if (needs_recalc) {
+    recalc_warning = "Prices were refreshed but daily returns are not recalculated — snapshot commands (status/summary/allocation/cash) and performance may report different values for this date. Run 'recalculate' to sync.";
+  }
+
   return {
     prices_as_of: pricesAsOf,
     price_age_days: priceAgeDays,
     stale,
+    needs_recalc,
+    recalc_warning,
   };
 }
