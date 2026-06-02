@@ -35,9 +35,6 @@ Pointers only — read the actual files; do not paste excerpts into this skill.
 - `portfolio-ts/src/validators.ts` — domain constants (`USER_ACTIONS`, `ALLOWED_CURRENCIES`, `STALE_MAX_AGE_DAYS`), `parseDate`.
 - `portfolio-ts/src/response.ts` — JSON envelope (`success`, `error`, `buildPagination`).
 - `portfolio-ts/src/providers/yahoo.ts` — Yahoo Finance price fetcher.
-- `portfolio-ts/src/api/server.ts` — HTTP adapter: read-only routes + write routes (`POST /transactions`, `POST /transactions/:id/exchange`, `POST /recalculate`, `POST /repair-prices`, `POST /sync`).
-- `portfolio-ts/src/mcp/adapter.ts` — MCP write tools (add, edit, delete, exchange, recalculate, repair_prices, sync).
-- `portfolio-ts/src/adapters/shared.ts` — shared `WriteHandlers` registry and `toWriteErrorEnvelope` used by both HTTP and MCP adapters.
 - `portfolio_db/sql/` — all financial math.
 - `portfolio-ts/tests/*.test.ts` — Bun test coverage; mirrors the public contract.
 
@@ -53,9 +50,6 @@ Pointers only — read the actual files; do not paste excerpts into this skill.
 - Exchange HTTP: `curl -X POST localhost:8787/exchange -H 'Content-Type: application/json' -d '{"date":"2026-06-01","from":"USD","to":"EUR","quantity":1000,"rate":0.92}'`
 - MCP write adapter: call `mcpWrite("add_transaction", args, ctx)` directly (tool names: add_transaction, edit_transaction, delete_transaction, exchange_currency)
 - **Envelope parity:** CLI, HTTP API, and MCP all return identical JSON envelopes (`src/response.ts`). See `docs/platform-adapters.md` §1 and §3.2 for the shared contract.
-- Write HTTP: `curl -X POST localhost:8787/transactions -H 'Content-Type: application/json' -d '{"action":"BUY","ticker":"AAPL","shares":10,"price":150,"date":"2025-01-15","exchange":"NASDAQ"}'`
-- MCP write adapter: exposed as tools via `portfolio-ts/src/mcp/adapter.ts`
-- CLI / HTTP API / MCP all return identical JSON envelopes — see `docs/platform-adapters.md` for the canonical contract.
 
 ## Agent workflow rules (not in the docs above)
 
