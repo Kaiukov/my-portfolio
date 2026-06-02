@@ -29,7 +29,7 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
   const requiredRows = await query<{ ticker: string; ticker_category: string }>(
     "SELECT ticker, ticker_category FROM discover_required_tickers_sql() ORDER BY ticker",
   );
-  const requiredTickers = requiredRows.map((r) => r.ticker);
+  const requiredTickers = [...new Set(requiredRows.map((r) => r.ticker))];
 
   // Determine end date for checkpoint validation
   const today = new Date().toISOString().split("T")[0];
