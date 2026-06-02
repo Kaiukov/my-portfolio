@@ -46,7 +46,7 @@ Stable, compact, read-only JSON shape for embedding portfolio status in dashboar
 
 1. `widget.value == status.portfolio_value` on the same `as_of_date` (consistency invariant)
 2. `widget.total.amount == status.total_gain` and `widget.total.pct == status.total_gain_pct`
-3. No SQL/psycopg in the adapter layer — TypeScript only formats output
+3. No SQL/Bun SQL imports in the adapter layer — TypeScript only formats output
 4. No DB credentials or secrets in the JSON output
 5. Pure JSON, follows the existing envelope convention (`success()`/`error()` from `response.ts`)
 

@@ -1,18 +1,20 @@
 # TypeScript/Bun Migration
 
-**Replace Python with TypeScript/Bun while keeping PostgreSQL as the financial source of truth.**
+> This directory documents the COMPLETED Python → TypeScript/Bun migration. It is historical/archival and is NOT the current implementation plan.
 
-The `portfolio` CLI is being migrated from Python to TypeScript/Bun. PostgreSQL stays as the single source of truth for all financial data. Python is removed after the TypeScript implementation reaches full parity. No new financial features — only a platform migration.
+**Replaced Python with TypeScript/Bun while keeping PostgreSQL as the financial source of truth.**
+
+The `portfolio` CLI was migrated from Python to TypeScript/Bun. PostgreSQL remains the single source of truth for all financial data. Python was removed after the TypeScript implementation reached full parity. This was a platform migration — no new financial features were added.
 
 ## Pages
 
-- [Architecture](architecture.md) — Current vs target architecture, data flow
+- [Architecture](architecture.md) — Architecture and data flow
 - [Phases](phases.md) — Six-phase migration plan (Phase 0 documentation through Phase 5 removal) with scope and acceptance criteria
 - [Stack](stack.md) — TypeScript tools, folder structure, conventions
 - [Decisions](decisions.md) — Decision log with rationale and consequences
-- [Out of Scope](out-of-scope.md) — Explicit list of what is not being built yet
+- [Out of Scope](out-of-scope.md) — Explicit list of what was not built
 
 ## Related Docs
 
-- Existing Python CLI documentation: `docs/wiki/`
-- Current Python architecture: `portfolio_db/`
+- Current TypeScript/Bun architecture: `portfolio-ts/src/` and `portfolio_db/sql/`
+- CLI documentation: `docs/wiki/`

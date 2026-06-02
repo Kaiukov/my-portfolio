@@ -69,10 +69,6 @@ export PORTFOLIO_DB_URL="postgresql://portfolio_user:password@localhost:5432/por
    export PORTFOLIO_DB_URL="postgresql://postgres:password@db.xxx.supabase.co:5432/postgres"
    ```
 
-### Legacy DuckDB migration (historical only)
-
-DuckDB is no longer a runtime database. The Bun CLI does not ship `migrate-duckdb-to-postgres` or `migrate`; those paths are historical and documented only for archaeology. If you need migration context, consult `portfolio-ts/PARITY.md` and git history. Do not treat DuckDB recovery as a normal workflow step.
-
 ## Key commands
 
 ```bash
@@ -129,7 +125,7 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 - `delete` requires `--confirm` (unless `--dry-run`)
 - `edit`, `repair_prices`, `recalculate` support `--dry-run`
 - `process.exit(1)` makes code after it unreachable in `src/cli.ts`
-- Historical migration commands (`migrate`, `migrate-duckdb-to-postgres`) are intentionally dropped in the Bun runtime
+- The historical `migrate` command (legacy CSV import) is intentionally dropped in the Bun runtime
 - `recalculate` uses cached prices only; `repair_prices` fetches from network
 - `performance --benchmark` falls back to `PORTFOLIO_BENCHMARK_TICKERS` env var -> `SPY`
 - `status`, `cash`, `summary`, `allocation`, `performance`, `mwr` must stay aligned to one reporting snapshot

@@ -1,6 +1,6 @@
 # Out of Scope
 
-These items are explicitly **not** part of this migration plan. They may be pursued after the migration is complete, but they must not be implemented or planned during Phases 0–5.
+These items were explicitly **not** part of the migration. They may be pursued now that the migration is complete.
 
 ## Systems
 
@@ -24,8 +24,8 @@ These items are explicitly **not** part of this migration plan. They may be purs
 
 ## Process
 
-- **Refactoring Python code** — No Python behavior refactor during migration. Python code may only be changed for compatibility shims, entrypoint rename (Phase 4), or parity-test wiring.
-- **Parallel implementations** — Do not maintain two full implementations longer than necessary. Phase 5 removes Python as soon as TypeScript matches behavior.
+- **Refactoring Python code** — No Python behavior refactor during the transition. Python code was only changed for compatibility shims, entrypoint rename (Phase 4), or parity-test wiring.
+- **Parallel implementations** — Two full implementations were not maintained longer than necessary. Phase 5 removed Python as soon as TypeScript matched behavior.
 
 ## Questions for Future (After Migration)
 

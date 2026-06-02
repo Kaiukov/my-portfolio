@@ -1,6 +1,6 @@
 # Architecture
 
-## Current Architecture (Python)
+## Python Architecture (Historical)
 
 ```
 Python CLI (click) -> Python services/orchestration -> PostgreSQL database
@@ -13,7 +13,7 @@ Python CLI (click) -> Python services/orchestration -> PostgreSQL database
 - PostgreSQL owns persisted state and some financial calculations via SQL functions/views.
 - Three-layer design: persistence (`database.py`), shared services, CLI adapter.
 
-## Target Architecture (TypeScript/Bun)
+## TypeScript/Bun Architecture
 
 ```
 TypeScript/Bun CLI -> TypeScript services/orchestration -> PostgreSQL database
@@ -24,7 +24,7 @@ TypeScript/Bun CLI -> TypeScript services/orchestration -> PostgreSQL database
 
 - TypeScript/Bun replaces the Python CLI and all non-SQL core/orchestration logic.
 - PostgreSQL remains the financial source of truth — its functions, views, and persisted state are untouched.
-- Python is removed after TypeScript reaches full behavioral parity.
+- Python was removed after TypeScript reached full behavioral parity.
 
 ## Key Principle
 

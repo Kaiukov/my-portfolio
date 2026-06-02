@@ -5,20 +5,20 @@
 Status: Accepted
 
 Context:
-- Python CLI is stable but has growing maintenance overhead.
-- Team is more productive in TypeScript.
-- Python dependency chain (uv, hatchling, psycopg) adds complexity vs Bun's single binary.
+- Python CLI was stable but had growing maintenance overhead.
+- Team was more productive in TypeScript.
+- Python dependency chain (uv, hatchling, psycopg) added complexity vs Bun's single binary.
 
 Decision:
-- Python will be fully replaced by TypeScript/Bun over time.
-- The process is phased, not a big-bang rewrite.
-- PostgreSQL stays as the financial source of truth throughout.
+- Python was fully replaced by TypeScript/Bun.
+- The process was phased, not a big-bang rewrite.
+- PostgreSQL stayed as the financial source of truth throughout.
 
 Consequences:
 - Positive: Simplified runtime, single-language stack, faster iteration.
 - Positive: Bun's built-in test runner, package manager, and TypeScript support reduce tooling surface.
-- Neutral: Existing Python code must be maintained until cutover.
-- Negative: Team must maintain two runtimes during transition.
+- Neutral: Existing Python code was maintained during the transition.
+- Negative: Team maintained two runtimes during the transition.
 
 ---
 
@@ -32,9 +32,8 @@ Context:
 - Porting them to TypeScript would duplicate logic and risk introducing bugs.
 
 Decision:
-- PostgreSQL functions, views, and persisted state are the single source of truth.
-- TypeScript issues SQL queries and calls existing functions; it does not reimplement financial calculations.
-- If logic lives only in Python and is needed in TypeScript, the default path is to push it into PostgreSQL SQL, not to port it to TypeScript.
+- PostgreSQL and `portfolio_db/sql/*` own financial data and calculations. TypeScript/Bun adapters only route, validate inputs, orchestrate commands, and emit JSON envelopes.
+- If logic lived only in Python and was needed in TypeScript, the default path was to push it into PostgreSQL SQL, not to port it to TypeScript.
 
 Consequences:
 - Positive: No risk of calculation drift between implementations.
@@ -54,13 +53,13 @@ Context:
 - They establish the test infrastructure and JSON parity verification framework.
 
 Decision:
-- Phase 1 implements only `status` and `transactions`.
-- Write commands (add, edit, delete, exchange) are Phase 2.
+- Phase 1 implemented only `status` and `transactions`.
+- Write commands (add, edit, delete, exchange) were Phase 2.
 
 Consequences:
 - Positive: Faster time to first working TypeScript command.
 - Positive: Write path design benefits from lessons learned in read-only phase.
-- Neutral: Write commands ship later, but the Python CLI remains operational.
+- Neutral: Write commands shipped later; the Python CLI remained operational during the transition.
 
 ---
 
@@ -74,13 +73,13 @@ Context:
 - The migration goal is a like-for-like platform replacement, not an expansion.
 
 Decision:
-- API, MCP server, dashboard, iOS widget, and S3/object-storage backup are out of scope.
+- API, MCP server, dashboard, iOS widget, and S3/object-storage backup were declared out of scope.
 - See [out-of-scope.md](out-of-scope.md) for the full list.
 
 Consequences:
 - Positive: Focused scope, faster migration.
 - Positive: New targets can be built on top of the TypeScript CLI afterward.
-- Neutral: External consumers of the CLI (if any) continue through the Python CLI until cutover.
+- Neutral: External consumers of the CLI (if any) continued through the Python CLI until cutover.
 
 ---
 
@@ -94,9 +93,9 @@ Context:
 - TypeScript ORMs for PostgreSQL (Prisma, Drizzle) are evolving rapidly; choosing one now risks future regret.
 
 Decision:
-- No ORM in Phase 1 or Phase 2.
-- Use `Bun.sql` or a thin PostgreSQL client with raw SQL queries.
-- Future phases can revisit if the pattern of raw queries becomes painful.
+- No ORM was used in Phase 1 or Phase 2.
+- `Bun.sql` and raw SQL queries were used in place of an ORM.
+- The pattern of raw queries could be revisited later if needed.
 
 Consequences:
 - Positive: Direct control over SQL, zero ORM overhead.
@@ -115,12 +114,12 @@ Context:
 - Removing Python before TypeScript reaches full parity would leave users without a fallback.
 
 Decision:
-- Python stays in the repository as a parity reference until Phase 5.
-- CI runs both implementations and compares JSON output for migrated commands.
-- `portfolio-py` entry point is maintained for manual verification.
+- Python stayed in the repository as a parity reference until Phase 5.
+- CI ran both implementations and compared JSON output for migrated commands.
+- The `portfolio-py` entry point was maintained for manual verification.
 
 Consequences:
-- Positive: Safety net during migration — TypeScript can be validated against Python at any time.
-- Positive: Users experience no disruption — `portfolio` keeps working.
+- Positive: Safety net during the transition — TypeScript could be validated against Python at any time.
+- Positive: Users experienced no disruption — `portfolio` kept working.
 - Negative: Two runtimes to maintain, two sets of dependencies.
-- Negative: CI time increases due to dual execution.
+- Negative: CI time increased due to dual execution.

@@ -4,30 +4,30 @@ Three layers. Each owns its domain. No layer reaches into a layer below it that 
 
 ## PostgreSQL Persistence Layer
 
-`portfolio_db/database.py` — SQL, psycopg driver, schema setup, migrations, connection lifecycle, PORTFOLIO_DB_URL resolution, all repository/query methods.
+`portfolio-ts/src/db.ts` — Bun SQL driver, connection lifecycle, `PORTFOLIO_DB_URL` resolution, schema/bootstrap access, all repository/query helpers. The schema and SQL functions in `portfolio_db/sql/` are the financial source of truth.
 
-**Rule**: No caller outside this file may use `db.con` directly.
+**Rule**: No caller outside `src/db.ts` may use the raw SQL handle directly.
 
-## Shared Service Layer
+## Shared Service / Use-Case Layer
 
-Files: `portfolio_service.py`, `transaction_service.py`, `reporting_service.py`, `recalculation_service.py`, `performance_service.py`, `price_service.py`, `price_cache_service.py`, `calculator.py`, `domain.py`, `validators.py`
+Files: `portfolio-ts/src/commands/*`, `portfolio-ts/src/validators.ts`, `portfolio-ts/src/asset_kind.ts`, `portfolio-ts/src/tx.ts`, `portfolio-ts/src/tx_core.ts`, `portfolio-ts/src/sql_apply.ts`
 
-Owns business logic, financial invariants, transaction rules, recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior.
+Owns business logic, financial invariants, transaction rules (SELL-as-of-date, exchange validation), recalculation orchestration, reporting, allocation, cash logic, performance metrics, price-cache behavior, asset/currency normalization.
 
-**Rule**: No financial invariant lives in CLI or API adapters.
+**Rule**: No financial invariant lives in CLI or API adapters. This layer is reused by both CLI and REST API without duplication.
 
-## Adapter Layer (CLI)
+## Adapter Layer
 
-`portfolio_db/cli.py` — Click argument parsing, user-facing validation, calls service layer, serializes JSON via `response.py`.
+- **CLI**: `portfolio-ts/src/cli.ts` — argument parsing, user-facing validation, calls shared service layer, serializes JSON via `src/response.ts`.
+- **REST API**: `portfolio-ts/src/api/server.ts` — HTTP routing, shared write handlers.
+- **MCP**: `portfolio-ts/src/mcp/adapter.ts` — AI-agent write integration via Model Context Protocol.
 
-**Rules**: No SQL/psycopg imports. No business logic. No duplication of service logic.
+**Rules**: No SQL/Bun SQL imports. No business logic. No duplication of service logic. CLI and REST API are peer adapters and must stay behavior-aligned.
 
 ## Data Flow
 
 ```
-CLI (click) -> Service Layer (business logic) -> Database (psycopg + SQL)
+CLI/API/MCP -> Shared service layer (commands/*) -> PostgreSQL (db.ts + portfolio_db/sql/*)
 ```
 
-## Legacy Code
-
-`calculator.py` moved to `portfolio_db/_legacy/calculator.py`. AST scanner test enforces no production imports.
+PostgreSQL and `portfolio_db/sql/*` own financial data and calculations. TypeScript/Bun adapters only route, validate inputs, orchestrate commands, and emit JSON envelopes.

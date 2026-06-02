@@ -28,23 +28,19 @@ EXCHANGE_FROM/TO are created automatically by the `exchange` command.
 
 ## Date Format Trap
 
-**Read/report commands** use `YYYY-MM-DD`. **Write/recalc commands** use legacy `DD-MM-YYYY`.
+**All commands** accept ISO `YYYY-MM-DD` (primary). Legacy `DD-MM-YYYY` is still accepted on write commands with a deprecation warning.
 
 ```bash
 # Read: YYYY-MM-DD
-uv run portfolio performance --as-of-date 2026-01-15
+portfolio performance --as-of-date 2026-01-15
 
-# Write: DD-MM-YYYY
-uv run portfolio add --date 15-01-2026 --asset AAPL --action buy --quantity 10 --price 150 --exchange IB
+# Write: YYYY-MM-DD (DD-MM-YYYY also accepted, deprecated)
+portfolio add --date 2026-01-15 --asset AAPL --action buy --quantity 10 --price 150 --exchange IB
 
-# Exchange also uses DD-MM-YYYY
-uv run portfolio exchange --from USD --to EURUSD=X --quantity 1000 --date 15-03-2026
+# Exchange also uses YYYY-MM-DD
+portfolio exchange --from USD --to EURUSD=X --quantity 1000 --date 2026-03-15
 ```
 
 ## Fee Currency
 
 `add` and `edit` accept `--fee-currency`. Defaults to `--currency`. Stored in `fee_currency` VARCHAR(10).
-
-## Migration
-
-The `migrate` command ingests semicolon-separated CSV with `DD-MM-YYYY` dates. Destructive: clears all existing transactions and daily_returns before import.

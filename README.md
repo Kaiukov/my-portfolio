@@ -64,7 +64,7 @@ psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/views.sql
 psql "$PORTFOLIO_DB_URL" -v ON_ERROR_STOP=1 -f portfolio_db/sql/triggers.sql
 ```
 
-DuckDB is no longer a runtime database. The `portfolio_db/sql/` files are pure PostgreSQL and remain the source of truth for the schema. See [Legacy / migration notes](#legacy--migration-notes) below for one-off DuckDB import tooling.
+The `portfolio_db/sql/` files are pure PostgreSQL and remain the source of truth for the schema.
 
 ## Quick start
 
@@ -264,8 +264,8 @@ The canonical implementation is in `portfolio-ts/src/response.ts`; see [docs/api
 ## Date format
 
 - **Write and read commands** accept ISO `YYYY-MM-DD` (primary).
-- Legacy `DD-MM-YYYY` is still accepted on write commands (`--date`, `--start-date`, `--end-date`, `--from-date`) with a stderr deprecation warning. Remove legacy support after the migration window closes.
-- The historical `migrate` command (DuckDB import, Python-era) ingests semicolon-separated CSV with `DD-MM-YYYY` dates; see [Legacy / migration notes](#legacy--migration-notes).
+- Legacy `DD-MM-YYYY` is still accepted on write commands (`--date`, `--start-date`, `--end-date`, `--from-date`) with a stderr deprecation warning.
+- The historical `migrate` command (legacy CSV import) ingests semicolon-separated CSV with `DD-MM-YYYY` dates.
 
 ## Environment variables
 
@@ -273,8 +273,8 @@ The canonical implementation is in `portfolio-ts/src/response.ts`; see [docs/api
 |---|---|---|
 | `PORTFOLIO_DB_URL` | Yes | PostgreSQL connection string (local or hosted). |
 | `PORTFOLIO_BENCHMARK_TICKERS` | No (default: `SPY`) | Comma-separated benchmark tickers for `performance`. |
-| `PORTFOLIO_LOG_PATH` | Reserved | Reserved for the legacy Python logger; not used by the TypeScript CLI. |
-| `PORTFOLIO_PRICE_PROVIDER` | Reserved | Reserved/legacy. The TypeScript CLI uses `yahoo-finance2` directly; this variable is ignored. |
+| `PORTFOLIO_LOG_PATH` | Reserved | Legacy; not used by the TypeScript CLI. |
+| `PORTFOLIO_PRICE_PROVIDER` | Reserved | Legacy; the TypeScript CLI uses `yahoo-finance2` directly; this variable is ignored. |
 | `PORTFOLIO_S3_*` / `S3_*` | For `backup push` / `backup pull` | S3-compatible backup storage (see [Backups](#backups-s3--cloudflare-r2)). |
 
 See [`.env.example`](.env.example) for a ready-to-copy template. `.env` is auto-loaded from the current directory or any parent directory.
@@ -518,20 +518,26 @@ bun run typecheck
 
 ## Documentation
 
-Additional design notes and operational references live in `docs/`:
+### Current development / operator docs
 
-- [API Response Standardization Plan](docs/api-response-standardization-plan.md)
-- [Cloudflare Widget](docs/widget-contract.md) — data contract served by the Worker; see also the [Cloudflare Widget section](#cloudflare-widget) above for the deployment flow
-- [Crontab Schedule](docs/crontab-schedule.md)
-- [Platform Adapters](docs/platform-adapters.md) — architecture overview of all adapters (CLI, API, dashboard, Scriptable widget)
-- [Production Ready Plan](docs/production-ready-plan.md)
-- [Transaction Specification](docs/transaction-spec.md)
-- [TypeScript Migration](docs/typescript-migration/README.md) — history of the Python → TypeScript/Bun cutover
+| Document | Description |
+|---|---|
+| [Platform Adapters](docs/platform-adapters.md) | Architecture overview of all adapters (CLI, API, MCP, dashboard, widget) |
+| [Transaction Specification](docs/transaction-spec.md) | Action semantics, validation, recalculation behavior |
+| [API Response Standardization Plan](docs/api-response-standardization-plan.md) | JSON envelope spec, per-command payload shapes, pagination |
+| [Crontab Schedule](docs/crontab-schedule.md) | OS-cron and refresh scheduling |
+| [Cloudflare Widget](docs/widget-contract.md) | Read-only widget JSON contract |
+| [Production Ready Plan](docs/production-ready-plan.md) | Readiness checklist and completed scope |
+| [Wiki](docs/wiki/index.md) | CLI reference, transactions, performance metrics, schema, prices, environments |
 
-> **Note:** Some historical docs (and the `portfolio-db/` and `scripts/` directories) still reference the old `portfolio-py` Python CLI or the `portfolio-ts` bin name. The current binary is **`portfolio`** (issue #141, completed). When in doubt, follow the JSON-envelope contract and the command list in [`bun src/cli.ts --help`](portfolio-ts/src/cli.ts) — those are the source of truth.
+### Historical / archival
+
+| Document | Description |
+|---|---|
+| [TypeScript Migration](docs/typescript-migration/README.md) | History of the completed Python → TypeScript/Bun cutover |
 
 ## Legacy / migration notes
 
-- **DuckDB is no longer a runtime database.** The CLI no longer ships a `migrate-duckdb-to-postgres` command (see `portfolio-ts/PARITY.md`). If you have historical data in a DuckDB file, the Python-era migration script in git history may still work with `uv`, but the supported runtime is PostgreSQL.
-- **The `portfolio_db/` directory contains SQL only** (no Python source). Apply these files with `psql` during one-time schema bootstrap — see [One-time schema bootstrap](#one-time-schema-bootstrap).
+- **The `portfolio_db/` directory contains SQL only** (no Python source). These are the financial source of truth applied via `psql` during one-time schema bootstrap.
 - **Reserved env vars** `PORTFOLIO_PRICE_PROVIDER` and `PORTFOLIO_LOG_PATH` are kept in `.env.example` for compatibility with downstream tooling but are ignored by the TypeScript CLI. They can be removed once no caller references them.
+- **Migration history:** The Python→TypeScript/Bun migration is COMPLETE. See [docs/typescript-migration/](docs/typescript-migration/README.md) for the archival record.
