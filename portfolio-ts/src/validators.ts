@@ -74,9 +74,6 @@ export const ALLOWED_CURRENCIES = new Set([
   "USD", "EUR", "GBP", "UAH", "JPY", "CHF", "CAD", "AUD", "HKD", "SGD",
 ]);
 
-const FX_PAIR_RE = /^[A-Z]{6}=X$/;
-const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
-
 export function validateAssetSymbol(asset: string, action: string): void {
   if (!asset || !asset.trim()) {
     throw new ValidationError(
@@ -88,7 +85,7 @@ export function validateAssetSymbol(asset: string, action: string): void {
 
   const upper = asset.toUpperCase();
 
-  if ((action === "BUY" || action === "SELL") && ISO_CURRENCY_RE.test(upper) && !FX_PAIR_RE.test(upper)) {
+  if ((action === "BUY" || action === "SELL") && ALLOWED_CURRENCIES.has(upper)) {
     throw new ValidationError(
       `--asset: ${JSON.stringify(asset)} looks like an ISO currency code. ` +
       `Use the FX pair format (e.g. EURUSD=X) instead of a bare currency code.\n` +

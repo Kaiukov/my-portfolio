@@ -130,6 +130,19 @@ describe("validateAssetSymbol", () => {
     expect(() => validateAssetSymbol("EUR", "DEPOSIT")).not.toThrow();
   });
 
+  test("passes for 3-letter ETF tickers with BUY/SELL (regression #191)", () => {
+    expect(() => validateAssetSymbol("IWM", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("SPY", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("QQQ", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("VTI", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("IWM", "SELL")).not.toThrow();
+    expect(() => validateAssetSymbol("SPY", "SELL")).not.toThrow();
+    expect(() => validateAssetSymbol("GLD", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("TLT", "SELL")).not.toThrow();
+    expect(() => validateAssetSymbol("DIA", "BUY")).not.toThrow();
+    expect(() => validateAssetSymbol("XLF", "BUY")).not.toThrow();
+  });
+
   test("throws for empty asset", () => {
     expect(() => validateAssetSymbol("", "BUY")).toThrow(ValidationError);
   });

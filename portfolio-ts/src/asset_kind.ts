@@ -1,4 +1,5 @@
 import YahooFinance from "yahoo-finance2";
+import { ALLOWED_CURRENCIES } from "./validators.js";
 
 const yahooFinance = new YahooFinance();
 
@@ -49,9 +50,13 @@ export async function fetchAssetMetadata(
     };
   }
 
-  const bareCurrency = /^[A-Z]{3}$/.test(ticker)
-    ? ticker
-    : /^([A-Z]{3})USD=X$/.exec(ticker)?.[1] ?? null;
+  const bareCurrency = /^[A-Z]{3}$/.test(ticker) && ALLOWED_CURRENCIES.has(ticker.toUpperCase())
+    ? ticker.toUpperCase()
+    : (() => {
+        const m = /^([A-Z]{3})USD=X$/.exec(ticker);
+        if (m && ALLOWED_CURRENCIES.has(m[1])) return m[1];
+        return null;
+      })();
 
   if (bareCurrency && bareCurrency !== "USD") {
     return {
