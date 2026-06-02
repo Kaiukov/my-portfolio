@@ -1,4 +1,5 @@
 import { querySingle } from "../db.js";
+import { getSummary } from "./summary.js";
 
 export interface MwrData {
   mwr_pct: number;
@@ -28,11 +29,13 @@ export async function getMwr(asOfDate?: string): Promise<MwrData> {
     ? Number(row["mwr"])
     : null;
 
+  const summary = await getSummary(actualDate);
+
   if (mwrRaw === null || !Number.isFinite(mwrRaw)) {
     return {
       mwr_pct: 0,
       as_of_date: actualDate,
-      portfolio_value: 0,
+      portfolio_value: summary.portfolio_value_usd,
       note: "MWR not available — insufficient transaction data or no valid portfolio value",
     };
   }
@@ -40,7 +43,7 @@ export async function getMwr(asOfDate?: string): Promise<MwrData> {
   return {
     mwr_pct: round4(mwrRaw * 100),
     as_of_date: actualDate,
-    portfolio_value: 0,
+    portfolio_value: summary.portfolio_value_usd,
     note: "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
   };
 }
