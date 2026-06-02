@@ -24,6 +24,14 @@ mock.module("../src/tx.js", () => ({
   },
 }));
 
+const mockYahooQuote = mock();
+mock.module("yahoo-finance2", () => {
+  const MockYahooFinance = function (this: any) {
+    this.quote = mockYahooQuote;
+  };
+  return { default: MockYahooFinance };
+});
+
 beforeEach(() => {
   mockAddTransaction.mockReset();
   mockEditTransaction.mockReset();

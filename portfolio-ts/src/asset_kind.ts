@@ -1,8 +1,6 @@
 import YahooFinance from "yahoo-finance2";
 import { ALLOWED_CURRENCIES } from "./validators.js";
 
-const yahooFinance = new YahooFinance();
-
 export interface AssetMetadata {
   yahoo_quote_type: string;
   yahoo_type_disp: string;
@@ -36,8 +34,21 @@ export const ASSET_KIND_NORMALIZED = new Set([
   "unknown",
 ]);
 
+export type QuoteFn = (ticker: string) => Promise<{
+  quoteType?: string;
+  typeDisp?: string;
+  shortName?: string;
+  longName?: string;
+  currency?: string;
+  exchange?: string;
+} | null>;
+
+const defaultQuoteFn: QuoteFn = (ticker) =>
+  new YahooFinance().quote(ticker) as ReturnType<QuoteFn>;
+
 export async function fetchAssetMetadata(
   ticker: string,
+  quoteFn: QuoteFn = defaultQuoteFn,
 ): Promise<AssetMetadata | null> {
   if (ticker === "USD") {
     return {
@@ -70,14 +81,7 @@ export async function fetchAssetMetadata(
   }
 
   try {
-    const quote = (await yahooFinance.quote(ticker)) as {
-      quoteType?: string;
-      typeDisp?: string;
-      shortName?: string;
-      longName?: string;
-      currency?: string;
-      exchange?: string;
-    };
+    const quote = await quoteFn(ticker);
 
     if (!quote || !quote.quoteType) return null;
 

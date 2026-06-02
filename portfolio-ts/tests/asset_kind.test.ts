@@ -2,7 +2,6 @@ import { describe, expect, test, mock, jest } from "bun:test";
 
 const mockQuerySingle = mock();
 const mockQuery = mock();
-const mockYahooQuote = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
@@ -16,13 +15,6 @@ mock.module("../src/tx.js", () => ({
     return fn({ unsafe: async (_sql: string, _params?: unknown[]) => [] });
   },
 }));
-
-mock.module("yahoo-finance2", () => {
-  const MockYahooFinance = function (this: any) {
-    this.quote = mockYahooQuote;
-  };
-  return { default: MockYahooFinance };
-});
 
 describe("normalizeAssetKind", () => {
   test("EQUITY -> stock", async () => {
@@ -108,17 +100,15 @@ describe("fetchAssetMetadata", () => {
   });
 
   test("IWM -> fetches real ETF metadata from Yahoo (regression #191)", async () => {
-    mockYahooQuote.mockResolvedValue({
+    const { fetchAssetMetadata } = await import("../src/asset_kind.js");
+    const meta = await fetchAssetMetadata("IWM", async () => ({
       quoteType: "ETF",
       typeDisp: "ETF",
       shortName: "iShares Russell 2000 ETF",
       longName: "iShares Russell 2000 ETF",
       currency: "USD",
       exchange: "NMS",
-    });
-
-    const { fetchAssetMetadata } = await import("../src/asset_kind.js");
-    const meta = await fetchAssetMetadata("IWM");
+    }));
     expect(meta).not.toBeNull();
     expect(meta!.yahoo_quote_type).toBe("ETF");
     expect(meta!.currency).toBe("USD");
