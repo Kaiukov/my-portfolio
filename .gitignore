@@ -65,7 +65,6 @@ portfolio_reports/
 ukr_news/
 portfolio.db
 srcNOUSE
-duckdb
 tmp/
 yfiance-transactions/DONE/
 mcp-searxng/.venv/

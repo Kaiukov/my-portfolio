@@ -534,37 +534,37 @@ If FX data is unavailable for the snapshot date, the command should return an er
 ## 7. Implementation Plan
 
 ### Phase 1 — Shared envelope utility
-- Create `portfolio_db/response.py`
-  - `success(command, data, count=None) -> str` — returns JSON string
-  - `error(command, code, message) -> str` — returns JSON string
-  - Helper: `now_utc() -> str` for `meta.generated_at`
+- Create `src/response.ts`
+  - `success(command, data, count=None) -> JSON string`
+  - `error(command, code, message) -> JSON string`
+  - Helper: `now_utc()` for `meta.generated_at`
 
 ### Phase 2 — Metric value refactor
-- Update `evaluate_metric` in `portfolio_service.py` to return `{"value": float, "assessment": str}` dicts
-- Update `get_performance_stats()` to use new metric shape throughout
+- Refactor metric evaluation to return `{"value": float, "assessment": str}` dicts
+- Update performance stats to use new metric shape throughout
 
-### Phase 3 — Command-by-command migration (in `cli.py`)
+### Phase 3 — Command-by-command implementation
 Wrap each command output with `success()` / `error()`:
 
-1. `migrate`
+1. `migrate` (archived)
 2. `add`
 3. `delete`
 4. `exchange`
 5. `recalculate`
 6. `verify_prices`
-7. `transactions` — remove `--format`; add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
-8. `report` — remove `--format`; add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
+7. `transactions` — add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
+8. `report` — add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
 9. `status`
-10. `performance` — remove `--table` / `--md` flags
+10. `performance`
 11. `summary`
 12. `allocation`
 13. `cash`
 
 ### Phase 3a — Service layer pagination support
-- Update `get_transactions(limit, offset, start_date, end_date)` in `portfolio_service.py`
-  - Add `LIMIT / OFFSET` to the DuckDB query
+- Update transaction listing in the service layer
+  - Add `LIMIT / OFFSET` to the PostgreSQL query
   - Run a separate `COUNT(*)` query (same filter, no limit) for `pagination.total`
-- Update `get_daily_returns(limit, offset, start_date, end_date)` in `portfolio_service.py`
+- Update daily returns listing in the service layer
   - Same pattern: filtered query + count query
 - Both queries order by `date DESC` for the fetch (latest first), then reverse before returning so the response is ascending by date within each page
 
@@ -574,20 +574,19 @@ Wrap each command output with `success()` / `error()`:
 - Always exit with code `1` on error
 
 ### Phase 5 — Tests
-- Update `tests/test_calculator.py` if any assertions check old output format
-- Add `tests/test_response_envelope.py` to verify envelope structure for each command
+- Update tests if any assertions check old output format
+- Add envelope tests to verify envelope structure for each command
 
 ---
 
-## 8. File Changes Summary
+## 8. File Changes Summary (historical reference — current implementation is in TypeScript/Bun)
 
 | File | Change |
 |---|---|
-| `portfolio_db/response.py` | **CREATE** — envelope helpers |
-| `portfolio_db/portfolio_service.py` | Update `evaluate_metric`, `get_performance_stats`; add pagination params to `get_transactions`, `get_daily_returns` |
-| `portfolio_db/cli.py` | Rewrite output logic for all 13 commands; remove format flags |
-| `tests/test_response_envelope.py` | **CREATE** — envelope tests |
-| `tests/test_calculator.py` | Update if assertions on old output format exist |
+| `src/response.ts` | Envelope helpers |
+| `src/commands/*` | Command implementations |
+| `src/cli.ts` | CLI entrypoint and command dispatch |
+| `tests/*.test.ts` | Envelope and parity tests |
 
 ---
 

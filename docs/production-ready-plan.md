@@ -36,7 +36,7 @@ Deliverables:
 Current priority: highest production risk.
 
 - [x] Build one price pipeline:
-  - [x] cached DuckDB prices as primary source
+  - [x] cached price data as primary source
   - [x] external fetch only for refresh/repair
   - [x] no hidden fallback rates
 - [x] Add strict validation for:
@@ -93,7 +93,7 @@ Deliverable:
 
 ## 4. Reporting Consistency ✅ DONE
 
-- [x] All read reports must use one snapshot builder (`reporting_service.py`)
+- [x] All read reports must use one snapshot builder (PostgreSQL SQL functions)
 - [x] One `as_of_date` for:
   - [x] `status`
   - [x] `cash`
@@ -171,19 +171,17 @@ Deliverable:
 ## 7. Packaging and Runtime ✅ DONE
 
 - [x] Add proper project metadata:
-  - [x] `pyproject.toml`
-  - [x] console script entrypoint (`portfolio = "portfolio_db.cli:cli"`)
+  - [x] `package.json` (TypeScript/Bun)
+  - [x] console script entrypoint (`portfolio = src/cli.ts`)
 - [x] Lock env handling:
   - [x] DB path (via `PORTFOLIO_DB_URL` env var, PostgreSQL-only)
   - [x] logs path (via `PORTFOLIO_LOG_PATH` env var, `.env.example`)
-  - [x] provider settings (`PORTFOLIO_PRICE_PROVIDER=yfinance` in `.env.example`)
 - [x] Add reproducible bootstrap:
-  - [x] `uv sync` documented in `operations.md` Bootstrap section
-  - [x] `init` command — idempotent DB initialization
+  - [x] `bun install` for dependency setup
+  - [x] `init` command — idempotent DB verification
 - [x] Fix import hygiene:
-  - [x] local package isolation (`pythonpath = ["."]` in pyproject.toml)
-  - [x] `_WORKSPACE` sentinel in `portfolio_db/__init__.py`
-  - [x] `tests/test_import_isolation.py` guards against sibling repo shadowing
+  - [x] TypeScript strict mode
+  - [x] `bun run typecheck` for static validation
 
 Deliverable:
 
@@ -191,7 +189,7 @@ Deliverable:
 
 ## 8. Observability and Ops ✅ DONE
 
-- [x] Structured logs (`portfolio_db/logger.py` → `logs/portfolio.log`):
+- [x] Structured logs:
   - [x] price refresh
   - [x] recalc start/done/failure
   - [x] transaction mutations (add/edit/delete)
@@ -220,7 +218,7 @@ Deliverable:
   - [x] optional backup before destructive changes (`delete --backup`)
 - [x] Validate user inputs strictly
 - [x] No silent fallback pricing
-- [ ] Optional lock/serialization around writes (deferred — DuckDB single-writer is sufficient)
+- [ ] Optional lock/serialization around writes (deferred — PostgreSQL handles concurrency)
 
 Deliverable:
 
@@ -245,10 +243,9 @@ Deliverable:
 
 ### Milestone 3: Deployment Readiness ✅ DONE
 
-- [x] packaging (`pyproject.toml` + console script)
+- [x] packaging (`package.json` + `portfolio` bin link)
 - [x] clean install (`init` command + `.env.example`)
 - [x] cron/automation docs (`docs/crontab-schedule.md`)
-- [x] import isolation (`pythonpath` + sentinel + test)
 - [x] CI (`.github/workflows/ci.yml`)
 
 ### Milestone 4: Portfolio Intelligence ✅ DONE
@@ -274,6 +271,6 @@ Deliverable:
 fetches benchmark tickers (even if SPY is not in the portfolio) so `spy_twr_pct`,
 `up_capture_ratio`, `down_capture_ratio` will populate after the next `repair_prices` run.
 
-- [x] Add `BENCHMARK_TICKERS = ['SPY']` config in `portfolio_service.py`
+- [x] Add SPY benchmark ticker as default benchmark
 - [x] Extend `repair_prices` to always fetch benchmark tickers
 - [x] Regression test: `test_repair_prices_caches_spy`

@@ -16,7 +16,7 @@
 
 Every adapter and utility in this document respects these invariants:
 
-1. **PostgreSQL is the financial source of truth.** No adapter duplicates or recomputes financial calculations. All metrics (TWR, CAGR, Sharpe, allocation %, cash balances, etc.) are computed by PostgreSQL functions and surfaced through the shared service layer.
+1. **PostgreSQL is the financial source of truth.** PostgreSQL and `portfolio_db/sql/*` own financial data and calculations. TypeScript/Bun adapters only route, validate inputs, orchestrate commands, and emit JSON envelopes. No adapter duplicates or recomputes financial calculations. All metrics (TWR, CAGR, Sharpe, allocation %, cash balances, etc.) are computed by PostgreSQL functions and surfaced through the shared service layer.
 2. **Adapters never duplicate calculations.** The shared service/use-case layer (defined in `CLAUDE.md` → "Architecture layers") owns all business logic. Adapters format and route only.
 3. **Read paths use cached prices only.** No adapter triggers a Yahoo Finance call during a read command. Price fetching belongs exclusively to `repair_prices` and `sync` (explicit maintenance commands). The stale-price max-age (`STALE_MAX_AGE_DAYS = 5`) is enforced before every `recalculate` (see `docs/crontab-schedule.md` and issue #84).
 4. **All adapters share one JSON envelope.** Every response follows `{"ok": true/false, "command": "...", "data": ..., "meta": {"generated_at": "...", "count": N}}` as defined in `docs/api-response-standardization-plan.md`. The TypeScript implementation lives in `portfolio-ts/src/response.ts`.
@@ -28,7 +28,7 @@ Every adapter and utility in this document respects these invariants:
 
 ## 1. CLI Adapter
 
-The CLI is the current primary interface. It has one historical Python implementation and one current TypeScript/Bun implementation (`portfolio-ts` during migration, `portfolio` as the active binary). Both share the same JSON contract. The TypeScript/Bun runtime is the current active one; `PARITY.md` documents the migration status of each command.
+The TypeScript/Bun runtime (`portfolio` binary) is the only active CLI implementation. `PARITY.md` documents the parity history with the removed Python implementation.
 
 ### Command Groups
 
@@ -368,7 +368,7 @@ PORTFOLIO_S3_PREFIX=         # Default prefix
 
 ### Implementation Notes
 
-- Use the AWS SDK (e.g., `@aws-sdk/client-s3` for TypeScript) or `boto3` (for Python), depending on which CLI implementation hosts it.
+- Use the AWS SDK (`@aws-sdk/client-s3` for TypeScript).
 - Prefer streaming upload (no local temp file for SQL format; for JSONL, stream directly).
 - Should support S3-compatible stores: AWS S3, MinIO, DigitalOcean Spaces, Backblaze B2, Cloudflare R2.
 

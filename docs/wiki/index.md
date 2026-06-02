@@ -1,6 +1,6 @@
 # Wiki Library
 
-> Project is mid-migration from Python to TypeScript/Bun. TypeScript is the target runtime, and the app runs via Docker.
+> The Python→TypeScript/Bun migration is COMPLETE. Current runtime is TypeScript/Bun with PostgreSQL.
 
 Live deploys, KV writes, and DB migrations are orchestrator-only; delegated agents work on mocks.
 
