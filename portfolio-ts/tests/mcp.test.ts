@@ -70,8 +70,12 @@ function freshStaleEmpty() {
 }
 
 // Set up default freshness: no stale/coverage issues, prices_as_of = 2026-01-20
+// Order must match getPriceFreshness() query sequence:
+//   1. querySingle MAX(date) -> 2. querySingle needs_recalc()
+//   3. query checkpoints     -> 4. query stale tickers
 function setupFreshnessDb() {
   mockDbQuerySingle.mockResolvedValueOnce(freshQuerySingleRow("2026-01-20"));
+  mockDbQuerySingle.mockResolvedValueOnce({ needs_recalc: false });
   mockDbQuery.mockResolvedValueOnce(freshCoverageEmpty());
   mockDbQuery.mockResolvedValueOnce(freshStaleEmpty());
 }
@@ -248,6 +252,7 @@ describe("mcpRead", () => {
     expect(result.meta.count).toBeNull();
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
     expect(result.meta).toHaveProperty("stale", false);
+    expect(result.meta).toHaveProperty("needs_recalc", false);
   });
 
   test("status with asOf alias works", async () => {
@@ -369,6 +374,10 @@ describe("mcpRead", () => {
   test("mwr returns correct envelope with freshness meta", async () => {
     setupFreshnessDb();
     mockDbQuerySingle.mockResolvedValueOnce({ mwr: 0.1234 });
+    mockDbQuerySingle.mockResolvedValueOnce({
+      holding_count: 5, total_cash_usd: 5000, portfolio_value_usd: 25000,
+      last_transaction_date: "2026-01-15", transaction_count: 42, as_of_date: "2026-01-15",
+    });
 
     const { mcpRead } = await import("../src/mcp/read.js");
     const result = await mcpRead("mwr", {});
@@ -377,6 +386,7 @@ describe("mcpRead", () => {
     expect(result.command).toBe("mwr");
     const data = result.data as Record<string, unknown>;
     expect(data.mwr_pct).toBe(12.34);
+    expect(data.portfolio_value).toBe(25000);
     expect(data.as_of_date).toBeDefined();
     expect(result.meta.count).toBeNull();
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
