@@ -16,7 +16,7 @@ Never trigger network calls: `report`, `transactions`, `status`, `allocation`, `
 
 ## Mutating Commands
 
-Auto-recalculate after write: `add`, `edit`, `delete`, `exchange`, `migrate`, `repair_prices`, `recalculate`.
+Auto-recalculate after write: `add`, `edit`, `delete`, `exchange`. Maintenance commands `repair_prices` and `recalculate` also mutate state but belong to the maintenance group.
 
 ## File-Level Commands
 
@@ -78,3 +78,7 @@ Auto-recalculate after write: `add`, `edit`, `delete`, `exchange`, `migrate`, `r
 --dry-run           Show what would be done
 --force             Bypass safety checks (recalculate only)
 ```
+
+## Adapter Access
+
+The same write operations are available via the HTTP API and MCP adapter, using identical JSON envelopes. See `docs/platform-adapters.md` for route/tool tables, shared write layer, and error-mapping parity.

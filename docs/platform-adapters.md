@@ -1,16 +1,14 @@
 # Platform Adapters, Utilities, and CLI Discovery
 
-> Design doc for the future platform surface of the portfolio project.
-> Defines what adapters and utilities will exist, their responsibilities, and the contracts they share.
-> **This is an intentional spec — no implementation code lives here.**
-
-## Status: Draft
+> Adapter surface documentation for the portfolio project.
+> Defines the adapters and utilities, their responsibilities, and the contracts they share.
 
 ### Changelog
 
 | Date | Change |
 |---|---|
 | 2026-05-31 | Initial draft |
+| 2026-06-02 | API + MCP write adapters implemented (#181); shared write layer + envelope parity |
 
 ---
 
@@ -109,25 +107,28 @@ Errors:
 
 ## 2. API Adapter
 
-Future HTTP access layer for dashboards, widgets, and trusted integrations.
+HTTP access layer for dashboards, widgets, and trusted integrations. Implemented as a Bun-native adapter in `portfolio-ts/src/api/server.ts`.
 
 ### Scope
 
-**Read-only first.** No write endpoints until the read-only API is stable in production.
+**Read and write.** All read-only CLI commands are available as GET endpoints. Write operations (`add`, `edit`, `delete`, `exchange`) are available via POST/PATCH/PUT/DELETE, reusing the same shared command functions as the CLI — no duplicated business logic.
 
-### Endpoints
+### Read-Only Endpoints
 
-Each endpoint returns the same JSON envelope as the CLI, reusing the same PostgreSQL-owned calculations. The data payload is identical to the CLI command's `data` field.
+Each returns the same JSON envelope as the CLI, reusing the same PostgreSQL-owned calculations. The data payload is identical to the CLI command's `data` field.
 
-| Endpoint | CLI equivalent | Description |
-|---|---|---|
-| `GET /status` | `status` | Portfolio value, total gain, net contributions |
-| `GET /summary` | `summary` | Per-position summary (shares, cost basis, gain) |
-| `GET /cash` | `cash` | Cash balances by currency with USD values |
-| `GET /allocation` | `allocation` | Asset allocation with percentages |
-| `GET /performance` | `performance` | TWR, CAGR, Sharpe, MDD, benchmark comparison |
-| `GET /transactions` | `transactions` | Transaction list (paginated) |
-| `GET /health` | `health` | DB reachability, stale data, price coverage |
+| Method | Endpoint | CLI equivalent | Description |
+|---|---|---|---|
+| GET | `/health` | `health` | DB reachability, stale data, price coverage |
+| GET | `/status` | `status` | Portfolio value, total gain, net contributions |
+| GET | `/summary` | `summary` | Per-position summary (shares, cost basis, gain) |
+| GET | `/allocation` | `allocation` | Asset allocation with percentages |
+| GET | `/cash` | `cash` | Cash balances by currency with USD values |
+| GET | `/performance` | `performance` | TWR, CAGR, Sharpe, MDD, benchmark comparison |
+| GET | `/mwr` | `mwr` | Money-weighted return (XIRR) |
+| GET | `/verify_prices` | `verify_prices` | Price coverage diagnostics (read-only) |
+
+Note: the read-only `transactions` command currently has no GET endpoint in server.ts — use the CLI for transaction listing. The `/ready` endpoint (GET) is a health-check probe, not a CLI command mapping.
 
 ### Query Parameters
 
@@ -135,31 +136,97 @@ Common parameters mapped from CLI flags:
 
 | CLI flag | API query param | Applies to |
 |---|---|---|
-| `--as-of-date` | `?as_of_date=` | All except `health` |
-| `--limit` | `?limit=` | `transactions` |
-| `--offset` | `?offset=` | `transactions` |
-| `--start-date` | `?start_date=` | `transactions` |
-| `--end-date` | `?end_date=` | `transactions` |
+| `--as-of-date` | `?as_of_date=` | `status`, `summary`, `allocation`, `cash`, `performance`, `mwr` |
 | `--benchmark` | `?benchmark=` | `performance` |
 | `--from-date` | `?from_date=` | `performance` |
+| `--period` | `?period=` | `performance` |
+| `--max-age-days` | `?max_age_days=` | `health`, `verify_prices` |
+
+### Write Endpoints
+
+Write operations reuse the same shared command functions (`src/adapters/shared.ts`) and are dispatched through `WriteHandlers` (addTransaction, editTransaction, editDryRun, deleteTransaction, deletePreview, exchangeCurrency). Dry-run is supported on edit and delete via `?dry_run=true` / `{"dry_run": true}`. Delete requires `?confirm=true` / `{"confirm": true}`.
+
+| Method | Endpoint | CLI equivalent | Required body fields |
+|---|---|---|---|
+| POST | `/transactions` | `add` | date, asset, action, quantity, exchange |
+| PATCH | `/transactions/:id` | `edit` | id (in path) + at least one field to change |
+| PUT | `/transactions/:id` | `edit` | Same as PATCH (both route through editTransaction) |
+| DELETE | `/transactions/:id` | `delete` | id (in path); confirm required unless dry-run |
+| POST | `/exchange` | `exchange` | date, fromAsset/by from_asset/by from, toAsset/by to_asset/by to, quantity, rate |
+
+Optional fields for POST/PATCH/PUT bodies: price, currency, fees, feeCurrency (or fee_currency), account, dataSource (or data_source). See `portfolio-ts/src/api/server.ts` for the canonical field resolution logic.
 
 ### Rules
 
 - Return the same JSON envelope shape as the CLI (`response.ts` / `docs/api-response-standardization-plan.md`).
-- Reuse the shared service layer (PostgreSQL functions). No calculation in the API adapter.
-- No write endpoints until read-only API is stable.
+- Reuse the shared service layer + `src/adapters/shared.ts` `WriteHandlers`. No calculation in the API adapter.
+- Write routes delegate to the same `WriteHandlers` as the MCP adapter and the underlying `commands/*` modules.
 - Authentication (API keys, JWT) is a deployment concern — the adapter must accept configurable middleware.
 - Rate limiting and CORS are deployment concerns, not baked into the adapter.
 
 ### Implementation Notes
 
-- The API adapter should be a thin HTTP wrapper around the same service functions that `portfolio-ts` calls. No SQL imports, no psycopg imports.
-- A framework like Hono (lightweight, Bun-native) is a natural fit, but the adapter MUST remain framework-agnostic at the service boundary.
-- The adapter should NOT duplicate the CLI's Click/bun argument parsing — it maps HTTP query params → service params.
+- The API adapter is a thin HTTP wrapper around the same service functions that `portfolio-ts` calls — no SQL imports.
+- Uses Bun's built-in `Bun.serve` with no external framework dependency.
+- The adapter maps HTTP params → service params without duplicating CLI argument parsing.
+- Error handling is unified via `toWriteErrorEnvelope` from `src/adapters/shared.ts` (see §3.2).
 
 ---
 
-## 3. Dashboard Adapter
+## 3. MCP Adapter
+
+MCP (Model Context Protocol) write adapter for AI-agent integration. Implemented in `portfolio-ts/src/mcp/adapter.ts`.
+
+### Scope
+
+**Write operations only** (read operations use the CLI or HTTP API). Exposes add/edit/delete/exchange as MCP-style tool calls, reusing the same shared `WriteHandlers` from `src/adapters/shared.ts` as the HTTP API.
+
+### Write Tools
+
+All tools return the same JSON envelope as the CLI and HTTP API (`response.ts`). The `mcpWrite(toolName, args, ctx)` function dispatches by tool name.
+
+| Tool name | CLI equivalent | Required args | Optional args |
+|---|---|---|---|
+| `add_transaction` | `add` | date, asset, action, quantity, exchange | price, currency, fees, feeCurrency/fee_currency, account |
+| `edit_transaction` | `edit` | id/transactionId/transaction_id/transId | date, asset, action, quantity, price, currency, fees, feeCurrency/fee_currency, exchange, dataSource/data_source, account, dry_run/dryRun/dry-run |
+| `delete_transaction` | `delete` | id/transactionId/transaction_id/transId | dry_run/dryRun/dry-run, confirm |
+| `exchange_currency` | `exchange` | date, fromAsset/from_asset/from, toAsset/to_asset/to, quantity, rate | — |
+
+### Arg Aliases
+
+MCP tools accept multiple key aliases per arg for client flexibility:
+
+- `add_transaction`: `feeCurrency` or `fee_currency`
+- `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
+- `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
+- `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
+
+### Rules
+
+- Same `WriteHandlers` interface as the HTTP API — identical behavior for add, edit, delete, exchange.
+- Dry-run supported on `edit_transaction` and `delete_transaction`.
+- Delete requires `confirm: true` unless dry-run.
+- Unknown tool name returns `{"ok": false, "error": {"code": "NOT_FOUND", "message": "..."}}`.
+
+### 3.1 Success Envelope
+
+Identical to CLI and HTTP API (see §1 JSON Envelope for shape). `command` field maps to the CLI command name (`"add"`, `"edit"`, `"delete"`, `"exchange"`), not the MCP tool name.
+
+### 3.2 Error Mapping (all adapters)
+
+Error handling is unified across CLI, HTTP API, and MCP via `src/adapters/shared.ts` `toWriteErrorEnvelope`:
+
+| Error type | `error.code` | HTTP status (API) | CLI exit code |
+|---|---|---|---|
+| `ValidationError` | `"VALIDATION_ERROR"` | 400 | 1 |
+| `NotFoundError` | `"NOT_FOUND"` | 404 | 1 |
+| Any other error | `"INTERNAL_ERROR"` | 500 | 1 |
+
+**Parity guarantee:** The same `toWriteErrorEnvelope` function is used by both the HTTP API (`server.ts:316`) and the MCP adapter (`adapter.ts:172`). CLI errors follow the same code/message conventions internally. All three adapters produce structurally identical `ErrorEnvelope` JSON.
+
+---
+
+## 4. Dashboard Adapter
 
 Future read-only UI for mobile, desktop, and web.
 
@@ -189,7 +256,7 @@ Not specified — the dashboard is frontend-agnostic. It could be a static site 
 
 ---
 
-## 4. Cron Jobs
+## 5. Cron Jobs
 
 Scheduled maintenance for prices and portfolio recalculation. The full existing schedule is documented in `docs/crontab-schedule.md`.
 
@@ -252,7 +319,7 @@ verify_prices ──→ repair_prices (when needed) ──→ recalculate ──
 
 ---
 
-## 5. Backup Utility: S3-Compatable Backup
+## 6. Backup Utility: S3-Compatable Backup
 
 Extends the existing `backup` command (local `pg_dump` to file) with an S3-compatible upload variant.
 
@@ -307,7 +374,7 @@ PORTFOLIO_S3_PREFIX=         # Default prefix
 
 ---
 
-## 6. iOS Widget via Scriptable
+## 7. iOS Widget via Scriptable
 
 Lightweight read-only widget using the Scriptable iOS app. The widget fetches a JSON payload from the API adapter (or from a pre-generated file hosted on a server/cron).
 
@@ -353,7 +420,7 @@ See `docs/widget-contract.md` for the full shape. The payload is compact by desi
 
 ---
 
-## 7. AI-Friendly CLI Command Discovery
+## 8. AI-Friendly CLI Command Discovery
 
 Machine-readable command discovery so AI agents can determine which command to use without reading markdown docs.
 
@@ -522,16 +589,17 @@ Intent → command mapper. Returns recommended commands for a natural-language g
 
 ---
 
-## Implementation Order
+## Implementation Status
 
-Per issue #98, the suggested implementation order:
+Per issue #98, the suggested implementation order. Completed items are marked.
 
-1. `portfolio commands` and `portfolio command_info` (AI-friendly discovery)
-2. S3-compatible `backup_s3`
-3. Read-only API adapter
-4. Read-only dashboard MVP
-5. iOS Scriptable widget endpoint/payload (the `widget` command exists; a dedicated API endpoint is future)
-6. Write API endpoints (only if needed)
+1. ~~`portfolio commands` and `portfolio command_info` (AI-friendly discovery)~~ — **Not implemented** (superseded by MCP)
+2. S3-compatible `backup_s3` — **Not implemented**
+3. ~~Read-only API adapter~~ — **Done** (PR #102+, extended in #181)
+4. Read-only dashboard MVP — **Not implemented**
+5. iOS Scriptable widget endpoint/payload — **Not implemented** (the `widget` CLI command exists)
+6. ~~Write API endpoints~~ — **Done** (#181)
+7. ~~MCP write adapter~~ — **Done** (#181)
 
 ---
 
@@ -557,4 +625,7 @@ Per issue #98, the suggested implementation order:
 | `docs/production-ready-plan.md` | Milestone history, completed items |
 | `portfolio-ts/PARITY.md` | Command parity between Python and TypeScript implementations |
 | `portfolio-ts/src/response.ts` | Canonical JSON envelope implementation |
+| `portfolio-ts/src/api/server.ts` | HTTP API adapter (read + write routes) |
+| `portfolio-ts/src/mcp/adapter.ts` | MCP write adapter (`mcpWrite`) |
+| `portfolio-ts/src/adapters/shared.ts` | Shared `WriteHandlers` + `toWriteErrorEnvelope` (used by API + MCP) |
 | `.agents/skills/my-portfolio-cli/SKILL.md` | Skill file for CLI change workflows |
