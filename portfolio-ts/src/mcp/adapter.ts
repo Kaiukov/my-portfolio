@@ -8,12 +8,12 @@ export type McpWriteContext = {
   write?: Partial<WriteHandlers>;
 };
 
-function strField(body: JsonObject, key: string): string | undefined {
+export function strField(body: JsonObject, key: string): string | undefined {
   const val = body[key];
   return typeof val === "string" ? val : undefined;
 }
 
-function floatField(body: JsonObject, key: string): number | undefined {
+export function floatField(body: JsonObject, key: string): number | undefined {
   const raw = body[key];
   if (typeof raw === "number") {
     return Number.isFinite(raw) ? raw : undefined;
@@ -25,7 +25,7 @@ function floatField(body: JsonObject, key: string): number | undefined {
   return undefined;
 }
 
-function intField(body: JsonObject, ...keys: string[]): number | undefined {
+export function intField(body: JsonObject, ...keys: string[]): number | undefined {
   for (const key of keys) {
     if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
     const raw = body[key];
@@ -54,7 +54,7 @@ function parseBoolValue(raw: unknown): boolean | undefined {
   return undefined;
 }
 
-function boolFlag(body: JsonObject, ...keys: string[]): boolean {
+export function boolFlag(body: JsonObject, ...keys: string[]): boolean {
   for (const key of keys) {
     if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
     const raw = body[key];

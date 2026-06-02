@@ -56,7 +56,33 @@ Results: 14 pass, 0 fail, 0 skip
 ```
 
 `bun run typecheck`: ✓  
-`bun test`: 93 pass, 0 fail
+`bun test`: 519 pass, 0 fail
+
+## MCP adapter parity
+
+The MCP adapter (`portfolio-ts/src/mcp/`) now exposes both read and write tools,
+matching the JSON envelope contract of the CLI and HTTP API exactly.
+
+| MCP read tool | CLI equivalent | API route | Freshness meta | Parity |
+|---|---|---|---|---|
+| `status` | `status` | `GET /status` | Yes | Identical envelope to CLI and API |
+| `summary` | `summary` | `GET /summary` | Yes | Identical envelope to CLI and API |
+| `cash` | `cash` | `GET /cash` | Yes | Identical envelope to CLI and API |
+| `allocation` | `allocation` | `GET /allocation` | Yes | Identical envelope to CLI and API |
+| `concentration` | `concentration` | — | Yes | Identical envelope to CLI |
+| `performance` | `performance` | `GET /performance` | Yes | Identical envelope to CLI and API |
+| `mwr` | `mwr` | `GET /mwr` | Yes | Identical envelope to CLI and API |
+| `transactions` | `transactions` | — | — | Identical envelope to CLI (pagination) |
+| `report` | `report` | — | — | Identical envelope to CLI (pagination) |
+| `health` | `health` | `GET /health` | — | Identical envelope to CLI and API |
+| `verify_prices` | `verify_prices` | `GET /verify_prices` | — | Identical envelope to CLI and API |
+| `widget` | `widget` | — | — | Identical envelope to CLI |
+
+All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.
+No business logic is duplicated in the MCP adapter. Error handling maps through the
+same `toWriteErrorEnvelope` mapper used by the HTTP API adapter.
+
+
 
 ## Price fetch audit trail
 
