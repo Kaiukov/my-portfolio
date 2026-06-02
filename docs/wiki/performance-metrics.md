@@ -35,3 +35,7 @@ Benchmark metrics are joined on date, not array position.
 
 - Volatility (annualized), Sharpe ratio, max drawdown
 - Alpha, beta, correlation with benchmark
+
+## Money-Weighted Return (MWR)
+
+`portfolio mwr` output includes `data.portfolio_value` — the real current portfolio value in USD (sourced from the summary snapshot, not 0).

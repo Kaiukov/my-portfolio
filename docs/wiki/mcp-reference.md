@@ -1,0 +1,93 @@
+# MCP Reference
+
+Model Context Protocol (MCP) adapter for AI-agent integration. Lives in `portfolio-ts/src/mcp/`.
+
+The MCP adapter is a full read+write peer adapter alongside the CLI and HTTP API. It reuses the same shared service layer (`src/commands/*`) — no duplicated business logic.
+
+## Files
+
+| File | Exports | Purpose |
+|---|---|---|
+| `read.ts` | `mcpRead(toolName, args)` | Read tools (12 tools) |
+| `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (4 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
+| `index.ts` | Re-exports `mcpRead`, `mcpWrite`, `McpWriteContext` | Package entry point |
+
+## JSON Envelope
+
+All tools return the same envelope as the CLI and HTTP API (`portfolio-ts/src/response.ts`):
+
+```json
+{"ok": true, "command": "...", "data": ..., "meta": {"generated_at": "...", "count": null}}
+```
+
+Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."}, "meta": {...}}`
+
+Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/adapters/shared.ts`).
+
+## Read Tools
+
+Dispatched via `mcpRead(toolName, args)`. Each tool mirrors its CLI/API counterpart exactly.
+
+| Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
+|---|---|---|---|---|
+| `status` | `status` | — | `as_of` / `asOf` | Yes |
+| `summary` | `summary` | — | `as_of` / `asOf` | Yes |
+| `cash` | `cash` | — | `as_of` / `asOf` | Yes |
+| `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
+| `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
+| `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period` | Yes |
+| `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
+| `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
+| `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
+| `widget` | `widget` | `days` | `as_of` / `asOf` | — |
+
+Tools with "Freshness meta" inject `needs_recalc`/`recalc_warning`/`stale`/`prices_as_of`/`price_age_days` into the response `meta` envelope (see [CLI Reference](cli-reference.md#freshness-meta-fields)).
+
+## Write Tools
+
+Dispatched via `mcpWrite(toolName, args, ctx)`. Each tool mirrors its CLI/API counterpart exactly.
+
+| Tool name | CLI equivalent | Required args | Optional args |
+|---|---|---|---|
+| `add_transaction` | `add` | `date`, `asset`, `action`, `quantity`, `exchange` | `price`, `currency`, `fees`, `feeCurrency` / `fee_currency`, `account` |
+| `edit_transaction` | `edit` | `id` / `transactionId` / `transaction_id` / `transId` | `date`, `asset`, `action`, `quantity`, `price`, `currency`, `fees`, `feeCurrency` / `fee_currency`, `exchange`, `dataSource` / `data_source`, `account`, `dry_run` / `dryRun` / `dry-run` |
+| `delete_transaction` | `delete` | `id` / `transactionId` / `transaction_id` / `transId` | `dry_run` / `dryRun` / `dry-run`, `confirm` |
+| `exchange_currency` | `exchange` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `quantity`, `rate` | — |
+
+### Arg Aliases
+
+MCP tools accept multiple key aliases per arg:
+
+- `add_transaction`: `feeCurrency` or `fee_currency`
+- `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
+- `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
+- `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
+
+## Write Context
+
+`mcpWrite` accepts an optional `ctx` parameter (`McpWriteContext`) with a `write` field for injecting custom `WriteHandlers` (useful for testing or overriding the default handlers from `src/adapters/shared.ts`).
+
+## Dry-Run and Confirm
+
+- `edit_transaction` and `delete_transaction` support dry-run via `dry_run: true` (or `dryRun`, `dry-run`).
+- `delete_transaction` requires `confirm: true` unless dry-run.
+
+## Error Handling
+
+Unknown tool names return:
+
+```json
+{"ok": false, "command": "mcp", "error": {"code": "NOT_FOUND", "message": "Unsupported MCP read/write tool: <name>"}}
+```
+
+All other errors pass through `toWriteErrorEnvelope` from `src/adapters/shared.ts`, producing the same error codes as the HTTP API:
+
+| Error type | `error.code` |
+|---|---|
+| `ValidationError` | `"VALIDATION_ERROR"` |
+| `NotFoundError` | `"NOT_FOUND"` |
+| Any other error | `"INTERNAL_ERROR"` |
+
+See [Platform Adapters](../platform-adapters.md) for a full reference.
