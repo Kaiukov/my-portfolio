@@ -9,6 +9,7 @@
 |---|---|
 | 2026-05-31 | Initial draft |
 | 2026-06-02 | API + MCP write adapters implemented (#181); shared write layer + envelope parity |
+| 2026-06-02 | MCP read tools added (#194) — full CLI/API/MCP parity for all read commands |
 
 ---
 
@@ -175,11 +176,30 @@ Optional fields for POST/PATCH/PUT bodies: price, currency, fees, feeCurrency (o
 
 ## 3. MCP Adapter
 
-MCP (Model Context Protocol) write adapter for AI-agent integration. Implemented in `portfolio-ts/src/mcp/adapter.ts`.
+MCP (Model Context Protocol) adapter for AI-agent integration. Implemented in `portfolio-ts/src/mcp/`. Exposes both read and write tools, reusing the same shared service layer as the CLI and HTTP API.
 
 ### Scope
 
-**Write operations only** (read operations use the CLI or HTTP API). Exposes add/edit/delete/exchange as MCP-style tool calls, reusing the same shared `WriteHandlers` from `src/adapters/shared.ts` as the HTTP API.
+**Full read and write.** All read-only CLI commands are available as MCP read tools (`mcpRead` in `src/mcp/read.ts`). Write operations are available as MCP write tools (`mcpWrite` in `src/mcp/adapter.ts`), reusing the same shared `WriteHandlers` from `src/adapters/shared.ts` as the HTTP API.
+
+### Read Tools
+
+All read tools return the same JSON envelope as the CLI and HTTP API (`response.ts`). The `mcpRead(toolName, args)` function dispatches by tool name, exactly mirroring the envelope produced by the CLI and/or HTTP API handler.
+
+| Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
+|---|---|---|---|---|
+| `status` | `status` | — | `as_of` / `asOf` | Yes |
+| `summary` | `summary` | — | `as_of` / `asOf` | Yes |
+| `cash` | `cash` | — | `as_of` / `asOf` | Yes |
+| `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
+| `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
+| `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period` | Yes |
+| `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
+| `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
+| `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
+| `widget` | `widget` | `days` | `as_of` / `asOf` | — |
 
 ### Write Tools
 
@@ -600,6 +620,7 @@ Per issue #98, the suggested implementation order. Completed items are marked.
 5. iOS Scriptable widget endpoint/payload — **Not implemented** (the `widget` CLI command exists)
 6. ~~Write API endpoints~~ — **Done** (#181)
 7. ~~MCP write adapter~~ — **Done** (#181)
+8. ~~MCP read adapter~~ — **Done** (#194)
 
 ---
 
@@ -626,6 +647,7 @@ Per issue #98, the suggested implementation order. Completed items are marked.
 | `portfolio-ts/PARITY.md` | Command parity between Python and TypeScript implementations |
 | `portfolio-ts/src/response.ts` | Canonical JSON envelope implementation |
 | `portfolio-ts/src/api/server.ts` | HTTP API adapter (read + write routes) |
-| `portfolio-ts/src/mcp/adapter.ts` | MCP write adapter (`mcpWrite`) |
+| `portfolio-ts/src/mcp/adapter.ts` | MCP write adapter (`mcpWrite`) + arg helpers |
+| `portfolio-ts/src/mcp/read.ts` | MCP read adapter (`mcpRead`) — full CLI/API parity |
 | `portfolio-ts/src/adapters/shared.ts` | Shared `WriteHandlers` + `toWriteErrorEnvelope` (used by API + MCP) |
 | `.agents/skills/my-portfolio-cli/SKILL.md` | Skill file for CLI change workflows |
