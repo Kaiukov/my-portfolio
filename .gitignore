@@ -96,3 +96,14 @@ portfolio.restored-*.sql
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Local orchestration / agent-session artifacts (not part of the portfolio project)
+.claude/skills/
+.claude/scheduled_tasks.lock
+.agents/skills/cmux-agent-workflows
+.agents/skills/smartdca
+docs/models.json
+docs/models.toml
+docs/prompt.md
+scripts/cmux-monitor.sh
+session-ses_*.md
