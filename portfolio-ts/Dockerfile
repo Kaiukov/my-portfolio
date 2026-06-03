@@ -1,17 +1,16 @@
-FROM oven/bun:1-slim
+FROM oven/bun:1-alpine
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl gnupg lsb-release ca-certificates jq procps \
-    && install -d /usr/share/postgresql-common/pgdg \
-    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client-16 \
-    && rm -rf /var/lib/apt/lists/*
+# Runtime deps only:
+#   postgresql16-client -> pg_dump for the backup command
+#   ca-certificates     -> TLS for R2/Cloudflare/Yahoo calls
+#   jq, procps          -> in-container diagnostics
+# Alpine ships postgresql16-client directly, so there's no pgdg apt repo to add
+# and therefore no curl/gnupg/lsb-release build tools to install and purge.
+RUN apk add --no-cache postgresql16-client ca-certificates jq procps
 
 COPY portfolio-ts/package.json portfolio-ts/bun.lock ./
 RUN bun install --frozen-lockfile --production
