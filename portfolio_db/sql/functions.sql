@@ -1730,4 +1730,42 @@ BEGIN
 END;
 $$;
 
+-- Income report: aggregated DIVIDEND and INTEREST transactions with FX conversion
+DROP FUNCTION IF EXISTS portfolio_income_sql(DATE, DATE, TEXT) CASCADE;
+CREATE OR REPLACE FUNCTION portfolio_income_sql(
+    p_as_of_date DATE DEFAULT CURRENT_DATE,
+    p_from_date DATE DEFAULT NULL,
+    p_asset TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+    asset          TEXT,
+    action         TEXT,
+    total_quantity DOUBLE PRECISION,
+    usd_value      DOUBLE PRECISION,
+    currency       TEXT,
+    transaction_count BIGINT,
+    first_date     TEXT,
+    last_date      TEXT
+)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT
+        t.asset::TEXT,
+        t.action::TEXT,
+        SUM(t.quantity)::DOUBLE PRECISION AS total_quantity,
+        SUM(cash_amount_to_usd_sql(t.asset, t.quantity, t.date))::DOUBLE PRECISION AS usd_value,
+        COALESCE(t.currency, 'USD')::TEXT AS currency,
+        COUNT(*)::BIGINT AS transaction_count,
+        MIN(t.date)::TEXT AS first_date,
+        MAX(t.date)::TEXT AS last_date
+    FROM transactions t
+    WHERE t.action IN ('DIVIDEND', 'INTEREST')
+      AND t.date <= p_as_of_date
+      AND (p_from_date IS NULL OR t.date >= p_from_date)
+      AND (p_asset IS NULL OR upper(t.asset) = upper(p_asset))
+    GROUP BY t.asset, t.action, t.currency
+    ORDER BY t.asset, t.action
+$$;
+
 SET check_function_bodies = on;

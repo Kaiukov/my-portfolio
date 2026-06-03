@@ -20,6 +20,7 @@ import { getPerformance } from "./commands/performance.js";
 import { getMwr } from "./commands/mwr.js";
 import { getHealth } from "./commands/health.js";
 import { getWidget } from "./commands/widget.js";
+import { getIncome } from "./commands/income.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import {
@@ -71,6 +72,7 @@ Commands:
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
+  income          Dividend and interest income report (--as-of-date, --from-date, --asset)
   init            Verify database schema is ready
   backup          Create a pg_dump backup
   backup push     Upload portfolio snapshot to S3-compatible storage
@@ -409,6 +411,15 @@ export async function dispatch(argv: string[]): Promise<void> {
       const maxAgeDays = int(flags, "max-age-days");
       const result = await getHealth(maxAgeDays);
       console.log(JSON.stringify(success("health", result), null, 2));
+      return;
+    }
+
+    case "income": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      const asset = str(flags, "asset");
+      const result = await getIncome(asOfDate, fromDate, asset);
+      console.log(JSON.stringify(success("income", result, result.rows.length), null, 2));
       return;
     }
 
