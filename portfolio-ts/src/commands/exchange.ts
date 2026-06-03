@@ -4,6 +4,7 @@ import {
   ValidationError,
   parseDate,
   validatePositiveFloat,
+  isStablecoin,
 } from "../validators.js";
 
 export interface ExchangeResult {
@@ -44,21 +45,35 @@ export async function exchangeCurrency(params: {
   }
 
   // Cash-like validation via PostgreSQL — avoids duplicating domain logic
-  const fromCashRow = await querySingle<{ ok: boolean }>(
-    "SELECT is_cash_like_sql($1) AS ok",
-    [params.fromAsset],
-  );
-  const toCashRow = await querySingle<{ ok: boolean }>(
-    "SELECT is_cash_like_sql($1) AS ok",
-    [params.toAsset],
-  );
+  let fromCashOk: boolean;
+  let toCashOk: boolean;
 
-  if (!fromCashRow?.ok) {
+  if (isStablecoin(params.fromAsset)) {
+    fromCashOk = true;
+  } else {
+    const row = await querySingle<{ ok: boolean }>(
+      "SELECT is_cash_like_sql($1) AS ok",
+      [params.fromAsset],
+    );
+    fromCashOk = !!row?.ok;
+  }
+
+  if (isStablecoin(params.toAsset)) {
+    toCashOk = true;
+  } else {
+    const row = await querySingle<{ ok: boolean }>(
+      "SELECT is_cash_like_sql($1) AS ok",
+      [params.toAsset],
+    );
+    toCashOk = !!row?.ok;
+  }
+
+  if (!fromCashOk) {
     throw new ValidationError(
       `Exchange --from asset must be cash-like, got ${JSON.stringify(params.fromAsset)}`,
     );
   }
-  if (!toCashRow?.ok) {
+  if (!toCashOk) {
     throw new ValidationError(
       `Exchange --to asset must be cash-like, got ${JSON.stringify(params.toAsset)}`,
     );

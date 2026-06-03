@@ -3,6 +3,18 @@
 
 SET check_function_bodies = off;
 
+-- Stablecoin allowlist: single source of truth for USD-pegged stablecoins.
+-- Classification is GLOBAL/unconditional by design (stablecoins are cash 1:1 USD
+-- regardless of entry date). The feature assumes no pre-existing BUY/SELL
+-- stablecoin-symbol rows; verified 0 such rows on prod+dev at rollout 2026-06-03.
+-- See regression guard test: stablecoin.integration.test.ts ("regression: no harm
+-- to non-stablecoin portfolios").
+DROP FUNCTION IF EXISTS is_stablecoin_sql(TEXT) CASCADE;
+CREATE OR REPLACE FUNCTION is_stablecoin_sql(asset TEXT)
+RETURNS BOOLEAN LANGUAGE sql IMMUTABLE AS $$
+    SELECT upper(asset) IN ('USDT','USDC','DAI','TUSD','USDP','FDUSD','PYUSD','USDE','GUSD')
+$$;
+
 -- Detect asset kind: metadata-driven asset class detection
 -- First checks asset_metadata.yahoo_quote_type, falls back to suffix-based detection
 -- This is ORTHOGONAL to get_asset_type_sql (PRICING bucket) — asset_kind is for display/allocation
@@ -39,6 +51,7 @@ AS $$
             WHEN RIGHT(p_ticker, 3) = '.HK' THEN 'stock'
             WHEN RIGHT(p_ticker, 3) = '.SG' THEN 'stock'
             WHEN p_ticker LIKE 'CASH %' THEN 'cash'
+            WHEN is_stablecoin_sql(p_ticker) THEN 'cash'
             ELSE 'stock'
         END
     )
@@ -81,6 +94,9 @@ AS $$
     SELECT CASE
         WHEN ticker = 'USD' THEN 'cash_base'
         WHEN ticker IN ('EUR', 'GBP', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'JPY') THEN 'cash_fx'
+        -- cash_stable: unconditional global classification — stablecoins are always 1:1 USD.
+        -- See is_stablecoin_sql comment for going-forward guarantee.
+        WHEN is_stablecoin_sql(ticker) THEN 'cash_stable'
         WHEN RIGHT(ticker, 5) = 'USD=X' THEN 'cash_fx'
         WHEN RIGHT(ticker, 4) = '-USD' THEN 'crypto'
         WHEN RIGHT(ticker, 2) = '.L' THEN 'stock_gbp'
@@ -102,7 +118,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 IMMUTABLE
 AS $$
-    SELECT get_asset_type_sql(asset) IN ('cash_base', 'cash_fx')
+    SELECT get_asset_type_sql(asset) IN ('cash_base', 'cash_fx', 'cash_stable')
         OR asset LIKE 'CASH %'
 $$;
 
@@ -114,6 +130,8 @@ LANGUAGE sql
 IMMUTABLE
 AS $$
     SELECT CASE
+        WHEN asset_type = 'cash_stable' THEN upper(asset)
+        WHEN asset LIKE 'CASH %' AND is_stablecoin_sql(btrim(substring(asset FROM 6))) THEN upper(btrim(substring(asset FROM 6)))
         WHEN asset_type = 'cash_base' OR asset = 'CASH USD' THEN 'USD'
         WHEN asset = 'EUR' THEN 'EURUSD=X'
         WHEN asset = 'GBP' THEN 'GBPUSD=X'
@@ -140,6 +158,8 @@ LANGUAGE sql
 IMMUTABLE
 AS $$
     SELECT CASE
+        WHEN asset_type = 'cash_stable' THEN upper(asset)
+        WHEN asset LIKE 'CASH %' AND is_stablecoin_sql(btrim(substring(asset FROM 6))) THEN upper(btrim(substring(asset FROM 6)))
         WHEN asset_type = 'cash_fx' THEN
             CASE
                 WHEN asset = 'EUR' THEN 'EURUSD=X'
@@ -185,6 +205,7 @@ AS $$
         WHEN symbol = 'AUDUSD=X' THEN 'AUD'
         WHEN symbol = 'HKDUSD=X' THEN 'HKD'
         WHEN symbol = 'SGDUSD=X' THEN 'SGD'
+        WHEN is_stablecoin_sql(symbol) THEN symbol
         ELSE symbol
     END
 $$;
@@ -253,6 +274,8 @@ LANGUAGE sql
 STABLE
 AS $$
     SELECT CASE
+        WHEN get_asset_type_sql(p_asset) = 'cash_stable' THEN p_quantity
+        WHEN is_stablecoin_sql(normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset))) THEN p_quantity
         WHEN normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset)) = 'USD' THEN p_quantity
         ELSE p_quantity * price_asof_sql(
             normalize_cash_asset_sql(p_asset, get_asset_type_sql(p_asset)),
@@ -275,6 +298,7 @@ AS $$
     SELECT CASE
         WHEN p_fee_currency IS NULL OR p_fee_currency = '' THEN 'USD'
         WHEN get_asset_type_sql(p_fee_currency) = 'cash_base' THEN 'USD'
+        WHEN get_asset_type_sql(p_fee_currency) = 'cash_stable' THEN upper(p_fee_currency)
         WHEN get_asset_type_sql(p_fee_currency) = 'cash_fx'
             THEN get_cash_key_for_asset_sql(p_fee_currency, get_asset_type_sql(p_fee_currency))
         ELSE p_fee_currency || '-USD'
@@ -290,6 +314,7 @@ STABLE
 AS $$
     SELECT CASE
         WHEN get_asset_type_sql(p_asset) = 'cash_base' THEN p_quantity
+        WHEN get_asset_type_sql(p_asset) = 'cash_stable' THEN p_quantity
         WHEN get_asset_type_sql(p_asset) = 'cash_fx' THEN p_quantity * price_asof_sql(p_asset, p_as_of_date)
         WHEN get_asset_type_sql(p_asset) IN (
             'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
@@ -335,9 +360,11 @@ STABLE
 AS $$
     SELECT ticker, ticker_category
     FROM (
-        -- All unique assets from transactions
+        -- All unique assets from transactions (exclude stablecoins — they need no price)
         SELECT t.asset AS ticker, 'asset'::TEXT AS ticker_category
         FROM transactions t
+        WHERE NOT is_stablecoin_sql(t.asset)
+          AND NOT (t.asset LIKE 'CASH %' AND is_stablecoin_sql(btrim(substring(t.asset FROM 6))))
 
         UNION
 
@@ -406,11 +433,13 @@ AS $$
         UNION
 
         -- Asset tickers needed for non-fiat fee currencies (e.g. BTC -> BTC-USD)
+        -- Exclude stablecoins — they need no price
         SELECT DISTINCT fee_currency_ticker_sql(t.fee_currency), 'asset'::TEXT
         FROM transactions t
         WHERE t.fee_currency IS NOT NULL
           AND t.fee_currency <> ''
-          AND get_asset_type_sql(t.fee_currency) NOT IN ('cash_base', 'cash_fx')
+          AND get_asset_type_sql(t.fee_currency) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
+          AND NOT is_stablecoin_sql(t.fee_currency)
           AND fee_currency_ticker_sql(t.fee_currency) <> 'USD'
     ) sub
     WHERE ticker IS NOT NULL
@@ -442,7 +471,8 @@ AS $$
     SELECT DISTINCT t.asset::TEXT, t.date
     FROM transactions t
     WHERE t.action IN ('BUY', 'SELL')
-      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
+      AND NOT is_stablecoin_sql(t.asset)
       AND t.asset NOT LIKE 'CASH %'
 
     UNION
@@ -454,7 +484,8 @@ AS $$
         END
     FROM transactions t
     WHERE t.action IN ('BUY', 'SELL')
-      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx')
+      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
+      AND NOT is_stablecoin_sql(t.asset)
       AND t.asset NOT LIKE 'CASH %'
 
     UNION
@@ -485,6 +516,7 @@ AS $$
     WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
        OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
       AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+      AND NOT is_stablecoin_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)))
 
     UNION
 
@@ -498,6 +530,7 @@ AS $$
     WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
        OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
       AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+      AND NOT is_stablecoin_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)))
 $$;
 
 -- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.
@@ -730,6 +763,7 @@ AS $$
             CASE
                 WHEN t.asset LIKE 'CASH %' THEN t.asset
                 WHEN get_asset_type_sql(t.asset) = 'cash_base' THEN 'CASH USD'
+                WHEN get_asset_type_sql(t.asset) = 'cash_stable' THEN 'CASH ' || upper(t.asset)
                 WHEN get_asset_type_sql(t.asset) = 'cash_fx'
                     THEN 'CASH ' || cash_display_currency_sql(get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset)))
                 ELSE NULL
@@ -802,6 +836,7 @@ AS $$
         a.balance,
         CASE
             WHEN a.cash_key = 'USD' THEN a.balance
+            WHEN is_stablecoin_sql(a.cash_key) THEN a.balance
             ELSE a.balance * COALESCE(price_asof_sql(a.cash_key, p_as_of_date), 0)
         END AS usd_value
     FROM aggregated a
@@ -863,7 +898,11 @@ AS $$
     cash_valued AS (
         SELECT
             c.cash_key AS asset,
-            CASE WHEN c.cash_key = 'USD' THEN 'cash_base'::TEXT ELSE 'cash_fx'::TEXT END AS asset_type,
+            CASE
+                WHEN c.cash_key = 'USD' THEN 'cash_base'::TEXT
+                WHEN is_stablecoin_sql(c.cash_key) THEN 'cash_stable'::TEXT
+                ELSE 'cash_fx'::TEXT
+            END AS asset_type,
             c.balance AS net_quantity,
             c.usd_value AS value_usd
         FROM portfolio_cash_sql(p_as_of_date) c

@@ -10,6 +10,7 @@ import {
   validateAssetSymbol,
   validateAction,
   validateCurrency,
+  isStablecoin,
 } from "../validators.js";
 import { parseRow, type TransactionRow } from "./transactions.js";
 
@@ -116,14 +117,16 @@ export async function editTransaction(
     if (finalPrice != null) {
       throw new ValidationError(`${newAction} does not accept a price`);
     }
-    const cashRow = await querySingle<{ ok: boolean }>(
-      "SELECT is_cash_like_sql($1) AS ok",
-      [newAsset],
-    );
-    if (!cashRow?.ok) {
-      throw new ValidationError(
-        `${newAction} requires a cash asset, got ${newAsset}`,
+    if (!isStablecoin(newAsset)) {
+      const cashRow = await querySingle<{ ok: boolean }>(
+        "SELECT is_cash_like_sql($1) AS ok",
+        [newAsset],
       );
+      if (!cashRow?.ok) {
+        throw new ValidationError(
+          `${newAction} requires a cash asset, got ${newAsset}`,
+        );
+      }
     }
   }
 
