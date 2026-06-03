@@ -1076,6 +1076,10 @@ $$;
 -- ALL financial math is owned by PostgreSQL. TypeScript must not duplicate any calculation.
 -- avg_daily_return uses portfolio_daily_return (INCLUDES cash flows).
 -- avg_investment_return and all other risk metrics use investment_return (EXCLUDES cash flows).
+-- time_weighted_return_pct = geometric-linked investment_return, EXCLUDES cash flows (cash-flow-neutral).
+-- total_return_pct = (end_value - start_value) / start_value, INCLUDES cash-flow / contribution effects (balance growth).
+--   For the flow-adjusted return use MWR/XIRR (portfolio mwr).
+-- investment_return daily basis = prior market value PV_{t-1} (not contributed capital).
 -- total_gain = start_value * TWR decimal — pure market gain in USD, excludes cash flows.
 --   Reconcile: total_gain / start_value * 100 ≈ time_weighted_return_pct.
 -- Benchmark-relative metrics are joined on date, not aligned by array position.
@@ -1354,7 +1358,10 @@ AS $$
         COALESCE(d.avg_dd, 0.0)                                                                 AS avg_drawdown,
         COALESCE(d.avg_dd_dur, 0.0)                                                             AS avg_drawdown_duration,
         COALESCE(d.twr_decimal_val * 100.0, 0.0)                                                AS time_weighted_return_pct,
-        COALESCE(d.twr_decimal_val * 100.0, 0.0)                                                AS total_return_pct,
+        CASE WHEN COALESCE(d.start_value, 0.0) > 0
+             THEN ((d.end_value - d.start_value) / d.start_value) * 100.0
+             ELSE 0.0
+        END                                                                                     AS total_return_pct,
         COALESCE(d.med_monthly, 0.0)                                                            AS median_monthly_return,
         CASE
             WHEN d.start_date_val IS NOT NULL

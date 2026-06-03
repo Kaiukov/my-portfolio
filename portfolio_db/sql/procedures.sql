@@ -76,8 +76,8 @@ BEGIN
                 v_portfolio_daily_return := 0;
             END IF;
 
-            IF v_adjusted_base > 0 THEN
-                v_investment_return := ((v_portfolio_value - v_prev_value - v_cash_flow_impact) / v_adjusted_base) * 100;
+            IF v_prev_value > 0 THEN
+                v_investment_return := ((v_portfolio_value - v_prev_value - v_cash_flow_impact) / v_prev_value) * 100;
             ELSE
                 v_investment_return := 0;
             END IF;
