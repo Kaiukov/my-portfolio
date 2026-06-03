@@ -5,6 +5,7 @@ import { getAllocation } from "../commands/allocation.js";
 import { getCash } from "../commands/cash.js";
 import { getCurrencyExposure } from "../commands/currency_exposure.js";
 import { getIncome } from "../commands/income.js";
+import { getRealizedGains } from "../commands/realized_gains.js";
 import { getPerformance } from "../commands/performance.js";
 import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
@@ -71,6 +72,14 @@ const ROUTES: Record<string, Handler> = {
     const asset = strParam(p, "asset");
     const data = await getIncome(asOf, fromDate, asset);
     return success("income", data, data.rows.length);
+  },
+  "/realized_gains": async (p) => {
+    const fromDate = strParam(p, "from_date");
+    const toDate = strParam(p, "to_date");
+    const asset = strParam(p, "asset");
+    const byYear = parseBoolValue(p.get("by_year")) ?? false;
+    const data = await getRealizedGains({ fromDate, toDate, asset, byYear });
+    return success("realized_gains", data, data.rows.length);
   },
   "/performance": async (p) => {
     const asOfDate = strParam(p, "as_of");

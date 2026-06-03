@@ -1882,4 +1882,162 @@ AS $$
     ORDER BY (co.holdings_usd + co.cash_usd) DESC
 $$;
 
+-- FIFO realized gains detail: one row per SELL↔BUY lot match.
+-- Reuses the same temp-table FIFO approach as portfolio_fifo_metrics_sql.
+-- BUY creates lots; SELL consumes oldest lots first and emits a row per match.
+-- SPLIT adjusts lots (no taxable event, no emitted rows).
+-- Holding days = sell_date - matched buy date.
+DROP FUNCTION IF EXISTS portfolio_realized_gains_sql(DATE, DATE, TEXT);
+CREATE OR REPLACE FUNCTION portfolio_realized_gains_sql(
+    p_from_date DATE DEFAULT NULL,
+    p_to_date DATE DEFAULT CURRENT_DATE,
+    p_asset TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+    sell_date        DATE,
+    sell_id          BIGINT,
+    asset            TEXT,
+    sell_quantity    DOUBLE PRECISION,
+    proceeds_usd     DOUBLE PRECISION,
+    cost_basis_usd   DOUBLE PRECISION,
+    realized_gain    DOUBLE PRECISION,
+    holding_days     INTEGER,
+    matched_buy_id   BIGINT,
+    matched_buy_date DATE
+)
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+DECLARE
+    v_lot_cost       DOUBLE PRECISION;
+    v_proceeds       DOUBLE PRECISION;
+    v_sell_qty       DOUBLE PRECISION;
+    v_consume        DOUBLE PRECISION;
+    v_cost_consumed  DOUBLE PRECISION;
+    v_proceeds_share DOUBLE PRECISION;
+    v_realized       DOUBLE PRECISION;
+    lot_rec          RECORD;
+    tx               RECORD;
+BEGIN
+    DROP TABLE IF EXISTS fifo_lots_detail;
+    CREATE TEMP TABLE fifo_lots_detail (
+        id SERIAL PRIMARY KEY,
+        asset TEXT NOT NULL,
+        remaining_qty DOUBLE PRECISION NOT NULL,
+        unit_cost_usd DOUBLE PRECISION NOT NULL,
+        buy_id BIGINT NOT NULL,
+        buy_date DATE NOT NULL
+    ) ON COMMIT DROP;
+
+    CREATE INDEX IF NOT EXISTS idx_fifo_lots_detail_asset ON fifo_lots_detail (asset, id);
+
+    FOR tx IN
+        SELECT t.id, t.date, t.asset, upper(t.action) AS action,
+               t.quantity, t.price, t.fees,
+               COALESCE(NULLIF(t.currency, ''), 'USD') AS currency,
+               COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency
+        FROM transactions t
+        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT')
+          AND NOT is_cash_like_sql(t.asset)
+          AND (p_from_date IS NULL OR t.date >= p_from_date)
+          AND t.date <= p_to_date
+          AND (p_asset IS NULL OR upper(t.asset) = upper(p_asset))
+        ORDER BY t.date ASC, t.id ASC
+    LOOP
+        IF tx.action = 'BUY' THEN
+            v_lot_cost := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
+                        + cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
+
+            INSERT INTO fifo_lots_detail (asset, remaining_qty, unit_cost_usd, buy_id, buy_date)
+            VALUES (tx.asset, tx.quantity,
+                    CASE WHEN tx.quantity > 0 THEN v_lot_cost / tx.quantity ELSE 0 END,
+                    tx.id, tx.date);
+        ELSIF tx.action = 'SELL' THEN
+            v_sell_qty := tx.quantity;
+            v_proceeds := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
+                        - cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
+
+            FOR lot_rec IN
+                SELECT id, remaining_qty, unit_cost_usd, buy_id, buy_date
+                FROM fifo_lots_detail
+                WHERE asset = tx.asset AND remaining_qty > 0
+                ORDER BY id ASC
+            LOOP
+                EXIT WHEN v_sell_qty <= 0;
+
+                v_consume := LEAST(lot_rec.remaining_qty, v_sell_qty);
+                v_cost_consumed := v_consume * lot_rec.unit_cost_usd;
+                v_proceeds_share := v_proceeds * (v_consume / tx.quantity);
+                v_realized := v_proceeds_share - v_cost_consumed;
+
+                sell_date        := tx.date;
+                sell_id          := tx.id;
+                asset            := tx.asset;
+                sell_quantity    := v_consume;
+                proceeds_usd     := v_proceeds_share;
+                cost_basis_usd   := v_cost_consumed;
+                realized_gain    := v_realized;
+                holding_days     := (tx.date - lot_rec.buy_date);
+                matched_buy_id   := lot_rec.buy_id;
+                matched_buy_date := lot_rec.buy_date;
+
+                RETURN NEXT;
+
+                UPDATE fifo_lots_detail
+                SET remaining_qty = remaining_qty - v_consume
+                WHERE id = lot_rec.id;
+
+                v_sell_qty := v_sell_qty - v_consume;
+            END LOOP;
+        ELSIF tx.action = 'SPLIT' THEN
+            UPDATE fifo_lots_detail
+            SET remaining_qty = remaining_qty * tx.quantity,
+                unit_cost_usd = CASE WHEN tx.quantity <> 0
+                                THEN unit_cost_usd / tx.quantity
+                                ELSE unit_cost_usd END
+            WHERE asset = tx.asset AND remaining_qty > 0;
+        END IF;
+    END LOOP;
+
+    RETURN;
+END;
+$$;
+
+-- Realized gains aggregated by tax year.
+-- Groups by EXTRACT(YEAR FROM sell_date). Short-term = holding_days <= 365.
+-- Builds on top of portfolio_realized_gains_sql detail.
+DROP FUNCTION IF EXISTS portfolio_realized_gains_by_year_sql(INTEGER, INTEGER);
+CREATE OR REPLACE FUNCTION portfolio_realized_gains_by_year_sql(
+    p_from_year INTEGER DEFAULT NULL,
+    p_to_year INTEGER DEFAULT NULL
+)
+RETURNS TABLE (
+    tax_year             INTEGER,
+    total_realized_gain  DOUBLE PRECISION,
+    short_term_gain      DOUBLE PRECISION,
+    long_term_gain       DOUBLE PRECISION,
+    transaction_count    BIGINT
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH detail AS (
+        SELECT sell_date, asset, realized_gain, holding_days, sell_id
+        FROM portfolio_realized_gains_sql(
+            CASE WHEN p_from_year IS NOT NULL THEN make_date(p_from_year, 1, 1) ELSE NULL END,
+            CASE WHEN p_to_year IS NOT NULL THEN make_date(p_to_year, 12, 31) ELSE CURRENT_DATE END,
+            NULL
+        )
+    )
+    SELECT
+        EXTRACT(YEAR FROM sell_date)::INTEGER                     AS tax_year,
+        COALESCE(SUM(realized_gain), 0)::DOUBLE PRECISION         AS total_realized_gain,
+        COALESCE(SUM(CASE WHEN holding_days <= 365 THEN realized_gain ELSE 0 END), 0)::DOUBLE PRECISION AS short_term_gain,
+        COALESCE(SUM(CASE WHEN holding_days > 365 THEN realized_gain ELSE 0 END), 0)::DOUBLE PRECISION  AS long_term_gain,
+        COUNT(DISTINCT sell_id)::BIGINT                            AS transaction_count
+    FROM detail
+    GROUP BY EXTRACT(YEAR FROM sell_date)
+    ORDER BY tax_year
+$$;
+
 SET check_function_bodies = on;

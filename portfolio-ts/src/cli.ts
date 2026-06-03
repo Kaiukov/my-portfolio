@@ -23,6 +23,7 @@ import { getHealth } from "./commands/health.js";
 import { getWidget } from "./commands/widget.js";
 import { getCurrencyExposure } from "./commands/currency_exposure.js";
 import { getIncome } from "./commands/income.js";
+import { getRealizedGains } from "./commands/realized_gains.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import {
@@ -77,6 +78,7 @@ Commands:
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
   income          Dividend and interest income report (--as-of-date, --from-date, --asset)
+  realized-gains  FIFO realized gains detail by lot and tax year (--from-date, --to-date, --asset, --by-year)
   init            Verify database schema is ready
   backup          Create a pg_dump backup
   backup push     Upload portfolio snapshot to S3-compatible storage
@@ -463,6 +465,17 @@ export async function dispatch(argv: string[]): Promise<void> {
       const asset = str(flags, "asset");
       const result = await getIncome(asOfDate, fromDate, asset);
       console.log(JSON.stringify(success("income", result, result.rows.length), null, 2));
+      return;
+    }
+
+    case "realized-gains":
+    case "gains": {
+      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      const toDate = str(flags, "to-date") ?? str(flags, "to_date");
+      const asset = str(flags, "asset");
+      const byYear = bool(flags, "by-year") || bool(flags, "by_year");
+      const result = await getRealizedGains({ fromDate, toDate, asset, byYear });
+      console.log(JSON.stringify(success("realized_gains", result, result.rows.length), null, 2));
       return;
     }
 
