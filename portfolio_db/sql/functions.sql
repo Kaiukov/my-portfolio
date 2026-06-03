@@ -1958,10 +1958,10 @@ BEGIN
                         - cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
 
             FOR lot_rec IN
-                SELECT id, remaining_qty, unit_cost_usd, buy_id, buy_date
-                FROM fifo_lots_detail
-                WHERE asset = tx.asset AND remaining_qty > 0
-                ORDER BY id ASC
+                SELECT f.id, f.remaining_qty, f.unit_cost_usd, f.buy_id, f.buy_date
+                FROM fifo_lots_detail f
+                WHERE f.asset = tx.asset AND f.remaining_qty > 0
+                ORDER BY f.id ASC
             LOOP
                 EXIT WHEN v_sell_qty <= 0;
 
@@ -1983,19 +1983,19 @@ BEGIN
 
                 RETURN NEXT;
 
-                UPDATE fifo_lots_detail
-                SET remaining_qty = remaining_qty - v_consume
-                WHERE id = lot_rec.id;
+                UPDATE fifo_lots_detail f
+                SET remaining_qty = f.remaining_qty - v_consume
+                WHERE f.id = lot_rec.id;
 
                 v_sell_qty := v_sell_qty - v_consume;
             END LOOP;
         ELSIF tx.action = 'SPLIT' THEN
-            UPDATE fifo_lots_detail
-            SET remaining_qty = remaining_qty * tx.quantity,
+            UPDATE fifo_lots_detail f
+            SET remaining_qty = f.remaining_qty * tx.quantity,
                 unit_cost_usd = CASE WHEN tx.quantity <> 0
-                                THEN unit_cost_usd / tx.quantity
-                                ELSE unit_cost_usd END
-            WHERE asset = tx.asset AND remaining_qty > 0;
+                                THEN f.unit_cost_usd / tx.quantity
+                                ELSE f.unit_cost_usd END
+            WHERE f.asset = tx.asset AND f.remaining_qty > 0;
         END IF;
     END LOOP;
 
