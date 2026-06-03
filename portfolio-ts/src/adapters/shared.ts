@@ -3,6 +3,7 @@ import { addTransaction } from "../commands/add.js";
 import { editTransaction, editDryRun } from "../commands/edit.js";
 import { deleteTransaction, deletePreview } from "../commands/delete.js";
 import { exchangeCurrency } from "../commands/exchange.js";
+import { applySplit } from "../commands/split.js";
 import { NotFoundError, ValidationError } from "../validators.js";
 
 export type WriteHandlers = {
@@ -12,6 +13,7 @@ export type WriteHandlers = {
   deleteTransaction: typeof deleteTransaction;
   deletePreview: typeof deletePreview;
   exchangeCurrency: typeof exchangeCurrency;
+  applySplit: typeof applySplit;
 };
 
 export const defaultWriteHandlers: WriteHandlers = {
@@ -21,6 +23,7 @@ export const defaultWriteHandlers: WriteHandlers = {
   deleteTransaction,
   deletePreview,
   exchangeCurrency,
+  applySplit,
 };
 
 export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): WriteHandlers {
@@ -31,6 +34,7 @@ export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): Wr
     deleteTransaction: overrides.deleteTransaction ?? defaultWriteHandlers.deleteTransaction,
     deletePreview: overrides.deletePreview ?? defaultWriteHandlers.deletePreview,
     exchangeCurrency: overrides.exchangeCurrency ?? defaultWriteHandlers.exchangeCurrency,
+    applySplit: overrides.applySplit ?? defaultWriteHandlers.applySplit,
   };
 }
 

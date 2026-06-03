@@ -581,7 +581,7 @@ BEGIN
                COALESCE(NULLIF(t.currency, ''), 'USD') AS currency,
                COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency
         FROM transactions t
-        WHERE upper(t.action) IN ('BUY', 'SELL')
+        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT')
           AND NOT is_cash_like_sql(t.asset)
           AND t.date <= p_as_of_date
         ORDER BY t.date ASC, t.id ASC
@@ -618,6 +618,13 @@ BEGIN
 
                 v_sell_qty := v_sell_qty - v_consume;
             END LOOP;
+        ELSIF tx.action = 'SPLIT' THEN
+            UPDATE fifo_lots
+            SET remaining_qty = remaining_qty * tx.quantity,
+                unit_cost_usd = CASE WHEN tx.quantity <> 0
+                                THEN unit_cost_usd / tx.quantity
+                                ELSE unit_cost_usd END
+            WHERE asset = tx.asset AND remaining_qty > 0;
         END IF;
     END LOOP;
 
@@ -864,21 +871,30 @@ AS $$
         WHERE date <= p_as_of_date
           AND NOT is_cash_like_sql(asset)
     ),
-    net_holdings AS (
+    split_factors AS (
         SELECT
             asset,
-            SUM(CASE
-                WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-                WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-                ELSE 0
-            END) AS net_quantity
+            COALESCE(EXP(SUM(LN(quantity))), 1) AS factor
         FROM filtered_txns
+        WHERE action = 'SPLIT'
         GROUP BY asset
+    ),
+    net_holdings AS (
+        SELECT
+            f.asset,
+            SUM(CASE
+                WHEN f.action IN ('BUY', 'EXCHANGE_TO') THEN f.quantity
+                WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                ELSE 0
+            END) * COALESCE(sf.factor, 1) AS net_quantity
+        FROM filtered_txns f
+        LEFT JOIN split_factors sf ON f.asset = sf.asset
+        GROUP BY f.asset, sf.factor
         HAVING SUM(CASE
-            WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-            WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
+            WHEN f.action IN ('BUY', 'EXCHANGE_TO') THEN f.quantity
+            WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
             ELSE 0
-        END) <> 0
+        END) * COALESCE(sf.factor, 1) <> 0
     ),
     non_cash_valued AS (
         SELECT
@@ -951,18 +967,31 @@ DECLARE
     v_fx_price DOUBLE PRECISION;
 BEGIN
     FOR h IN
+        WITH filtered AS (
+            SELECT asset, action, quantity
+            FROM transactions
+            WHERE date <= p_as_of_date
+              AND NOT is_cash_like_sql(asset)
+        ),
+        split_factors AS (
+            SELECT
+                asset,
+                COALESCE(EXP(SUM(LN(quantity))), 1) AS factor
+            FROM filtered
+            WHERE action = 'SPLIT'
+            GROUP BY asset
+        )
         SELECT
-            asset,
-            SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-                     WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-                     ELSE 0 END) AS net_quantity
-        FROM transactions
-        WHERE date <= p_as_of_date
-          AND NOT is_cash_like_sql(asset)
-        GROUP BY asset
-        HAVING SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-                         WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-                         ELSE 0 END) <> 0
+            f.asset,
+            SUM(CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO') THEN f.quantity
+                     WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                     ELSE 0 END) * COALESCE(sf.factor, 1) AS net_quantity
+        FROM filtered f
+        LEFT JOIN split_factors sf ON f.asset = sf.asset
+        GROUP BY f.asset, sf.factor
+        HAVING SUM(CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO') THEN f.quantity
+                         WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                         ELSE 0 END) * COALESCE(sf.factor, 1) <> 0
     LOOP
         v_price := price_asof_sql(h.asset, p_as_of_date);
         IF v_price IS NULL THEN

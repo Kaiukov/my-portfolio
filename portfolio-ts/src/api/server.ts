@@ -163,6 +163,7 @@ function allowedMethodsForPath(path: string): string[] | null {
   if (path === "/transactions") return ["POST"];
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
   if (path === "/exchange") return ["POST"];
+  if (path === "/split") return ["POST"];
   if (ROUTES[path]) return ["GET"];
   return null;
 }
@@ -274,6 +275,31 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
       return jsonResponse(success("exchange", result), 200);
     }
 
+    if (path === "/split" && req.method === "POST") {
+      const body = await parseJsonBody(req);
+      const dateStr = strField(body, "date");
+      const asset = strField(body, "asset");
+      const ratio = floatField(body, "ratio");
+      const confirm = body["confirm"];
+
+      if (!dateStr || !asset || ratio === undefined) {
+        throw new ValidationError("Required: date, asset, ratio, confirm");
+      }
+
+      if (!confirm) {
+        throw new ValidationError("--confirm is required for split");
+      }
+
+      const result = await write.applySplit({
+        dateStr,
+        asset,
+        ratio,
+        exchange: strField(body, "exchange"),
+        account: strField(body, "account"),
+      });
+      return jsonResponse(success("split", result), 200);
+    }
+
     const transMatch = TRANSACTION_ID_ROUTE.exec(path);
     if (!transMatch) {
       return jsonResponse(error("api", "NOT_FOUND", `Route ${path} not found`), 404);
@@ -325,9 +351,11 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         ? "add"
         : path === "/exchange"
           ? "exchange"
-          : TRANSACTION_ID_ROUTE.test(path)
-            ? (req.method === "DELETE" ? "delete" : "edit")
-            : "api";
+          : path === "/split"
+            ? "split"
+            : TRANSACTION_ID_ROUTE.test(path)
+              ? (req.method === "DELETE" ? "delete" : "edit")
+              : "api";
     const mapped = toWriteErrorEnvelope(routeCommand, err);
     return jsonResponse(mapped.body, mapped.status);
   }

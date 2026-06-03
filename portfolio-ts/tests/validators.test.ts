@@ -101,7 +101,8 @@ describe("USER_ACTIONS", () => {
     expect(USER_ACTIONS.has("INTEREST")).toBe(true);
     expect(USER_ACTIONS.has("FEE")).toBe(true);
     expect(USER_ACTIONS.has("TAX")).toBe(true);
-    expect(USER_ACTIONS.size).toBe(9);
+    expect(USER_ACTIONS.has("SPLIT")).toBe(true);
+    expect(USER_ACTIONS.size).toBe(10);
   });
 });
 
