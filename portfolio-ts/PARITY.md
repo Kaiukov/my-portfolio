@@ -28,6 +28,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio summary` | `portfolio-ts summary` | **accepted behavior change** | Calls `portfolio_summary_sql(as_of_date)` — PostgreSQL owns all calculations. Returns holding count, total cash, portfolio value, transaction metadata. Supports `--as-of-date`. |
 | `portfolio performance` | `portfolio-ts performance` | **implemented** | Calls `portfolio_performance_sql(as_of_date, benchmark, from_date)` — PostgreSQL owns all TWR/Sharpe/MDD/benchmark calculations. Returns total_gain (investment returns only, reconciled with TWR), median_monthly_return via PERCENTILE_CONT, CAGR, risk metrics, benchmark comparison. Supports `--as-of-date`, `--benchmark`, `--from-date`, `--period` (ytd/1y/6m/3m). |
 | `portfolio mwr` | `portfolio-ts mwr` | **implemented** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as percentage. Supports `--as-of-date`. |
+| `portfolio currency_exposure` | `portfolio-ts currency_exposure` | **accepted behavior change** | Calls `portfolio_currency_exposure_sql(as_of_date)` — PostgreSQL owns all calculations. Groups holdings and cash by currency with usd_value, pct, holdings_usd, cash_usd sub-columns. Same `--as-of-date` support and freshness meta as other read-only commands. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
 
 ## Validation results (live against PostgreSQL)
@@ -52,8 +53,9 @@ Mode: Phase 5 (TS structure validation only)
   PASS  allocation — JSON shape valid, allocation rows with percentages present
   PASS  summary — JSON shape valid, portfolio summary metrics present
   PASS  concentration — JSON shape valid, HHI and top holdings present
+  PASS  currency_exposure — JSON shape valid, per-currency exposure rows present
 
-Results: 14 pass, 0 fail, 0 skip
+Results: 15 pass, 0 fail, 0 skip
 ```
 
 `bun run typecheck`: ✓  
@@ -78,6 +80,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `health` | `health` | `GET /health` | — | Identical envelope to CLI and API |
 | `verify_prices` | `verify_prices` | `GET /verify_prices` | — | Identical envelope to CLI and API |
 | `widget` | `widget` | — | — | Identical envelope to CLI |
+| `currency_exposure` | `currency_exposure` | `GET /currency_exposure` | Yes | Identical envelope to CLI and API |
 | `income` | `income` | `GET /income` | — | Identical envelope to CLI and API |
 
 All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.

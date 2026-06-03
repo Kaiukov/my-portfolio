@@ -35,6 +35,20 @@ mock.module("../src/commands/income.js", () => ({
   getIncome: mock(() => Promise.resolve(MOCK_INCOME_RESULT)),
 }));
 
+const MOCK_CURRENCY_EXPOSURE_RESULT = {
+  as_of_date: "2026-06-03",
+  portfolio_value: 150000.00,
+  rows: [
+    { currency: "USD", usd_value: 120000.00, pct: 80.0, holdings_usd: 115000.0, cash_usd: 5000.0 },
+    { currency: "EUR", usd_value: 20000.00, pct: 13.33, holdings_usd: 18000.0, cash_usd: 2000.0 },
+    { currency: "GBP", usd_value: 10000.00, pct: 6.67, holdings_usd: 9000.0, cash_usd: 1000.0 },
+  ],
+};
+
+mock.module("../src/commands/currency_exposure.js", () => ({
+  getCurrencyExposure: mock(() => Promise.resolve(MOCK_CURRENCY_EXPOSURE_RESULT)),
+}));
+
 describe("CLI parsing", () => {
   test("--help prints help text", async () => {
     const mod = await import("../src/cli.js");
@@ -49,6 +63,7 @@ describe("CLI parsing", () => {
     expect(output).toContain("status");
     expect(output).toContain("income");
     expect(output).toContain("transactions");
+    expect(output).toContain("currency_exposure");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
@@ -100,6 +115,23 @@ describe("CLI parsing", () => {
     expect(output.command).toBe("income");
     expect(output.data).toEqual(MOCK_INCOME_RESULT);
     expect(output.meta.count).toBe(1);
+    expect(output.meta.generated_at).toBeDefined();
+
+    logSpy.mockRestore();
+  });
+
+  test("currency_exposure command returns correct JSON envelope", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    await mod.dispatch(["bun", "src/cli.ts", "currency_exposure", "--as-of-date", "2026-06-03"]);
+
+    expect(logSpy).toHaveBeenCalled();
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("currency_exposure");
+    expect(output.data).toEqual(MOCK_CURRENCY_EXPOSURE_RESULT);
+    expect(output.meta.count).toBe(3);
     expect(output.meta.generated_at).toBeDefined();
 
     logSpy.mockRestore();

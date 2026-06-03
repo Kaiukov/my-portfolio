@@ -1768,4 +1768,73 @@ AS $$
     ORDER BY t.asset, t.action
 $$;
 
+-- Currency exposure: aggregates portfolio exposure by currency across both
+-- holdings and cash. Non-cash holdings mapped via get_asset_type_sql (e.g.
+-- stock_eur → EUR, stock_gbp → GBP, stock_usd → USD). Cash rows mapped
+-- via the currency column from portfolio_cash_sql. Returns per-currency
+-- breakdown with holdings_usd (non-cash market value) and cash_usd sub-columns.
+-- pct sums to ~100 across rows; Σ usd_value == portfolio_value_asof_sql.
+DROP FUNCTION IF EXISTS portfolio_currency_exposure_sql(DATE) CASCADE;
+CREATE OR REPLACE FUNCTION portfolio_currency_exposure_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (
+    as_of_date       TEXT,
+    portfolio_value  DOUBLE PRECISION,
+    currency         TEXT,
+    usd_value        DOUBLE PRECISION,
+    pct              DOUBLE PRECISION,
+    holdings_usd     DOUBLE PRECISION,
+    cash_usd         DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH holdings AS (
+        SELECT
+            cash_display_currency_sql(
+                cash_currency_for_asset_type_sql(a.asset_type)
+            ) AS currency,
+            SUM(a.value_usd) AS holdings_usd
+        FROM portfolio_allocation_sql(p_as_of_date) a
+        WHERE a.asset_type NOT IN ('cash_base', 'cash_fx', 'cash_stable')
+          AND a.value_usd <> 0
+        GROUP BY 1
+    ),
+    cash AS (
+        SELECT
+            c.currency,
+            SUM(c.usd_value) AS cash_usd
+        FROM portfolio_cash_sql(p_as_of_date) c
+        WHERE c.usd_value <> 0
+        GROUP BY c.currency
+    ),
+    combined AS (
+        SELECT
+            COALESCE(h.currency, c.currency) AS currency,
+            COALESCE(h.holdings_usd, 0::double precision) AS holdings_usd,
+            COALESCE(c.cash_usd, 0::double precision) AS cash_usd
+        FROM holdings h
+        FULL OUTER JOIN cash c ON h.currency = c.currency
+    ),
+    total AS (
+        SELECT COALESCE(SUM(co.holdings_usd + co.cash_usd), 0::double precision) AS portfolio_total
+        FROM combined co
+    )
+    SELECT
+        p_as_of_date::TEXT,
+        t.portfolio_total,
+        co.currency,
+        (co.holdings_usd + co.cash_usd),
+        CASE
+            WHEN t.portfolio_total > 0::double precision
+            THEN ((co.holdings_usd + co.cash_usd) / t.portfolio_total) * 100.0::double precision
+            ELSE 0::double precision
+        END,
+        co.holdings_usd,
+        co.cash_usd
+    FROM combined co
+    CROSS JOIN total t
+    WHERE (co.holdings_usd + co.cash_usd) <> 0::double precision
+    ORDER BY (co.holdings_usd + co.cash_usd) DESC
+$$;
+
 SET check_function_bodies = on;
