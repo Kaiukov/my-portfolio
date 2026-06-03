@@ -1,5 +1,13 @@
 export const STALE_MAX_AGE_DAYS = 5;
 
+export const STABLECOINS = new Set([
+  "USDT", "USDC", "DAI", "TUSD", "USDP", "FDUSD", "PYUSD", "USDE", "GUSD",
+]);
+
+export function isStablecoin(asset: string): boolean {
+  return STABLECOINS.has(asset.toUpperCase());
+}
+
 export class ValidationError extends Error {
   readonly code = "VALIDATION_ERROR" as const;
   constructor(message: string) {

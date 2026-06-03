@@ -8,6 +8,8 @@ import {
   validateAction,
   validateCurrency,
   USER_ACTIONS,
+  STABLECOINS,
+  isStablecoin,
   ValidationError,
 } from "../src/validators.js";
 
@@ -184,5 +186,34 @@ describe("validateCurrency", () => {
   test("throws for unknown currency", () => {
     expect(() => validateCurrency("XYZ", "--currency")).toThrow(ValidationError);
     expect(() => validateCurrency("BTC", "--currency")).toThrow(ValidationError);
+  });
+});
+
+describe("isStablecoin", () => {
+  test("true for all 9 stablecoins (any case)", () => {
+    const coins = ["USDT", "USDC", "DAI", "TUSD", "USDP", "FDUSD", "PYUSD", "USDE", "GUSD"];
+    for (const c of coins) {
+      expect(isStablecoin(c)).toBe(true);
+      expect(isStablecoin(c.toLowerCase())).toBe(true);
+    }
+    expect(STABLECOINS.size).toBe(9);
+  });
+
+  test("false for USD", () => {
+    expect(isStablecoin("USD")).toBe(false);
+    expect(isStablecoin("usd")).toBe(false);
+  });
+
+  test("false for BTC-USD", () => {
+    expect(isStablecoin("BTC-USD")).toBe(false);
+  });
+
+  test("false for EURUSD=X", () => {
+    expect(isStablecoin("EURUSD=X")).toBe(false);
+  });
+
+  test("false for stock-like tickers", () => {
+    expect(isStablecoin("SPYM")).toBe(false);
+    expect(isStablecoin("AAPL")).toBe(false);
   });
 });
