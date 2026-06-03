@@ -8,7 +8,7 @@ This page documents the dev and prod runtime boundaries only. The app runs via D
 
 | Field | Value |
 |---|---|
-| Role | integration / live testing |
+| Role | integration / QA twin (permanent) |
 | Host | `ssh root@dev` (Tailscale alias) -> `root@100.118.240.71` |
 | Type | Linux host with Docker + Docker Compose (no native bun/psql) |
 | Deploy path | `/root/portfolio-dev` |
@@ -21,8 +21,18 @@ This page documents the dev and prod runtime boundaries only. The app runs via D
 
 | Field | Value |
 |---|---|
-| Role | production |
+| Role | production (live, serving) |
 | Host | Proxmox CT 104 (Docker-in-LXC) -> `192.168.1.104` |
 | Provisioned | 2026-06-01 |
-| Status | provisioned but NOT yet serving - code/secrets/data deploy is manual (orchestrator-only) |
-| Blocker | must resolve the dev->prod Cloudflare KV/R2 collision (shared namespace) before the prod publish job goes live, otherwise dev and prod overwrite each other's widget snapshot |
+| API | read + write (`POST`/`PATCH`/`DELETE /transactions`, `/exchange`) |
+| Automation / cron | price refresh hourly · widget publish hourly · backup every 24h |
+| Scheduler KV key | `prod:portfolio:0fa1c86` |
+| R2 backup prefix | `prod/` |
+| Data | ~205 transactions, cost basis preserved |
+| First deployed | issue #178 (2026-06-01) |
+
+## Lifecycle
+
+- **Dev** is a **permanent QA twin**, NOT scheduled for decommission. It serves as the integration environment for testing changes before they reach prod.
+- **Prod** is the canonical environment for consumers — the agent skills on the openclaw/hermes box (`192.168.1.131`) and the production widget (`portfolio-widget-prod.kayukov2010.workers.dev`) point at prod (`192.168.1.104:8787`).
+- The two environments run independently. They may show slightly different `portfolio_value` due to price-refresh timing, while sharing identical cost basis. Decommissioning dev would be a separate, explicit decision — it is not implied by prod going live.
