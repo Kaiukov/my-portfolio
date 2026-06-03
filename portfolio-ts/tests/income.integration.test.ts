@@ -41,16 +41,18 @@ MAYBE_SKIP("integration: income command", () => {
             ) ON COMMIT DROP
           `);
 
-          // AAPL pays USD dividends, SAP.DE pays EUR dividends
+          // Dividends/interest are attributed by cash currency, not source security.
+          // asset is the cash currency (e.g. 'USD', 'EUR'), matching the real data model.
+          // See income.ts for details.
           await tx.unsafe(`
             INSERT INTO transactions (date, asset, action, quantity, price, fees, currency, fee_currency)
             VALUES
               ('2026-01-15', 'USD', 'DEPOSIT', 10000, NULL, 0, 'USD', NULL),
-              ('2026-01-20', 'AAPL', 'DIVIDEND', 0.25, NULL, 0, 'USD', NULL),
-              ('2026-02-20', 'AAPL', 'DIVIDEND', 0.25, NULL, 0, 'USD', NULL),
-              ('2026-03-20', 'AAPL', 'DIVIDEND', 0.30, NULL, 0, 'USD', NULL),
-              ('2026-01-31', 'SAP.DE', 'DIVIDEND', 0.50, NULL, 0, 'EUR', NULL),
-              ('2026-02-28', 'SAP.DE', 'DIVIDEND', 0.50, NULL, 0, 'EUR', NULL),
+              ('2026-01-20', 'USD', 'DIVIDEND', 0.25, NULL, 0, 'USD', NULL),
+              ('2026-02-20', 'USD', 'DIVIDEND', 0.25, NULL, 0, 'USD', NULL),
+              ('2026-03-20', 'USD', 'DIVIDEND', 0.30, NULL, 0, 'USD', NULL),
+              ('2026-01-31', 'EUR', 'DIVIDEND', 0.50, NULL, 0, 'EUR', NULL),
+              ('2026-02-28', 'EUR', 'DIVIDEND', 0.50, NULL, 0, 'EUR', NULL),
               ('2026-03-15', 'USD', 'INTEREST', 5.00, NULL, 0, 'USD', NULL)
           `);
 
@@ -65,8 +67,8 @@ MAYBE_SKIP("integration: income command", () => {
 
           const asOf = "2026-03-31";
 
-          // AAPL dividends: 0.25 + 0.25 + 0.30 = 0.80 total, USD so 1:1 = 0.80
-          // SAP.DE dividends: 0.50*1.10 + 0.50*1.08 = 0.55 + 0.54 = 1.09
+          // USD dividends: 0.25 + 0.25 + 0.30 = 0.80 total, USD so 1:1 = 0.80
+          // EUR dividends: 0.50*1.10 + 0.50*1.08 = 0.55 + 0.54 = 1.09
           // INTEREST: 5.00 USD = 5.00
           // Total income: 0.80 + 1.09 + 5.00 = 6.89
 
@@ -75,30 +77,30 @@ MAYBE_SKIP("integration: income command", () => {
             [asOf],
           ) as any[];
 
-          const aapl = rows.find((r: any) => r.asset === "AAPL");
-          const sap = rows.find((r: any) => r.asset === "SAP.DE");
-          const interest = rows.find((r: any) => r.asset === "USD" && r.action === "INTEREST");
+          const usdDiv = rows.find((r: any) => r.asset === "USD" && r.action === "DIVIDEND");
+          const eurDiv = rows.find((r: any) => r.asset === "EUR" && r.action === "DIVIDEND");
+          const usdInt = rows.find((r: any) => r.asset === "USD" && r.action === "INTEREST");
 
-          expect(aapl).toBeDefined();
-          expect(aapl.action).toBe("DIVIDEND");
-          expect(Number(aapl.total_quantity)).toBeCloseTo(0.80, 6);
-          expect(Number(aapl.usd_value)).toBeCloseTo(0.80, 2);
-          expect(aapl.currency).toBe("USD");
-          expect(Number(aapl.transaction_count)).toBe(3);
+          expect(usdDiv).toBeDefined();
+          expect(usdDiv.action).toBe("DIVIDEND");
+          expect(Number(usdDiv.total_quantity)).toBeCloseTo(0.80, 6);
+          expect(Number(usdDiv.usd_value)).toBeCloseTo(0.80, 2);
+          expect(usdDiv.currency).toBe("USD");
+          expect(Number(usdDiv.transaction_count)).toBe(3);
 
-          expect(sap).toBeDefined();
-          expect(sap.action).toBe("DIVIDEND");
-          expect(Number(sap.total_quantity)).toBeCloseTo(1.00, 6);
-          expect(Number(sap.usd_value)).toBeCloseTo(1.09, 2);
-          expect(sap.currency).toBe("EUR");
-          expect(Number(sap.transaction_count)).toBe(2);
+          expect(eurDiv).toBeDefined();
+          expect(eurDiv.action).toBe("DIVIDEND");
+          expect(Number(eurDiv.total_quantity)).toBeCloseTo(1.00, 6);
+          expect(Number(eurDiv.usd_value)).toBeCloseTo(1.09, 2);
+          expect(eurDiv.currency).toBe("EUR");
+          expect(Number(eurDiv.transaction_count)).toBe(2);
 
-          expect(interest).toBeDefined();
-          expect(interest.action).toBe("INTEREST");
-          expect(Number(interest.total_quantity)).toBeCloseTo(5.00, 6);
-          expect(Number(interest.usd_value)).toBeCloseTo(5.00, 2);
-          expect(interest.currency).toBe("USD");
-          expect(Number(interest.transaction_count)).toBe(1);
+          expect(usdInt).toBeDefined();
+          expect(usdInt.action).toBe("INTEREST");
+          expect(Number(usdInt.total_quantity)).toBeCloseTo(5.00, 6);
+          expect(Number(usdInt.usd_value)).toBeCloseTo(5.00, 2);
+          expect(usdInt.currency).toBe("USD");
+          expect(Number(usdInt.transaction_count)).toBe(1);
 
           // Verify status income field matches sum of income rows
           const [status] = await tx.unsafe(
@@ -122,19 +124,20 @@ MAYBE_SKIP("integration: income command", () => {
             (sum: number, r: any) => sum + Number(r.usd_value),
             0,
           );
-          // Only Feb 20 AAPL (0.25), Feb 28 SAP (0.54), Mar 15 INTEREST (5.00) = 5.79
-          // Actually AAPL Feb 20 = 0.25, SAP Feb 28 = 0.54, INTEREST Mar 15 = 5.00
+          // Only Feb 20 USD DIVIDEND (0.25), Feb 28 EUR DIVIDEND (0.54), Mar 15 INTEREST (5.00) = 5.79
           expect(fromFebTotal).toBeCloseTo(5.79, 2);
 
           // Test asset filter
-          const aaplOnly = await tx.unsafe(
+          const usdOnly = await tx.unsafe(
             `SELECT * FROM portfolio_income_sql($1, NULL, $2)`,
-            [asOf, "AAPL"],
+            [asOf, "USD"],
           ) as any[];
 
-          expect(aaplOnly.length).toBe(1);
-          expect(aaplOnly[0].asset).toBe("AAPL");
-          expect(Number(aaplOnly[0].usd_value)).toBeCloseTo(0.80, 2);
+          expect(usdOnly.length).toBe(2); // USD DIVIDEND + USD INTEREST
+          const usdDivFiltered = usdOnly.find((r: any) => r.action === "DIVIDEND");
+          const usdIntFiltered = usdOnly.find((r: any) => r.action === "INTEREST");
+          expect(Number(usdDivFiltered.usd_value)).toBeCloseTo(0.80, 2);
+          expect(Number(usdIntFiltered.usd_value)).toBeCloseTo(5.00, 2);
 
           // Test empty result (future from_date)
           const empty = await tx.unsafe(

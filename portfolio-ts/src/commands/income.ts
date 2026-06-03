@@ -1,5 +1,11 @@
 import { query } from "../db.js";
 
+// NOTE: Dividends/interest are attributed by CASH CURRENCY, not by source security.
+// The `asset` column in DIVIDEND/INTEREST transactions holds the cash currency
+// (e.g. 'USD', 'EUR'), not the paying ticker. Per-stock dividend attribution is not
+// supported by the current data model and would require a schema change.
+// See add.ts:62 for the validation that rejects stock-ticker dividends.
+
 export interface IncomeRow {
   asset: string;
   action: string;
