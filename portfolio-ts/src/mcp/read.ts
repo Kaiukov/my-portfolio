@@ -5,6 +5,7 @@ import { getSummary } from "../commands/summary.js";
 import { getCash } from "../commands/cash.js";
 import { getCurrencyExposure } from "../commands/currency_exposure.js";
 import { getIncome } from "../commands/income.js";
+import { getRealizedGains } from "../commands/realized_gains.js";
 import { getAllocation } from "../commands/allocation.js";
 import { getConcentration } from "../commands/concentration.js";
 import { getPerformance } from "../commands/performance.js";
@@ -62,6 +63,15 @@ export async function mcpRead(
       const asset = strField(args, "asset");
       const data = await getIncome(asOf, fromDate, asset);
       return success("income", data, data.rows.length);
+    }
+
+    if (toolName === "realized_gains") {
+      const fromDate = strField(args, "from_date") ?? strField(args, "fromDate");
+      const toDate = strField(args, "to_date") ?? strField(args, "toDate");
+      const asset = strField(args, "asset");
+      const byYear = (args["by_year"] ?? args["byYear"]) === true;
+      const data = await getRealizedGains({ fromDate, toDate, asset, byYear });
+      return success("realized_gains", data, data.rows.length);
     }
 
     if (toolName === "allocation") {

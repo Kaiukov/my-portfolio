@@ -22,6 +22,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio health` | `portfolio-ts health` | **accepted behavior change** | TypeScript uses `needs_recalc()` + `service_state` + checkpoint coverage. Python uses `analyze_price_coverage()` which checks series density as well. TypeScript health is simpler but surfacing the same key signals: DB reachable, stale data, missing price checkpoints. |
 | `portfolio init` | `portfolio-ts init` | **accepted behavior change** | TypeScript checks 4 core tables present. Python runs the full PortfolioService constructor which validates schema and runs setup. TypeScript is lighter — DB readiness check only. |
 | — | `portfolio-ts income` | **TS-only command** | Read-only dividend/interest report. Calls `portfolio_income_sql()`. No Python equivalent. `--as-of-date`, `--from-date`, `--asset` filters. Returns per-asset/usd_value rows + totals. |
+| — | `portfolio-ts realized-gains` | **TS-only command** | Read-only FIFO realized gains detail. Calls `portfolio_realized_gains_sql()` and `portfolio_realized_gains_by_year_sql()`. No Python equivalent. `--from-date`, `--to-date`, `--asset`, `--by-year` filters. Returns per-lot matched-gain rows + tax-year aggregation. Consistency invariant: SUM(detail.realized_gain) == status.realized_gain. |
 | `portfolio backup` | `portfolio-ts backup` | **parity tested** | `pg_dump` subprocess. Same flags. `--out` path optional. |
 | — | `portfolio-ts sync` | **TS-only command** | Convenience: `daily_maintenance_check` + `repair_prices` + `recalculate`. Stale-price max-age enforced via `--max-age-days` (default `STALE_MAX_AGE_DAYS=5`). No Python equivalent. |
 | `portfolio allocation` | `portfolio-ts allocation` | **accepted behavior change** | Calls `portfolio_allocation_sql(as_of_date)` — PostgreSQL owns all calculations. Returns FX-converted per-asset USD values with allocation percentages. TypeScript only sums `value_usd` for `portfolio_value` and formats rows. Supports `--as-of-date`. |
@@ -83,6 +84,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `widget` | `widget` | — | — | Identical envelope to CLI |
 | `currency_exposure` | `currency_exposure` | `GET /currency_exposure` | Yes | Identical envelope to CLI and API |
 | `income` | `income` | `GET /income` | — | Identical envelope to CLI and API |
+| `realized_gains` | `realized-gains` | `GET /realized_gains` | — | Identical envelope to CLI and API |
 
 All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.
 No business logic is duplicated in the MCP adapter. Error handling maps through the
