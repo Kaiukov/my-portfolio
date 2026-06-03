@@ -581,7 +581,7 @@ BEGIN
                COALESCE(NULLIF(t.currency, ''), 'USD') AS currency,
                COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency
         FROM transactions t
-        WHERE upper(t.action) IN ('BUY', 'SELL')
+        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT')
           AND NOT is_cash_like_sql(t.asset)
           AND t.date <= p_as_of_date
         ORDER BY t.date ASC, t.id ASC
@@ -618,6 +618,13 @@ BEGIN
 
                 v_sell_qty := v_sell_qty - v_consume;
             END LOOP;
+        ELSIF tx.action = 'SPLIT' THEN
+            UPDATE fifo_lots
+            SET remaining_qty = remaining_qty * tx.quantity,
+                unit_cost_usd = CASE WHEN tx.quantity <> 0
+                                THEN unit_cost_usd / tx.quantity
+                                ELSE unit_cost_usd END
+            WHERE asset = tx.asset AND remaining_qty > 0;
         END IF;
     END LOOP;
 
@@ -859,26 +866,41 @@ LANGUAGE sql
 STABLE
 AS $$
     WITH filtered_txns AS (
-        SELECT asset, action, quantity
+        SELECT id, date, asset, action, quantity
         FROM transactions
         WHERE date <= p_as_of_date
           AND NOT is_cash_like_sql(asset)
     ),
     net_holdings AS (
         SELECT
-            asset,
-            SUM(CASE
-                WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-                WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-                ELSE 0
-            END) AS net_quantity
-        FROM filtered_txns
-        GROUP BY asset
-        HAVING SUM(CASE
-            WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-            WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-            ELSE 0
-        END) <> 0
+            f.asset,
+            SUM(
+                (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+                      WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                      ELSE 0 END)
+                * COALESCE((
+                    SELECT EXP(SUM(LN(s.quantity)))
+                    FROM filtered_txns s
+                    WHERE s.asset = f.asset
+                      AND s.action = 'SPLIT'
+                      AND (s.date > f.date OR (s.date = f.date AND s.id > f.id))
+                ), 1)
+            ) AS net_quantity
+        FROM filtered_txns f
+        WHERE f.action <> 'SPLIT'
+        GROUP BY f.asset
+        HAVING SUM(
+            (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+                  WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                  ELSE 0 END)
+            * COALESCE((
+                SELECT EXP(SUM(LN(s.quantity)))
+                FROM filtered_txns s
+                WHERE s.asset = f.asset
+                  AND s.action = 'SPLIT'
+                  AND (s.date > f.date OR (s.date = f.date AND s.id > f.id))
+            ), 1)
+        ) <> 0
     ),
     non_cash_valued AS (
         SELECT
@@ -951,18 +973,41 @@ DECLARE
     v_fx_price DOUBLE PRECISION;
 BEGIN
     FOR h IN
+        WITH filtered AS (
+            SELECT id, date, asset, action, quantity
+            FROM transactions
+            WHERE date <= p_as_of_date
+              AND NOT is_cash_like_sql(asset)
+        )
         SELECT
-            asset,
-            SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-                     WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-                     ELSE 0 END) AS net_quantity
-        FROM transactions
-        WHERE date <= p_as_of_date
-          AND NOT is_cash_like_sql(asset)
-        GROUP BY asset
-        HAVING SUM(CASE WHEN action IN ('BUY', 'EXCHANGE_TO') THEN quantity
-                         WHEN action IN ('SELL', 'EXCHANGE_FROM') THEN -quantity
-                         ELSE 0 END) <> 0
+            f.asset,
+            SUM(
+                (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+                      WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                      ELSE 0 END)
+                * COALESCE((
+                    SELECT EXP(SUM(LN(s.quantity)))
+                    FROM filtered s
+                    WHERE s.asset = f.asset
+                      AND s.action = 'SPLIT'
+                      AND (s.date > f.date OR (s.date = f.date AND s.id > f.id))
+                ), 1)
+            ) AS net_quantity
+        FROM filtered f
+        WHERE f.action <> 'SPLIT'
+        GROUP BY f.asset
+        HAVING SUM(
+            (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+                  WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
+                  ELSE 0 END)
+            * COALESCE((
+                SELECT EXP(SUM(LN(s.quantity)))
+                FROM filtered s
+                WHERE s.asset = f.asset
+                  AND s.action = 'SPLIT'
+                  AND (s.date > f.date OR (s.date = f.date AND s.id > f.id))
+            ), 1)
+        ) <> 0
     LOOP
         v_price := price_asof_sql(h.asset, p_as_of_date);
         IF v_price IS NULL THEN

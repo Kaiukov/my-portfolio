@@ -157,6 +157,30 @@ export async function mcpWrite(
       return success("exchange", result);
     }
 
+    if (toolName === "split") {
+      const dateStr = strField(args, "date");
+      const asset = strField(args, "asset");
+      const ratio = floatField(args, "ratio");
+      const confirm = args["confirm"];
+
+      if (!dateStr || !asset || ratio === undefined) {
+        throw new ValidationError("Required: date, asset, ratio, confirm");
+      }
+
+      if (!confirm) {
+        throw new ValidationError("--confirm is required for split");
+      }
+
+      const result = await write.applySplit({
+        dateStr,
+        asset,
+        ratio,
+        exchange: strField(args, "exchange"),
+        account: strField(args, "account"),
+      });
+      return success("split", result);
+    }
+
     return error("mcp", "NOT_FOUND", `Unsupported MCP write tool: ${toolName}`);
   } catch (err) {
     const command =
@@ -164,11 +188,13 @@ export async function mcpWrite(
         ? "add"
         : toolName === "exchange_currency"
           ? "exchange"
-          : toolName === "delete_transaction"
-            ? "delete"
-            : toolName === "edit_transaction"
-              ? "edit"
-              : "mcp";
+          : toolName === "split"
+            ? "split"
+            : toolName === "delete_transaction"
+              ? "delete"
+              : toolName === "edit_transaction"
+                ? "edit"
+                : "mcp";
     return toWriteErrorEnvelope(command, err).body;
   }
 }

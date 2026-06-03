@@ -7,6 +7,7 @@ import { addTransaction } from "./commands/add.js";
 import { editTransaction, editDryRun } from "./commands/edit.js";
 import { deleteTransaction, deletePreview } from "./commands/delete.js";
 import { exchangeCurrency } from "./commands/exchange.js";
+import { applySplit } from "./commands/split.js";
 import { recalculate, recalculateDryRun } from "./commands/recalculate.js";
 import { verifyPrices } from "./commands/verify_prices.js";
 import { repairPrices, repairPricesDryRun, runDailyMaintenanceCheck } from "./commands/repair_prices.js";
@@ -57,6 +58,7 @@ Commands:
   edit            Edit an existing transaction and recalculate
   delete          Delete a transaction and recalculate
   exchange        Record a currency exchange (two linked transactions)
+  split           Record a stock split (forward or reverse corporate action)
   recalculate     Rebuild daily_returns from cached prices
   verify_prices   Show price coverage diagnostics (read-only)
   repair_prices   Fetch missing prices from Yahoo Finance
@@ -296,6 +298,45 @@ export async function dispatch(argv: string[]): Promise<void> {
 
       const result = await exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
       console.log(JSON.stringify(success("exchange", result), null, 2));
+      return;
+    }
+
+    case "split": {
+      const dateStr = str(flags, "date");
+      const asset = str(flags, "asset");
+      const ratio = float(flags, "ratio");
+      const confirm = bool(flags, "confirm");
+
+      if (!dateStr || !asset || ratio === undefined) {
+        const env = error(
+          "split",
+          "VALIDATION_ERROR",
+          "Required: --date YYYY-MM-DD --asset SYMBOL --ratio N --confirm",
+        );
+        console.log(JSON.stringify(env, null, 2));
+        process.exit(1);
+        return;
+      }
+
+      if (!confirm) {
+        const env = error(
+          "split",
+          "VALIDATION_ERROR",
+          "--confirm is required for split (use --confirm to proceed)",
+        );
+        console.log(JSON.stringify(env, null, 2));
+        process.exit(1);
+        return;
+      }
+
+      const result = await applySplit({
+        dateStr,
+        asset,
+        ratio,
+        exchange: str(flags, "exchange"),
+        account: str(flags, "account"),
+      });
+      console.log(JSON.stringify(success("split", result), null, 2));
       return;
     }
 
