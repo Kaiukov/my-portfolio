@@ -3,6 +3,7 @@ import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
 import { getCash } from "../commands/cash.js";
+import { getIncome } from "../commands/income.js";
 import { getPerformance } from "../commands/performance.js";
 import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
@@ -56,6 +57,13 @@ const ROUTES: Record<string, Handler> = {
     const freshnessMeta = await getPriceFreshness(asOf);
     const data = await getCash(asOf);
     return success("cash", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+  },
+  "/income": async (p) => {
+    const asOf = strParam(p, "as_of");
+    const fromDate = strParam(p, "from_date");
+    const asset = strParam(p, "asset");
+    const data = await getIncome(asOf, fromDate, asset);
+    return success("income", data, data.rows.length);
   },
   "/performance": async (p) => {
     const asOfDate = strParam(p, "as_of");
