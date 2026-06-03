@@ -29,7 +29,7 @@ This page documents the dev and prod runtime boundaries only. The app runs via D
 | Scheduler KV key | `prod:portfolio:0fa1c86` |
 | R2 backup prefix | `prod/` |
 | Data | ~205 transactions, cost basis preserved |
-| First deployed | issue #135 |
+| First deployed | issue #178 (2026-06-01) |
 
 ## Lifecycle
 
