@@ -20,6 +20,7 @@ import { getPerformance } from "./commands/performance.js";
 import { getMwr } from "./commands/mwr.js";
 import { getHealth } from "./commands/health.js";
 import { getWidget } from "./commands/widget.js";
+import { getCurrencyExposure } from "./commands/currency_exposure.js";
 import { getIncome } from "./commands/income.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
@@ -63,6 +64,7 @@ Commands:
   allocation      Portfolio allocation breakdown by asset
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
+  currency_exposure  Portfolio exposure broken down by currency
   performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
@@ -613,6 +615,14 @@ export async function dispatch(argv: string[]): Promise<void> {
       const freshnessMeta = await getPriceFreshness(asOfDate);
       const result = await getConcentration(asOfDate, topN);
       console.log(JSON.stringify(success("concentration", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "currency_exposure": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getCurrencyExposure(asOfDate);
+      console.log(JSON.stringify(success("currency_exposure", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 

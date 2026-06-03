@@ -3,6 +3,7 @@ import { toWriteErrorEnvelope } from "../adapters/shared.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getCash } from "../commands/cash.js";
+import { getCurrencyExposure } from "../commands/currency_exposure.js";
 import { getIncome } from "../commands/income.js";
 import { getAllocation } from "../commands/allocation.js";
 import { getConcentration } from "../commands/concentration.js";
@@ -46,6 +47,13 @@ export async function mcpRead(
       const freshnessMeta = await getPriceFreshness(asOf);
       const data = await getCash(asOf);
       return success("cash", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+    }
+
+    if (toolName === "currency_exposure") {
+      const asOf = asOfVal(args);
+      const freshnessMeta = await getPriceFreshness(asOf);
+      const data = await getCurrencyExposure(asOf);
+      return success("currency_exposure", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
     }
 
     if (toolName === "income") {
