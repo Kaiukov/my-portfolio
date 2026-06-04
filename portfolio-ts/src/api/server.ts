@@ -16,6 +16,7 @@ import { getDiversification } from "../commands/diversification.js";
 import { getConcentration } from "../commands/concentration.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
+import { getDecomposition } from "../commands/decomposition.js";
 import { ValidationError } from "../validators.js";
 import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
@@ -82,6 +83,12 @@ const ROUTES: Record<string, Handler> = {
     const freshnessMeta = await getPriceFreshness(asOf);
     const data = await getDiversification(asOf, lookbackDays, minCorrelation);
     return success("diversification", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+  },
+  "/decomposition": async (p) => {
+    const asOf = strParam(p, "as_of");
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getDecomposition(asOf);
+    return success("decomposition", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/cash": async (p) => {
     const asOf = strParam(p, "as_of");

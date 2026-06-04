@@ -2567,4 +2567,114 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+-- Portfolio growth decomposition: split total growth into "from my savings"
+-- (net contributions) vs "from the market" (returns).
+--
+-- Convention: the baseline is the FIRST daily_returns row (earliest tracked date).
+-- All components are measured as DELTAS between two portfolio_status_sql snapshots:
+--   - start snapshot: portfolio_status_sql at the first daily_returns date
+--   - end snapshot:   portfolio_status_sql at p_as_of_date
+-- This guarantees the identity:
+--     total_growth_usd = from_contributions_usd + from_returns_usd
+--
+--   initial_value  = portfolio_value at the first daily_returns row (0 if none)
+--   current_value  = status_end.portfolio_value
+--   net_deposits   = (deposits_end - deposits_start) - (withdrawals_end - withdrawals_start)
+--   total_gain     = (realized_end - realized_start) + (unrealized_end - unrealized_start)
+--   total_income   = income_end - income_start
+--   total_fees_and_taxes = (fees_end - fees_start) + (taxes_end - taxes_start)
+--   total_growth_usd    = current_value - initial_value
+--   from_contributions_usd = net_deposits
+--   from_returns_usd       = market_return = delta of portfolio_status_sql.total_gain
+--                            (where total_gain = portfolio_value - (deposits - withdrawals))
+--                            This guarantees: total_growth_usd = from_contributions_usd + from_returns_usd
+--
+-- Guards:
+--   total_growth_usd <= 0  -> both pct set to 0 (USD split still meaningful)
+--   initial_value = 0      -> both pct set to 0
+--   from_contributions_pct capped at 100 via LEAST
+--   from_returns_pct = 100 - from_contributions_pct (complement)
+DROP FUNCTION IF EXISTS portfolio_decomposition_sql(DATE) CASCADE;
+
+CREATE OR REPLACE FUNCTION portfolio_decomposition_sql(
+    p_as_of_date DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    as_of_date             TEXT,
+    total_growth_usd       DOUBLE PRECISION,
+    total_growth_pct       DOUBLE PRECISION,
+    from_contributions_usd DOUBLE PRECISION,
+    from_contributions_pct DOUBLE PRECISION,
+    from_returns_usd       DOUBLE PRECISION,
+    from_returns_pct       DOUBLE PRECISION,
+    initial_value          DOUBLE PRECISION,
+    current_value          DOUBLE PRECISION,
+    net_deposits           DOUBLE PRECISION,
+    total_gain             DOUBLE PRECISION,
+    total_income           DOUBLE PRECISION,
+    total_fees_and_taxes   DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH start_info AS (
+        SELECT
+            (SELECT MIN(date) FROM daily_returns)            AS start_date,
+            COALESCE(
+                (SELECT portfolio_value FROM daily_returns ORDER BY date ASC LIMIT 1),
+                0.0
+            )                                                 AS initial_value
+    ),
+    status_start AS (
+        SELECT * FROM portfolio_status_sql(
+            COALESCE((SELECT start_date FROM start_info), '1900-01-01'::DATE)
+        )
+    ),
+    status_end AS (
+        SELECT * FROM portfolio_status_sql(p_as_of_date)
+    ),
+    pieces AS (
+        SELECT
+            p_as_of_date::TEXT                                                   AS as_of_date,
+            COALESCE(se.portfolio_value, 0.0)                                    AS current_value,
+            si.initial_value,
+            (COALESCE(se.deposits, 0.0) - COALESCE(ss.deposits, 0.0))
+              - (COALESCE(se.withdrawals, 0.0) - COALESCE(ss.withdrawals, 0.0)) AS net_deposits,
+            (COALESCE(se.realized_gain, 0.0) - COALESCE(ss.realized_gain, 0.0))
+              + (COALESCE(se.unrealized_gain, 0.0)
+                 - COALESCE(ss.unrealized_gain, 0.0))                            AS total_gain,
+            COALESCE(se.income, 0.0) - COALESCE(ss.income, 0.0)                  AS total_income,
+            (COALESCE(se.fees, 0.0) - COALESCE(ss.fees, 0.0))
+              + (COALESCE(se.taxes, 0.0) - COALESCE(ss.taxes, 0.0))             AS total_fees_and_taxes,
+            COALESCE(se.total_gain, 0.0) - COALESCE(ss.total_gain, 0.0)          AS market_return
+        FROM status_start ss
+        CROSS JOIN status_end se
+        CROSS JOIN start_info si
+    )
+    SELECT
+        p.as_of_date,
+        p.current_value - p.initial_value                                                                             AS total_growth_usd,
+        CASE WHEN p.initial_value > 0.0
+             THEN (p.current_value - p.initial_value) / p.initial_value * 100.0
+             ELSE 0.0
+        END                                                                                                            AS total_growth_pct,
+        p.net_deposits                                                                                                 AS from_contributions_usd,
+        CASE WHEN (p.current_value - p.initial_value) > 0.0 AND p.initial_value > 0.0
+             THEN LEAST(p.net_deposits / (p.current_value - p.initial_value) * 100.0, 100.0)
+             ELSE 0.0
+        END                                                                                                            AS from_contributions_pct,
+        p.market_return                                                                                                AS from_returns_usd,
+        CASE WHEN (p.current_value - p.initial_value) > 0.0 AND p.initial_value > 0.0
+             THEN 100.0 - LEAST(p.net_deposits / (p.current_value - p.initial_value) * 100.0, 100.0)
+             ELSE 0.0
+        END                                                                                                            AS from_returns_pct,
+        p.initial_value,
+        p.current_value,
+        p.net_deposits,
+        p.total_gain,
+        p.total_income,
+        p.total_fees_and_taxes
+    FROM pieces p
+$$;
+
 SET check_function_bodies = on;
