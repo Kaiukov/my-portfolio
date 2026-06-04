@@ -68,7 +68,7 @@ Commands:
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
   currency_exposure  Portfolio exposure broken down by currency
-  performance     Performance metrics: TWR, CAGR, Calmar, Sharpe, max drawdown, benchmark-relative (beta, alpha, IR), real (inflation-adjusted) return. Use --benchmark SPY (default) for full risk-adjusted suite; --inflation-rate 0.025 for real return.
+  performance     Performance metrics: TWR, CAGR, Calmar, Sharpe, max drawdown, benchmark-relative (beta, alpha, IR), real (inflation-adjusted) return. Includes period_returns (1M,3M,6M,YTD,1Y,SII) and rolling_12m_returns. Use --benchmark SPY (default) for full risk-adjusted suite; --inflation-rate 0.025 for real return.
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
   cloudflare      Cloudflare Workers: init, deploy, publish, sync, url, login, logout, whoami

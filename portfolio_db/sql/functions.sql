@@ -2095,4 +2095,107 @@ AS $$
     ORDER BY tax_year
 $$;
 
+---------- portfolio_period_returns_sql ----------
+-- #223 Multi-window period returns: 1M, 3M, 6M, YTD, 1Y, SII
+-- All returns are TWR (geometric-linked investment_return, cash-flow-neutral).
+-- SII MUST equal portfolio_performance_sql.time_weighted_return_pct.
+
+CREATE OR REPLACE FUNCTION portfolio_period_returns_sql(
+    p_as_of_date DATE DEFAULT CURRENT_DATE
+) RETURNS TABLE(period TEXT, from_date TEXT, return_pct DOUBLE PRECISION)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH params AS (
+        SELECT COALESCE(p_as_of_date, CURRENT_DATE) AS as_of_date
+    ),
+    min_dr AS (
+        SELECT MIN(date) AS sii_from
+        FROM daily_returns
+        CROSS JOIN params
+        WHERE portfolio_value > 0 AND date <= params.as_of_date
+    ),
+    windows(w, from_d) AS (
+        SELECT '1M',  as_of_date - INTERVAL '1 month'               FROM params
+        UNION ALL
+        SELECT '3M',  as_of_date - INTERVAL '3 months'              FROM params
+        UNION ALL
+        SELECT '6M',  as_of_date - INTERVAL '6 months'              FROM params
+        UNION ALL
+        SELECT 'YTD', date_trunc('year', as_of_date)::DATE          FROM params
+        UNION ALL
+        SELECT '1Y',  as_of_date - INTERVAL '1 year'                FROM params
+        UNION ALL
+        SELECT 'SII', COALESCE(min_dr.sii_from, params.as_of_date)  FROM min_dr CROSS JOIN params
+    )
+    SELECT
+        w.w AS period,
+        w.from_d::TEXT AS from_date,
+        COALESCE(
+            (EXP(SUM(LN(GREATEST(1.0 + dr.investment_return / 100.0, 1e-12))))
+             - 1) * 100.0,
+            0.0
+        )::DOUBLE PRECISION AS return_pct
+    FROM windows w
+    CROSS JOIN params p
+    LEFT JOIN daily_returns dr
+        ON dr.date >= w.from_d
+        AND dr.date <= p.as_of_date
+        AND dr.portfolio_value > 0
+    GROUP BY w.w, w.from_d
+    ORDER BY w.w;
+$$;
+
+---------- portfolio_rolling_returns_sql ----------
+-- #223 Rolling trailing returns over p_window_months.
+-- For each month-end ≤ as_of_date with ≥ p_window_months of prior
+-- daily_returns history, compute the geometric-linked TWR (investment_return).
+
+CREATE OR REPLACE FUNCTION portfolio_rolling_returns_sql(
+    p_as_of_date DATE DEFAULT CURRENT_DATE,
+    p_window_months INTEGER DEFAULT 12
+) RETURNS TABLE(date TEXT, return_pct DOUBLE PRECISION)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH params AS (
+        SELECT
+            COALESCE(p_as_of_date, CURRENT_DATE) AS as_of_date,
+            COALESCE(p_window_months, 12) AS window_months
+    ),
+    month_ends AS (
+        SELECT MAX(dr.date) AS me
+        FROM daily_returns dr
+        CROSS JOIN params p
+        WHERE dr.date <= p.as_of_date
+        GROUP BY date_trunc('month', dr.date)
+    ),
+    eligible AS (
+        SELECT me.me
+        FROM month_ends me
+        CROSS JOIN params p
+        WHERE (
+            SELECT MIN(dr2.date)
+            FROM daily_returns dr2
+            WHERE dr2.date <= me.me
+              AND dr2.portfolio_value > 0
+        ) <= me.me - (p.window_months * INTERVAL '1 month')
+    )
+    SELECT
+        e.me::TEXT AS date,
+        COALESCE(
+            (EXP(SUM(LN(GREATEST(1.0 + dr.investment_return / 100.0, 1e-12))))
+             - 1) * 100.0,
+            0.0
+        )::DOUBLE PRECISION AS return_pct
+    FROM eligible e
+    CROSS JOIN params p
+    LEFT JOIN daily_returns dr
+        ON dr.date > e.me - (p.window_months * INTERVAL '1 month')
+        AND dr.date <= e.me
+        AND dr.portfolio_value > 0
+    GROUP BY e.me
+    ORDER BY e.me;
+$$;
+
 SET check_function_bodies = on;

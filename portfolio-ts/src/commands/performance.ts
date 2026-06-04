@@ -1,5 +1,19 @@
 import { query } from "../db.js";
 
+export interface PeriodReturns {
+  "1M": number;
+  "3M": number;
+  "6M": number;
+  YTD: number;
+  "1Y": number;
+  SII: number;
+}
+
+export interface RollingReturnsEntry {
+  date: string;
+  return: number;
+}
+
 export interface PerformanceResult {
   total_days: number;
   start_date: string | null;
@@ -37,6 +51,8 @@ export interface PerformanceResult {
   calmar_ratio: number;
   real_cagr: number;
   real_total_return_pct: number;
+  period_returns: PeriodReturns;
+  rolling_12m_returns: RollingReturnsEntry[];
 }
 
 function num(val: unknown): number {
@@ -135,12 +151,33 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
         calmar_ratio: 0,
         real_cagr: 0,
         real_total_return_pct: 0,
+        period_returns: { "1M": 0, "3M": 0, "6M": 0, YTD: 0, "1Y": 0, SII: 0 },
+        rolling_12m_returns: [],
       },
       benchmark,
     };
   }
 
   const r = row[0];
+
+  const periodRows = await query<{ period: string; return_pct: number }>(
+    "SELECT * FROM portfolio_period_returns_sql($1::date)",
+    [asOfDate],
+  );
+  const periodReturns: Record<string, number> = { "1M": 0, "3M": 0, "6M": 0, YTD: 0, "1Y": 0, SII: 0 };
+  for (const pr of periodRows) {
+    periodReturns[pr.period] = Number.isFinite(Number(pr.return_pct)) ? Number(pr.return_pct) : 0;
+  }
+
+  const rollingRows = await query<{ date: string; return_pct: number }>(
+    "SELECT * FROM portfolio_rolling_returns_sql($1::date, 12)",
+    [asOfDate],
+  );
+  const rolling12m: RollingReturnsEntry[] = rollingRows.map((rr) => ({
+    date: String(rr.date),
+    return: Number.isFinite(Number(rr.return_pct)) ? Number(rr.return_pct) : 0,
+  }));
+
   return {
     data: {
       total_days: intVal(r["total_days"]),
@@ -179,6 +216,8 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
       calmar_ratio: num(r["calmar_ratio"]),
       real_cagr: num(r["real_cagr"]),
       real_total_return_pct: num(r["real_total_return_pct"]),
+      period_returns: periodReturns as unknown as PeriodReturns,
+      rolling_12m_returns: rolling12m,
     },
     benchmark,
   };

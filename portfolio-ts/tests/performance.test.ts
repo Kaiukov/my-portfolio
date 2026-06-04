@@ -58,9 +58,17 @@ function makeRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function setupMocks(perfRow: Record<string, unknown> | null = makeRow(), periodRows: Record<string, unknown>[] = [], rollingRows: Record<string, unknown>[] = []) {
+  mockQuery.mockImplementation((sql: string, _params?: unknown[]) => {
+    if (typeof sql === "string" && sql.includes("portfolio_period_returns_sql")) return Promise.resolve(periodRows);
+    if (typeof sql === "string" && sql.includes("portfolio_rolling_returns_sql")) return Promise.resolve(rollingRows);
+    return Promise.resolve([perfRow as Record<string, unknown>]);
+  });
+}
+
 describe("getPerformance", () => {
   test("returns performance metrics from portfolio_performance_sql()", async () => {
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const { getPerformance } = await import("../src/commands/performance.js");
     const { data: result, benchmark } = await getPerformance();
@@ -86,7 +94,7 @@ describe("getPerformance", () => {
   });
 
   test("total_gain reconciles with TWR: total_gain ≈ start_value * twr_pct / 100", async () => {
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const { getPerformance } = await import("../src/commands/performance.js");
     const { data: result } = await getPerformance();
@@ -98,7 +106,7 @@ describe("getPerformance", () => {
 
   test("passes as_of_date, benchmark, from_date, inflationRate as SQL parameters", async () => {
     mockQuery.mockClear();
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const { getPerformance } = await import("../src/commands/performance.js");
     await getPerformance({ asOfDate: "2026-01-15", benchmark: "IVV", fromDate: "2025-01-01", inflationRate: "0.03" });
@@ -108,7 +116,7 @@ describe("getPerformance", () => {
 
   test("uses default benchmark SPY and default inflation rate when not specified", async () => {
     mockQuery.mockClear();
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const { getPerformance } = await import("../src/commands/performance.js");
     await getPerformance();
@@ -119,26 +127,27 @@ describe("getPerformance", () => {
 
   test("uses PORTFOLIO_BENCHMARK_TICKERS env var fallback", async () => {
     mockQuery.mockClear();
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const prev = process.env["PORTFOLIO_BENCHMARK_TICKERS"];
     process.env["PORTFOLIO_BENCHMARK_TICKERS"] = "IVV,VOO";
+    try {
+      const { getPerformance } = await import("../src/commands/performance.js");
+      await getPerformance();
 
-    const { getPerformance } = await import("../src/commands/performance.js");
-    await getPerformance();
-
-    expect(mockQuery.mock.calls[0][1][1]).toBe("IVV");
-
-    if (prev !== undefined) {
-      process.env["PORTFOLIO_BENCHMARK_TICKERS"] = prev;
-    } else {
-      delete process.env["PORTFOLIO_BENCHMARK_TICKERS"];
+      expect(mockQuery.mock.calls[0][1][1]).toBe("IVV");
+    } finally {
+      if (prev !== undefined) {
+        process.env["PORTFOLIO_BENCHMARK_TICKERS"] = prev;
+      } else {
+        delete process.env["PORTFOLIO_BENCHMARK_TICKERS"];
+      }
     }
   });
 
   test("computes from_date from period", async () => {
     mockQuery.mockClear();
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const { getPerformance } = await import("../src/commands/performance.js");
     await getPerformance({ period: "ytd" });
@@ -149,7 +158,7 @@ describe("getPerformance", () => {
   });
 
   test("handles empty result gracefully", async () => {
-    mockQuery.mockResolvedValue([]);
+    mockQuery.mockImplementation(() => Promise.resolve([]));
 
     const { getPerformance } = await import("../src/commands/performance.js");
     const { data: result, benchmark } = await getPerformance();
@@ -164,11 +173,13 @@ describe("getPerformance", () => {
     expect(result.calmar_ratio).toBe(0);
     expect(result.real_cagr).toBe(0);
     expect(result.real_total_return_pct).toBe(0);
+    expect(result.period_returns.SII).toBe(0);
+    expect(result.rolling_12m_returns).toEqual([]);
     expect(benchmark).toBe("SPY");
   });
 
   test("handles null SQL values by coercing to 0", async () => {
-    mockQuery.mockResolvedValue([{
+    const nullRow: Record<string, unknown> = {
       total_days: 0,
       start_date: null,
       end_date: null,
@@ -205,7 +216,8 @@ describe("getPerformance", () => {
       calmar_ratio: null,
       real_cagr: null,
       real_total_return_pct: null,
-    }]);
+    };
+    setupMocks(nullRow);
 
     const { getPerformance } = await import("../src/commands/performance.js");
     const { data: result } = await getPerformance();
@@ -217,11 +229,66 @@ describe("getPerformance", () => {
     expect(result.calmar_ratio).toBe(0);
     expect(result.real_cagr).toBe(0);
   });
+
+  test("period_returns defaults are populated", async () => {
+    setupMocks(makeRow(), [], []);
+
+    const { getPerformance } = await import("../src/commands/performance.js");
+    const { data: result } = await getPerformance();
+
+    expect(result.period_returns).toBeDefined();
+    expect(result.period_returns["1M"]).toBe(0);
+    expect(result.period_returns["3M"]).toBe(0);
+    expect(result.period_returns["6M"]).toBe(0);
+    expect(result.period_returns.YTD).toBe(0);
+    expect(result.period_returns["1Y"]).toBe(0);
+    expect(result.period_returns.SII).toBe(0);
+    expect(result.rolling_12m_returns).toEqual([]);
+  });
+
+  test("period_returns maps SQL rows correctly", async () => {
+    const periodRows = [
+      { period: "1M", return_pct: 1.2 },
+      { period: "3M", return_pct: 3.4 },
+      { period: "6M", return_pct: 6.7 },
+      { period: "YTD", return_pct: 8.9 },
+      { period: "1Y", return_pct: 15.0 },
+      { period: "SII", return_pct: 25.5 },
+    ];
+    setupMocks(makeRow(), periodRows, []);
+
+    const { getPerformance } = await import("../src/commands/performance.js");
+    const { data: result } = await getPerformance();
+
+    expect(result.period_returns["1M"]).toBe(1.2);
+    expect(result.period_returns["3M"]).toBe(3.4);
+    expect(result.period_returns["6M"]).toBe(6.7);
+    expect(result.period_returns.YTD).toBe(8.9);
+    expect(result.period_returns["1Y"]).toBe(15.0);
+    expect(result.period_returns.SII).toBe(25.5);
+  });
+
+  test("rolling_12m_returns maps SQL rows correctly", async () => {
+    const rollingRows = [
+      { date: "2026-01-31", return_pct: 5.0 },
+      { date: "2026-02-28", return_pct: 6.2 },
+      { date: "2026-03-31", return_pct: 4.8 },
+    ];
+    setupMocks(makeRow(), [], rollingRows);
+
+    const { getPerformance } = await import("../src/commands/performance.js");
+    const { data: result } = await getPerformance();
+
+    expect(result.rolling_12m_returns).toHaveLength(3);
+    expect(result.rolling_12m_returns[0]).toEqual({ date: "2026-01-31", return: 5.0 });
+    expect(result.rolling_12m_returns[1]).toEqual({ date: "2026-02-28", return: 6.2 });
+    expect(result.rolling_12m_returns[2]).toEqual({ date: "2026-03-31", return: 4.8 });
+  });
 });
 
 describe("getPerformance — CLI integration", () => {
   test("dispatches performance command and returns success envelope", async () => {
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -241,6 +308,9 @@ describe("getPerformance — CLI integration", () => {
     expect(output.data.calmar_ratio).toBe(3.8235);
     expect(output.data.real_cagr).toBe(29.2683);
     expect(output.data.real_total_return_pct).toBe(12.0731);
+    expect(output.data.period_returns).toBeDefined();
+    expect(output.data.rolling_12m_returns).toBeDefined();
+    expect(Array.isArray(output.data.rolling_12m_returns)).toBe(true);
     expect(output.meta.benchmark).toBe("SPY");
 
     logSpy.mockRestore();
@@ -248,7 +318,7 @@ describe("getPerformance — CLI integration", () => {
   });
 
   test("dispatches performance with --as-of-date, --benchmark, and --inflation-rate", async () => {
-    mockQuery.mockResolvedValue([makeRow()]);
+    setupMocks();
 
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -260,13 +330,15 @@ describe("getPerformance — CLI integration", () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.ok).toBe(true);
     expect(output.command).toBe("performance");
+    expect(output.data.period_returns).toBeDefined();
+    expect(output.data.rolling_12m_returns).toBeDefined();
     expect(output.meta.benchmark).toBe("IVV");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  test("performance help text describes benchmark and inflation-rate flags", async () => {
+  test("performance help text describes benchmark, inflation, period_returns, and rolling returns", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
@@ -278,6 +350,8 @@ describe("getPerformance — CLI integration", () => {
     expect(output).toContain("performance");
     expect(output).toContain("Calmar");
     expect(output).toContain("inflation");
+    expect(output).toContain("period_returns");
+    expect(output).toContain("rolling_12m_returns");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
