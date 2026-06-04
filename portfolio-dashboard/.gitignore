@@ -2,3 +2,5 @@ wrangler.jsonc
 .wrangler/
 dist/
 node_modules/
+wrangler.prod.jsonc
+wrangler.dev.jsonc

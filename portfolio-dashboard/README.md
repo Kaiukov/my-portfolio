@@ -23,17 +23,31 @@ no financial logic in the Worker.
 - `GET /health` → `{ ok: true }`
 - `GET /version` → `{ app, pattern }`
 
+## Live links (dev / prod split)
+
+Two Workers, one shared KV namespace, distinct keys (mirrors the widget convention
+`portfolio-widget` / `portfolio-widget-prod`):
+
+| Env | URL | KV key | Published by |
+|---|---|---|---|
+| **dev** | https://portfolio-dashboard.kayukov2010.workers.dev | `dev:dashboard` | dev service (CT 103) |
+| **prod** | https://portfolio-dashboard-prod.kayukov2010.workers.dev | `dashboard` | prod service (CT 104) |
+
 ## Deploy (orchestrator-only)
 
 ```bash
 cd portfolio-dashboard
-cp wrangler.jsonc.example wrangler.jsonc
-# fill account_id + kv_namespaces[].id from ../portfolio-ts/.portfolio/config.json
-wrangler deploy            # needs CLOUDFLARE_API_TOKEN or `wrangler login`
+# dev worker (bare name, dev:dashboard key):
+wrangler deploy --config wrangler.dev.jsonc
+# prod worker (-prod name, dashboard key):
+wrangler deploy --config wrangler.prod.jsonc
+# needs CLOUDFLARE_API_TOKEN or `wrangler login`
 ```
 
-The KV namespace is shared with the widget (`portfolio-widget` uses key
-`"portfolio"`; the dashboard uses key `"dashboard"` — no collision).
+`wrangler.dev.jsonc` / `wrangler.prod.jsonc` are gitignored (real account + KV ids);
+they differ only in `name` and `vars.DASHBOARD_KV_KEY`. The KV namespace
+`d4416963…` is shared with the widget (`portfolio` / `prod:portfolio:…`) and the
+dashboard keys (`dev:dashboard` / `dashboard`) — no collision.
 
 ## Publishing the snapshot
 
