@@ -1,33 +1,16 @@
 import { describe, expect, test, mock } from "bun:test";
 
-const mockSummary = mock();
-const mockStatus = mock();
-const mockWidget = mock();
-const mockAllocation = mock();
-const mockCash = mock();
-const mockPerformance = mock();
-const mockFreshness = mock();
+mock.module("../src/db.js", () => ({
+  query: mock(() => Promise.resolve([])),
+  querySingle: mock(() => Promise.resolve(null)),
+  connect: () => {},
+  close: () => {},
+}));
 
-mock.module("../src/commands/summary.js", () => ({
-  getSummary: mockSummary,
-}));
-mock.module("../src/commands/status.js", () => ({
-  getStatus: mockStatus,
-}));
-mock.module("../src/commands/widget.js", () => ({
-  getWidget: mockWidget,
-}));
-mock.module("../src/commands/allocation.js", () => ({
-  getAllocation: mockAllocation,
-}));
-mock.module("../src/commands/cash.js", () => ({
-  getCash: mockCash,
-}));
-mock.module("../src/commands/performance.js", () => ({
-  getPerformance: mockPerformance,
-}));
-mock.module("../src/commands/freshness.js", () => ({
-  getPriceFreshness: mockFreshness,
+mock.module("../src/tx.js", () => ({
+  beginTx: mock(() => Promise.resolve({})),
+  commit: mock(() => Promise.resolve()),
+  rollback: mock(() => Promise.resolve()),
 }));
 
 const summaryFixture = {
@@ -144,17 +127,25 @@ const freshnessFixture = {
 };
 
 describe("buildDashboardSnapshot", () => {
-  test("produces all fields with correct shape using mocked getters", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue(widgetFixture);
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue(freshnessFixture);
+  test("produces all fields with correct shape using injected deps", async () => {
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     expect(snapshot.summary.holding_count).toBe(5);
     expect(snapshot.summary.total_cash_usd).toBe(2500.75);
@@ -206,68 +197,92 @@ describe("buildDashboardSnapshot", () => {
   });
 
   test("today.abs comes from widget.today.amount (not status)", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue({
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => ({
       ...widgetFixture,
       today: { amount: 999.99, pct: 2.5 },
-    });
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue(freshnessFixture);
+    }));
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     expect(snapshot.today.abs).toBe(999.99);
     expect(snapshot.today.pct).toBe(2.5);
   });
 
   test("total.abs uses status.total_gain with fallback 0", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue({
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => ({
       ...statusFixture,
       total_gain: null,
       total_gain_pct: null,
-    });
-    mockWidget.mockResolvedValue(widgetFixture);
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue(freshnessFixture);
+    }));
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     expect(snapshot.total.abs).toBe(0);
     expect(snapshot.total.pct).toBe(0);
   });
 
   test("prices_as_of is null when freshness returns null", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue(widgetFixture);
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue({
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => ({
       prices_as_of: null,
       price_age_days: null,
       stale: true,
       needs_recalc: false,
-    });
+    }));
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     expect(snapshot.prices_as_of).toBeNull();
   });
 
   test("history is mapped from widget.series with correct date/value shape", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue({
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => ({
       ...widgetFixture,
       series: [
         { date: "2025-01-01", value: 10000 },
@@ -275,14 +290,22 @@ describe("buildDashboardSnapshot", () => {
         { date: "2026-01-01", value: 20000 },
         { date: "2026-06-01", value: 25000 },
       ],
-    });
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue(freshnessFixture);
+    }));
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     expect(snapshot.history.length).toBe(4);
     expect(snapshot.history[0]).toEqual({ date: "2025-01-01", value: 10000 });
@@ -290,50 +313,74 @@ describe("buildDashboardSnapshot", () => {
   });
 
   test("performance comes from getPerformance().data (not the wrapper)", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue(widgetFixture);
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue({
-      data: { total_days: 999, cagr: 99.9 },
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => ({
+      data: { ...performanceFixture.data, total_days: 999, cagr: 99.9 },
       benchmark: "VOO",
-    });
-    mockFreshness.mockResolvedValue(freshnessFixture);
+    }));
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     expect(snapshot.performance.total_days).toBe(999);
     expect(snapshot.performance.cagr).toBe(99.9);
   });
 
   test("getWidget is called with 365 days", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue(widgetFixture);
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue(freshnessFixture);
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    await buildDashboardSnapshot("2026-06-03");
+    await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
-    expect(mockWidget).toHaveBeenCalledWith(365, "2026-06-03");
+    expect(mockGetWidget).toHaveBeenCalledWith(365, "2026-06-03");
   });
 
   test("updatedAt is a valid ISO string", async () => {
-    mockSummary.mockResolvedValue(summaryFixture);
-    mockStatus.mockResolvedValue(statusFixture);
-    mockWidget.mockResolvedValue(widgetFixture);
-    mockAllocation.mockResolvedValue(allocationFixture);
-    mockCash.mockResolvedValue(cashFixture);
-    mockPerformance.mockResolvedValue(performanceFixture);
-    mockFreshness.mockResolvedValue(freshnessFixture);
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
 
     const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
-    const snapshot = await buildDashboardSnapshot("2026-06-03");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
 
     const parsed = new Date(snapshot.updatedAt);
     expect(parsed instanceof Date).toBe(true);

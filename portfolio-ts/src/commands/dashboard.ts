@@ -1,10 +1,10 @@
-import { getSummary, type SummaryData } from "./summary.js";
-import { getStatus, type StatusData } from "./status.js";
-import { getWidget } from "./widget.js";
-import { getAllocation, type AllocationRow } from "./allocation.js";
-import { getCash, type CashRow } from "./cash.js";
-import { getPerformance, type PerformanceResult } from "./performance.js";
-import { getPriceFreshness, type PriceFreshness } from "./freshness.js";
+import { getSummary as _getSummary, type SummaryData } from "./summary.js";
+import { getStatus as _getStatus, type StatusData } from "./status.js";
+import { getWidget as _getWidget, type WidgetData } from "./widget.js";
+import { getAllocation as _getAllocation, type AllocationRow } from "./allocation.js";
+import { getCash as _getCash, type CashRow } from "./cash.js";
+import { getPerformance as _getPerformance, type PerformanceResult } from "./performance.js";
+import { getPriceFreshness as _getPriceFreshness, type PriceFreshness } from "./freshness.js";
 
 export interface DashboardSnapshot {
   summary: {
@@ -39,8 +39,29 @@ export interface DashboardSnapshot {
   updatedAt: string;
 }
 
+export interface DashboardSnapshotDeps {
+  getSummary: typeof _getSummary;
+  getStatus: typeof _getStatus;
+  getWidget: typeof _getWidget;
+  getAllocation: typeof _getAllocation;
+  getCash: typeof _getCash;
+  getPerformance: typeof _getPerformance;
+  getPriceFreshness: typeof _getPriceFreshness;
+}
+
+const defaultDeps: DashboardSnapshotDeps = {
+  getSummary: _getSummary,
+  getStatus: _getStatus,
+  getWidget: _getWidget,
+  getAllocation: _getAllocation,
+  getCash: _getCash,
+  getPerformance: _getPerformance,
+  getPriceFreshness: _getPriceFreshness,
+};
+
 export async function buildDashboardSnapshot(
   asOfDate?: string,
+  deps: DashboardSnapshotDeps = defaultDeps,
 ): Promise<DashboardSnapshot> {
   const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
 
@@ -53,13 +74,13 @@ export async function buildDashboardSnapshot(
     performanceRaw,
     freshness,
   ] = await Promise.all([
-    getSummary(actualDate),
-    getStatus(actualDate),
-    getWidget(365, actualDate),
-    getAllocation(actualDate),
-    getCash(actualDate),
-    getPerformance({ asOfDate: actualDate }),
-    getPriceFreshness(actualDate),
+    deps.getSummary(actualDate),
+    deps.getStatus(actualDate),
+    deps.getWidget(365, actualDate),
+    deps.getAllocation(actualDate),
+    deps.getCash(actualDate),
+    deps.getPerformance({ asOfDate: actualDate }),
+    deps.getPriceFreshness(actualDate),
   ]);
 
   const summary: DashboardSnapshot["summary"] = {
