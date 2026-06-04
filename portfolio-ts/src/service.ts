@@ -5,6 +5,7 @@ import * as backupS3Module from "./commands/backup_s3.js";
 import * as initModule from "./commands/init.js";
 import * as refreshModule from "./commands/refresh.js";
 import * as publishModule from "./cloudflare/publish.js";
+import * as dashboardPublishModule from "./cloudflare/dashboard_publish.js";
 import * as syncModule from "./cloudflare/sync.js";
 import * as db from "./db.js";
 
@@ -102,6 +103,42 @@ export async function runCloudflarePublishJob(
     return {
       ok: false,
       job: "cloudflare_publish",
+      started_at: startedAt.toISOString(),
+      finished_at: finishedAt.toISOString(),
+      duration_ms: finishedAt.getTime() - startedAt.getTime(),
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export interface DashboardPublishJobDeps {
+  publishDashboardToKv?: (projectRoot?: string) => Promise<unknown>;
+  projectRoot?: string;
+  now?: () => Date;
+}
+
+export async function runDashboardPublishJob(
+  deps: DashboardPublishJobDeps = {},
+): Promise<ServiceJobResult<unknown>> {
+  const startedAt = (deps.now ?? (() => new Date()))();
+  try {
+    const publish =
+      deps.publishDashboardToKv ?? dashboardPublishModule.publishDashboardToKv;
+    const data = await publish(deps.projectRoot);
+    const finishedAt = (deps.now ?? (() => new Date()))();
+    return {
+      ok: true,
+      job: "dashboard_publish",
+      started_at: startedAt.toISOString(),
+      finished_at: finishedAt.toISOString(),
+      duration_ms: finishedAt.getTime() - startedAt.getTime(),
+      data,
+    };
+  } catch (err) {
+    const finishedAt = (deps.now ?? (() => new Date()))();
+    return {
+      ok: false,
+      job: "dashboard_publish",
       started_at: startedAt.toISOString(),
       finished_at: finishedAt.toISOString(),
       duration_ms: finishedAt.getTime() - startedAt.getTime(),
@@ -341,6 +378,8 @@ export interface ServiceConfig {
   refreshIntervalMs: number;
   publishEnabled: boolean;
   publishIntervalMs: number;
+  dashboardPublishEnabled: boolean;
+  dashboardPublishIntervalMs: number;
   backupEnabled: boolean;
   backupIntervalMs: number;
   initOnBoot: boolean;
@@ -355,6 +394,8 @@ function serviceStatusBody(config: ServiceConfig, startedAt: Date, ready: boolea
     refresh_interval_ms: config.refreshIntervalMs,
     cloudflare_publish: config.publishEnabled,
     publish_interval_ms: config.publishEnabled ? config.publishIntervalMs : null,
+    dashboard_publish: config.dashboardPublishEnabled,
+    dashboard_publish_interval_ms: config.dashboardPublishEnabled ? config.dashboardPublishIntervalMs : null,
     backup_enabled: config.backupEnabled,
     backup_interval_ms: config.backupEnabled ? config.backupIntervalMs : null,
     init_on_boot: config.initOnBoot,
@@ -422,6 +463,10 @@ export function readServiceConfig(
   const publishIntervalMs = env.PORTFOLIO_PUBLISH_INTERVAL
     ? syncModule.parseInterval(env.PORTFOLIO_PUBLISH_INTERVAL)
     : refreshIntervalMs;
+  const dashboardPublishEnabled = parseBooleanEnv(env.PORTFOLIO_DASHBOARD_PUBLISH, false);
+  const dashboardPublishIntervalMs = env.PORTFOLIO_DASHBOARD_PUBLISH_INTERVAL
+    ? syncModule.parseInterval(env.PORTFOLIO_DASHBOARD_PUBLISH_INTERVAL)
+    : publishIntervalMs;
   const backupEnabled = parseBooleanEnv(env.PORTFOLIO_BACKUP_ENABLED, false);
   const backupIntervalMs = env.PORTFOLIO_BACKUP_INTERVAL
     ? syncModule.parseInterval(env.PORTFOLIO_BACKUP_INTERVAL)
@@ -434,6 +479,9 @@ export function readServiceConfig(
   if (publishIntervalMs <= 0) {
     throw new Error("PORTFOLIO_PUBLISH_INTERVAL must be greater than zero");
   }
+  if (dashboardPublishIntervalMs <= 0) {
+    throw new Error("PORTFOLIO_DASHBOARD_PUBLISH_INTERVAL must be greater than zero");
+  }
   if (backupIntervalMs <= 0) {
     throw new Error("PORTFOLIO_BACKUP_INTERVAL must be greater than zero");
   }
@@ -443,6 +491,8 @@ export function readServiceConfig(
     refreshIntervalMs,
     publishEnabled,
     publishIntervalMs,
+    dashboardPublishEnabled,
+    dashboardPublishIntervalMs,
     backupEnabled,
     backupIntervalMs,
     initOnBoot,
@@ -488,6 +538,15 @@ export async function startPortfolioService(
             projectRoot: config.projectRoot,
           }),
       },
+      {
+        name: "dashboard_publish",
+        enabled: config.dashboardPublishEnabled,
+        intervalMs: config.dashboardPublishIntervalMs,
+        run: () =>
+          runDashboardPublishJob({
+            projectRoot: config.projectRoot,
+          }),
+      },
     ],
     onEvent: (event) => {
       console.log(JSON.stringify({ source: "portfolio-service", ...event }));
@@ -508,6 +567,8 @@ export async function startPortfolioService(
       refresh_interval_ms: config.refreshIntervalMs,
       cloudflare_publish: config.publishEnabled,
       publish_interval_ms: config.publishEnabled ? config.publishIntervalMs : null,
+      dashboard_publish: config.dashboardPublishEnabled,
+      dashboard_publish_interval_ms: config.dashboardPublishEnabled ? config.dashboardPublishIntervalMs : null,
       backup_enabled: config.backupEnabled,
       backup_interval_ms: config.backupEnabled ? config.backupIntervalMs : null,
       init_on_boot: config.initOnBoot,
