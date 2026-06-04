@@ -107,3 +107,6 @@ docs/models.toml
 docs/prompt.md
 scripts/cmux-monitor.sh
 session-ses_*.md
+
+# Local dashboard preview — embeds real portfolio data, never commit to public repo
+dashboard-preview/
