@@ -73,18 +73,20 @@ function fixturePerfectCorr(): { tx: string; prices: string; asOf: string } {
 // ── Fixture B: perfectly negative correlation ──
 // TESTA: 100→110→99→108.9  (% returns: 0.1, -0.1, 0.1)
 // TESTB: 200→180→198→178.2 (% returns: -0.1, 0.1, -0.1)
-// Equal weights → ρ = -1.0.
-// HHI = 5000
-// effective_holdings = 2.0
+// Weights use as-of MARKET value (portfolio_allocation_sql), so quantities are
+// chosen so the two positions end at EQUAL value (1.8×108.9 == 1.1×178.2 == 196.02)
+// and the deposit is fully invested (no leftover cash holding). Only then do the
+// weights equal 0.5/0.5 and CWHHI collapse to 0 for a perfectly hedged pair.
+// HHI = 5000 ; effective_holdings = 2.0
 // CWHHI = (0.25 + 0.25 + 2×0.5×0.5×(-1.0)) × 10000 = 0
 function fixtureNegCorr(): { tx: string; prices: string; asOf: string } {
   return {
     tx: `
       INSERT INTO transactions (date, asset, action, quantity, price, fees, currency, exchange)
       VALUES
-        ('2026-01-01', 'USD',   'DEPOSIT', 1000, NULL, 0, 'USD', 'bank'),
-        ('2026-01-01', 'TESTA', 'BUY',     5,    100,  0, 'USD', 'IBKR'),
-        ('2026-01-01', 'TESTB', 'BUY',     2.5,  200,  0, 'USD', 'IBKR')
+        ('2026-01-01', 'USD',   'DEPOSIT', 400, NULL, 0, 'USD', 'bank'),
+        ('2026-01-01', 'TESTA', 'BUY',     1.8,  100,  0, 'USD', 'IBKR'),
+        ('2026-01-01', 'TESTB', 'BUY',     1.1,  200,  0, 'USD', 'IBKR')
     `,
     prices: `
       INSERT INTO prices (ticker, date, price)

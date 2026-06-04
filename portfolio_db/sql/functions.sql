@@ -1231,6 +1231,13 @@ AS $$
         WHERE rho_val IS NOT NULL
           AND ABS(rho_val) >= p_min_correlation
     ),
+    all_corr AS (
+        -- CWHHI uses ALL non-null pairs regardless of p_min_correlation;
+        -- the filter only narrows the reported avg/max/min stats (see header).
+        SELECT w_a, w_b, rho_val
+        FROM pair_corr
+        WHERE rho_val IS NOT NULL
+    ),
     base_hhi AS (
         SELECT COALESCE(SUM(wgt * wgt), 0.0) AS hhi_frac FROM alloc
     ),
@@ -1238,7 +1245,7 @@ AS $$
         SELECT COUNT(*)::INTEGER AS th FROM alloc
     ),
     corr_adj AS (
-        SELECT COALESCE(SUM(w_a * w_b * rho_val), 0.0) AS adj FROM filtered_corr
+        SELECT COALESCE(SUM(w_a * w_b * rho_val), 0.0) AS adj FROM all_corr
     )
     SELECT
         p_as_of_date::TEXT,
