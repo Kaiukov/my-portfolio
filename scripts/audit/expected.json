@@ -1,0 +1,158 @@
+{
+  "daily_returns": {
+    "checkpoints": [
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2024-01-02",
+        "investment_return": 0.0,
+        "portfolio_daily_return": 0.0,
+        "portfolio_value": 9985.0
+      },
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2024-03-01",
+        "investment_return": 4.0060090135,
+        "portfolio_daily_return": 4.0060090135,
+        "portfolio_value": 10385.0
+      },
+      {
+        "cash_flow_impact": 3000.0,
+        "date": "2024-06-03",
+        "investment_return": 3.851709196,
+        "portfolio_daily_return": 32.7395281656,
+        "portfolio_value": 13785.0
+      },
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2024-09-03",
+        "investment_return": -16.5397170838,
+        "portfolio_daily_return": -16.5397170838,
+        "portfolio_value": 11505.0
+      },
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2024-12-02",
+        "investment_return": 4.7805302043,
+        "portfolio_daily_return": 4.7805302043,
+        "portfolio_value": 12055.0
+      },
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2025-03-03",
+        "investment_return": 11.1654914973,
+        "portfolio_daily_return": 11.1654914973,
+        "portfolio_value": 13401.0
+      },
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2025-06-02",
+        "investment_return": 6.6711439445,
+        "portfolio_daily_return": 6.6711439445,
+        "portfolio_value": 14295.0
+      },
+      {
+        "cash_flow_impact": -1000.0,
+        "date": "2025-09-02",
+        "investment_return": 1.0493179433,
+        "portfolio_daily_return": -5.9461350122,
+        "portfolio_value": 13445.0
+      },
+      {
+        "cash_flow_impact": 2000.0,
+        "date": "2025-12-01",
+        "investment_return": 4.4626255113,
+        "portfolio_daily_return": 19.3380438825,
+        "portfolio_value": 16045.0
+      },
+      {
+        "cash_flow_impact": 0.0,
+        "date": "2026-01-05",
+        "investment_return": 2.8046120287,
+        "portfolio_daily_return": 2.8046120287,
+        "portfolio_value": 16495.0
+      }
+    ],
+    "count": 735,
+    "first_date": "2024-01-02",
+    "last_date": "2026-01-05"
+  },
+  "meta": {
+    "annualization": {
+      "cagr_days": 365.25,
+      "risk_trading_days": 252.0,
+      "xirr_days": 365.0
+    },
+    "as_of": "2026-01-05",
+    "benchmark": "SPY",
+    "inflation_rate": 0.025,
+    "risk_free_rate": 0.02
+  },
+  "mwr": 0.0965084319,
+  "performance": {
+    "avg_daily_return": 0.0802986485,
+    "avg_drawdown": 9.4454642633,
+    "avg_drawdown_duration": 181.0,
+    "avg_investment_return": 0.030274452,
+    "beta": 1.1449134917,
+    "cagr": 10.1986108363,
+    "calmar_ratio": 0.6166133789,
+    "cvar_95": -0.0227506425,
+    "cvar_99": -0.0227506425,
+    "down_capture_ratio": 1.3807629162,
+    "end_date": "2026-01-05",
+    "end_value": 16495.0,
+    "hist_volatility": 13.4123200758,
+    "information_ratio": -3.5365247628,
+    "jensens_alpha": -5.4788047056,
+    "max_drawdown": 16.5397170838,
+    "median_monthly_return": 0.0,
+    "real_cagr": 7.5108398403,
+    "real_total_return_pct": 57.2004405087,
+    "relative_return": -3.7476328241,
+    "sharpe_ratio": 0.6112746184,
+    "sortino_ratio": 0.5777473923,
+    "spy_cagr_pct": 13.9462436605,
+    "spy_twr_pct": 30.0,
+    "start_date": "2024-01-02",
+    "start_value": 9985.0,
+    "std_dev": 0.8448967482,
+    "time_weighted_return_pct": 21.5503997295,
+    "total_days": 735,
+    "total_gain": 2151.8074129888,
+    "total_return_pct": 65.197796695,
+    "tracking_error": 46.7510829903,
+    "treynor_ratio": 0.0716089984,
+    "up_capture_ratio": 0.9585223472,
+    "var_95": 0.0,
+    "var_99": 0.0
+  },
+  "realized_gains": {
+    "rows": [
+      {
+        "asset": "AUDITAAA",
+        "cost_basis_usd": 2004.0,
+        "matched_buy_date": "2024-01-02",
+        "proceeds_usd": 2594.0,
+        "realized_gain": 590.0,
+        "sell_date": "2025-06-02",
+        "sell_quantity": 20
+      }
+    ],
+    "total": 590.0
+  },
+  "status": {
+    "cost_basis": 5815.0,
+    "deposits": 15000,
+    "fees": 75.0,
+    "income": 120,
+    "portfolio_value": 16495.0,
+    "realized_gain": 590.0,
+    "taxes": 0.0,
+    "total_gain": 2495.0,
+    "total_gain_pct": 17.8214285714,
+    "total_invested": 14000,
+    "total_profit": 2425.0,
+    "unrealized_gain": 1835.0,
+    "withdrawals": 1000
+  }
+}
