@@ -358,6 +358,8 @@ describe("mcpRead", () => {
       tracking_error: 0.05, spy_twr_pct: 10, spy_cagr_pct: 8,
       up_capture_ratio: 1.1, down_capture_ratio: 0.9,
     }]);
+    mockDbQuery.mockResolvedValueOnce([]); // period returns
+    mockDbQuery.mockResolvedValueOnce([]); // rolling returns
 
     const { mcpRead } = await import("../src/mcp/read.js");
     const result = await mcpRead("performance", { as_of: "2026-06-01", benchmark: "QQQ" });
