@@ -3,6 +3,7 @@ import { toWriteErrorEnvelope } from "../adapters/shared.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getCash } from "../commands/cash.js";
+import { getCashDrag } from "../commands/cash_drag.js";
 import { getCurrencyExposure } from "../commands/currency_exposure.js";
 import { getIncome } from "../commands/income.js";
 import { getRealizedGains } from "../commands/realized_gains.js";
@@ -17,7 +18,7 @@ import { verifyPrices } from "../commands/verify_prices.js";
 import { getWidget } from "../commands/widget.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
-import { strField, intField } from "./adapter.js";
+import { strField, intField, floatField } from "./adapter.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -49,6 +50,16 @@ export async function mcpRead(
       const freshnessMeta = await getPriceFreshness(asOf);
       const data = await getCash(asOf);
       return success("cash", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+    }
+
+    if (toolName === "cash_drag") {
+      const asOf = asOfVal(args);
+      const fromDate = strField(args, "from_date") ?? strField(args, "fromDate");
+      const benchmarkReturnRate = floatField(args, "benchmark_return_rate", "benchmarkReturnRate");
+      const cashReturnRate = floatField(args, "cash_return_rate", "cashReturnRate");
+      const freshnessMeta = await getPriceFreshness(asOf);
+      const data = await getCashDrag({ asOfDate: asOf, fromDate, benchmarkReturnRate, cashReturnRate });
+      return success("cash_drag", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
     }
 
     if (toolName === "currency_exposure") {

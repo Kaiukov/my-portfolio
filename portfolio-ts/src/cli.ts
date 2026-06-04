@@ -14,6 +14,7 @@ import { repairPrices, repairPricesDryRun, runDailyMaintenanceCheck } from "./co
 import { fetchPrices } from "./providers/yahoo.js";
 import { getReport } from "./commands/report.js";
 import { getCash } from "./commands/cash.js";
+import { getCashDrag } from "./commands/cash_drag.js";
 import { getAllocation } from "./commands/allocation.js";
 import { getSummary } from "./commands/summary.js";
 import { getConcentration } from "./commands/concentration.js";
@@ -66,6 +67,7 @@ Commands:
   repair_prices   Fetch missing prices from Yahoo Finance
   asset-metadata  Show asset metadata (sector/industry/region, ETF sector weights) from cache; use --refresh to fetch
   cash            Cash balances by currency with USD values
+  cash_drag       Opportunity cost of idle cash vs being invested (--as-of-date, --from-date, --benchmark-return-rate, --cash-return-rate)
   allocation      Portfolio allocation breakdown by asset
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
@@ -656,6 +658,17 @@ export async function dispatch(argv: string[]): Promise<void> {
       const freshnessMeta = await getPriceFreshness(asOfDate);
       const result = await getCash(asOfDate);
       console.log(JSON.stringify(success("cash", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "cash_drag": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      const benchmarkReturnRate = float(flags, "benchmark-return-rate") ?? float(flags, "benchmark_return_rate");
+      const cashReturnRate = float(flags, "cash-return-rate") ?? float(flags, "cash_return_rate");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getCashDrag({ asOfDate, fromDate, benchmarkReturnRate, cashReturnRate });
+      console.log(JSON.stringify(success("cash_drag", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 

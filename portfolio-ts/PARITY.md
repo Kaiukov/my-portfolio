@@ -31,6 +31,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio performance` | `portfolio-ts performance` | **implemented** | Calls `portfolio_performance_sql(as_of_date, benchmark, from_date)` — PostgreSQL owns all TWR/Sharpe/MDD/benchmark calculations. Returns total_gain (investment returns only, reconciled with TWR), median_monthly_return via PERCENTILE_CONT, CAGR, risk metrics, benchmark comparison. Also includes `period_returns` (1M/3M/6M/YTD/1Y/SII via `portfolio_period_returns_sql`) and `rolling_12m_returns` (via `portfolio_rolling_returns_sql`). All period/rolling returns are TWR (geometric-linked investment_return). Supports `--as-of-date`, `--benchmark`, `--from-date`, `--period` (ytd/1y/6m/3m). |
 | `portfolio mwr` | `portfolio-ts mwr` | **implemented** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as percentage. Supports `--as-of-date`. |
 | `portfolio currency_exposure` | `portfolio-ts currency_exposure` | **accepted behavior change** | Calls `portfolio_currency_exposure_sql(as_of_date)` — PostgreSQL owns all calculations. Groups holdings and cash by currency with usd_value, pct, holdings_usd, cash_usd sub-columns. Same `--as-of-date` support and freshness meta as other read-only commands. |
+| — | `portfolio-ts cash_drag` | **TS-only command** | Read-only opportunity cost of idle cash vs being invested. Calls `portfolio_cash_drag_sql(as_of_date, from_date, benchmark_return_rate, cash_return_rate)` which reuses `portfolio_cash_sql` + `portfolio_performance_sql`. Returns total cash, portfolio value, CAGR, and drag $/% vs portfolio and benchmark rates. Supports `--as-of-date`, `--from-date`, `--benchmark-return-rate`, `--cash-return-rate`. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
 
 ## Validation results (live against PostgreSQL)
@@ -73,6 +74,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `status` | `status` | `GET /status` | Yes | Identical envelope to CLI and API |
 | `summary` | `summary` | `GET /summary` | Yes | Identical envelope to CLI and API |
 | `cash` | `cash` | `GET /cash` | Yes | Identical envelope to CLI and API |
+| `cash_drag` | `cash_drag` | `GET /cash_drag` | Yes | Identical envelope to CLI and API |
 | `allocation` | `allocation` | `GET /allocation` | Yes | Identical envelope to CLI and API |
 | `concentration` | `concentration` | — | Yes | Identical envelope to CLI |
 | `performance` | `performance` | `GET /performance` | Yes | Identical envelope to CLI and API |
@@ -110,7 +112,7 @@ Both `repair_prices` and `recalculate` write process history to PostgreSQL:
 
 Files preserved in `portfolio_db/sql/`:
 - `schema.sql` — table definitions (including `repair_log`, `refresh_log`, `service_state`)
-- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
+- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_cash_drag_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers

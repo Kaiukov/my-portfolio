@@ -3,6 +3,7 @@ import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
 import { getCash } from "../commands/cash.js";
+import { getCashDrag } from "../commands/cash_drag.js";
 import { getCurrencyExposure } from "../commands/currency_exposure.js";
 import { getIncome } from "../commands/income.js";
 import { getRealizedGains } from "../commands/realized_gains.js";
@@ -60,6 +61,15 @@ const ROUTES: Record<string, Handler> = {
     const freshnessMeta = await getPriceFreshness(asOf);
     const data = await getCash(asOf);
     return success("cash", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+  },
+  "/cash_drag": async (p) => {
+    const asOf = strParam(p, "as_of");
+    const fromDate = strParam(p, "from_date");
+    const benchmarkReturnRate = parseFloatParam(p, "benchmark_return_rate");
+    const cashReturnRate = parseFloatParam(p, "cash_return_rate");
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getCashDrag({ asOfDate: asOf, fromDate, benchmarkReturnRate, cashReturnRate });
+    return success("cash_drag", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/currency_exposure": async (p) => {
     const asOf = strParam(p, "as_of");
@@ -120,6 +130,13 @@ function parseIntParam(p: URLSearchParams, key: string): number | undefined {
   const raw = p.get(key);
   if (raw === null) return undefined;
   const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseFloatParam(p: URLSearchParams, key: string): number | undefined {
+  const raw = p.get(key);
+  if (raw === null) return undefined;
+  const n = parseFloat(raw);
   return Number.isFinite(n) ? n : undefined;
 }
 

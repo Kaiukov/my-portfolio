@@ -2235,4 +2235,95 @@ AS $$
     ORDER BY am.ticker;
 $$;
 
+-- Cash drag: opportunity cost of holding idle cash vs being invested.
+-- Quantifies the annualized-rate-basis forgone return, i.e. 1-year forgone $.
+-- total_cash_usd: from portfolio_cash_sql (canonical cash classification + FX).
+-- total_portfolio_value + portfolio_cagr + benchmark_cagr: from portfolio_performance_sql.
+-- period_start_date = COALESCE(p_from_date, inception date from performance).
+-- Drag ($) = total_cash_usd × (return_rate − p_cash_return_rate)  [1-year forgone].
+-- Drag (%) = drag($) / total_portfolio_value × 100.
+-- Guard: divide-by-zero on zero portfolio value.
+DROP FUNCTION IF EXISTS portfolio_cash_drag_sql(DATE, DATE, DOUBLE PRECISION, DOUBLE PRECISION);
+CREATE OR REPLACE FUNCTION portfolio_cash_drag_sql(
+    p_as_of_date             DATE DEFAULT CURRENT_DATE,
+    p_from_date              DATE DEFAULT NULL,
+    p_benchmark_return_rate  DOUBLE PRECISION DEFAULT NULL,
+    p_cash_return_rate       DOUBLE PRECISION DEFAULT 0.0
+)
+RETURNS TABLE (
+    total_portfolio_value     DOUBLE PRECISION,
+    total_cash_usd            DOUBLE PRECISION,
+    cash_pct                  DOUBLE PRECISION,
+    portfolio_cagr            DOUBLE PRECISION,
+    benchmark_cagr            DOUBLE PRECISION,
+    assumed_cash_return_rate  DOUBLE PRECISION,
+    drag_vs_portfolio_cagr    DOUBLE PRECISION,
+    drag_vs_benchmark         DOUBLE PRECISION,
+    drag_vs_portfolio_pct     DOUBLE PRECISION,
+    drag_vs_benchmark_pct     DOUBLE PRECISION,
+    period_start_date         TEXT,
+    period_end_date           TEXT
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH cash_total AS (
+        SELECT COALESCE(SUM(c.usd_value), 0.0) AS total_cash_usd
+        FROM portfolio_cash_sql(p_as_of_date) c
+    ),
+    pv AS (
+        -- canonical total portfolio value (holdings + cash), aligned to the
+        -- status/cash/summary reporting snapshot; NOT the invested-only
+        -- start_value+total_gain trajectory from portfolio_performance_sql.
+        SELECT COALESCE(ps.portfolio_value, 0.0) AS portfolio_value
+        FROM portfolio_status_sql(p_as_of_date) ps
+    ),
+    perf AS (
+        SELECT
+            p.cagr                                              AS portfolio_cagr,
+            p.spy_cagr_pct                                      AS benchmark_cagr,
+            p.start_date                                        AS start_date,
+            p.end_date                                          AS end_date
+        FROM portfolio_performance_sql(p_as_of_date, 'SPY', p_from_date, 0.02, 0.025) p
+    ),
+    drag AS (
+        SELECT
+            ct.total_cash_usd,
+            pv.portfolio_value,
+            p.portfolio_cagr,
+            p.benchmark_cagr,
+            p_cash_return_rate                                      AS assumed_cash_return_rate,
+            p.start_date,
+            p.end_date,
+            COALESCE(p.portfolio_cagr, 0.0) / 100.0 - p_cash_return_rate AS rate_gap_portfolio,
+            COALESCE(p_benchmark_return_rate, COALESCE(p.benchmark_cagr, 0.0) / 100.0) - p_cash_return_rate AS rate_gap_benchmark
+        FROM cash_total ct
+        CROSS JOIN perf p
+        CROSS JOIN pv
+    )
+    SELECT
+        d.portfolio_value                                          AS total_portfolio_value,
+        d.total_cash_usd                                           AS total_cash_usd,
+        CASE WHEN d.portfolio_value > 0.0
+             THEN (d.total_cash_usd / d.portfolio_value) * 100.0
+             ELSE 0.0
+        END                                                        AS cash_pct,
+        COALESCE(d.portfolio_cagr, 0.0)                            AS portfolio_cagr,
+        COALESCE(d.benchmark_cagr, 0.0)                            AS benchmark_cagr,
+        d.assumed_cash_return_rate                                 AS assumed_cash_return_rate,
+        d.total_cash_usd * d.rate_gap_portfolio                     AS drag_vs_portfolio_cagr,
+        d.total_cash_usd * d.rate_gap_benchmark                     AS drag_vs_benchmark,
+        CASE WHEN d.portfolio_value > 0.0
+             THEN (d.total_cash_usd * d.rate_gap_portfolio) / d.portfolio_value * 100.0
+             ELSE 0.0
+        END                                                        AS drag_vs_portfolio_pct,
+        CASE WHEN d.portfolio_value > 0.0
+             THEN (d.total_cash_usd * d.rate_gap_benchmark) / d.portfolio_value * 100.0
+             ELSE 0.0
+        END                                                        AS drag_vs_benchmark_pct,
+        COALESCE(d.start_date, p_as_of_date::TEXT)                 AS period_start_date,
+        COALESCE(d.end_date, p_as_of_date::TEXT)                   AS period_end_date
+    FROM drag d
+$$;
+
 SET check_function_bodies = on;
