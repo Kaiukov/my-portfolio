@@ -16,7 +16,7 @@ export type WriteHandlers = {
   applySplit: typeof applySplit;
 };
 
-export const defaultWriteHandlers: WriteHandlers = {
+const defaultWriteHandlers: WriteHandlers = {
   addTransaction,
   editTransaction,
   editDryRun,

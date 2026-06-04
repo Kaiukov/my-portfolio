@@ -70,12 +70,12 @@ export function parseWranglerWhoami(output: string): string | null {
   return null;
 }
 
-export interface AccountIdValid {
+interface AccountIdValid {
   ok: true;
   id: string;
 }
 
-export interface AccountIdInvalid {
+interface AccountIdInvalid {
   ok: false;
   error: string;
 }
@@ -125,7 +125,7 @@ export function parseWhoamiOutput(output: string): WhoamiInfo {
   };
 }
 
-export type AccountIdResult = AccountIdValid | AccountIdInvalid;
+type AccountIdResult = AccountIdValid | AccountIdInvalid;
 
 export function validateAccountId(
   accountId: string | null,

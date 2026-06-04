@@ -40,7 +40,7 @@ export async function syncOnce(projectRoot?: string): Promise<PublishResult> {
   return publishToKv(projectRoot);
 }
 
-export interface TickEnvelope {
+interface TickEnvelope {
   event: "sync_tick";
   timestamp: string;
   success: boolean;
@@ -50,7 +50,7 @@ export interface TickEnvelope {
   snapshot?: unknown;
 }
 
-export async function doTick(
+async function doTick(
   projectRoot?: string,
   now?: () => Date,
 ): Promise<TickEnvelope> {
@@ -68,11 +68,11 @@ export async function doTick(
   };
 }
 
-export interface TimerHandle {
+interface TimerHandle {
   clear: () => void;
 }
 
-export interface SyncLoopOptions {
+interface SyncLoopOptions {
   intervalMs: number;
   projectRoot?: string;
   now?: () => Date;

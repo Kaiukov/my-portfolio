@@ -1,6 +1,6 @@
 import { loadLocalConfig } from "./config.js";
 
-export interface UrlResult {
+interface UrlResult {
   ok: boolean;
   url?: string;
   error?: string;

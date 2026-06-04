@@ -34,7 +34,7 @@ export const ASSET_KIND_NORMALIZED = new Set([
   "unknown",
 ]);
 
-export type QuoteFn = (ticker: string) => Promise<{
+type QuoteFn = (ticker: string) => Promise<{
   quoteType?: string;
   typeDisp?: string;
   shortName?: string;

@@ -4,7 +4,7 @@ export interface SpawnResult {
   exitCode: number;
 }
 
-export interface SpawnOptions {
+interface SpawnOptions {
   cwd?: string;
   inherit?: boolean;
 }

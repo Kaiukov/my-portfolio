@@ -4,7 +4,7 @@ import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "
 
 type JsonObject = Record<string, unknown>;
 
-export type McpWriteContext = {
+type McpWriteContext = {
   write?: Partial<WriteHandlers>;
 };
 
@@ -13,7 +13,7 @@ export function strField(body: JsonObject, key: string): string | undefined {
   return typeof val === "string" ? val : undefined;
 }
 
-export function floatField(body: JsonObject, key: string): number | undefined {
+function floatField(body: JsonObject, key: string): number | undefined {
   const raw = body[key];
   if (typeof raw === "number") {
     return Number.isFinite(raw) ? raw : undefined;
@@ -54,7 +54,7 @@ function parseBoolValue(raw: unknown): boolean | undefined {
   return undefined;
 }
 
-export function boolFlag(body: JsonObject, ...keys: string[]): boolean {
+function boolFlag(body: JsonObject, ...keys: string[]): boolean {
   for (const key of keys) {
     if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
     const raw = body[key];
