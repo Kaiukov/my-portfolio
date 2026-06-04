@@ -478,80 +478,73 @@ describe("Projection — auto-fetch from summary", () => {
 });
 
 describe("Projection — CLI integration", () => {
-  test("dispatches projection with detailed mode (CLI flags)", async () => {
-    setupSummary(100000);
+  function setupProjection(overrides: Record<string, unknown> = {}) {
+    mockQuerySingle.mockImplementation(() => Promise.resolve({
+      current_value: 100000,
+      annual_return_rate: 0.07,
+      monthly_contribution: 1000,
+      inflation_rate: 0.03,
+      target_value: null,
+      years_to_goal: null,
+      projected_goal_value: null,
+      projection_years: 10,
+      projected_value_nominal: 250000,
+      projected_value_real: 185000,
+      total_contributions: 120000,
+      return_portion: 30000,
+      required_return_rate: null,
+      ...overrides,
+    }));
+  }
 
+  test("dispatches SQL-backed projection (default params, no target)", async () => {
+    setupProjection();
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "projection", "--current-value", "100000", "--n", "24", "--contribution", "1000", "--rate", "7"]);
+      await mod.dispatch(["bun", "src/cli.ts", "projection"]);
       const output = JSON.parse(logSpy.mock.calls[0][0]);
       expect(output.ok).toBe(true);
       expect(output.command).toBe("projection");
-      expect(output.data.mode).toBe("detailed");
       expect(output.data.current_value).toBe(100000);
-      expect(output.data.months).toBe(24);
-      expect(output.data.projection).toHaveLength(25);
+      expect(output.data.projected_value_nominal).toBe(250000);
+      expect(output.data.projected_value_real).toBe(185000);
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();
     }
   });
 
-  test("dispatches projection — accumulation mode", async () => {
+  test("dispatches projection with custom flags and goal target", async () => {
+    setupProjection({ monthly_contribution: 2000, target_value: 500000, years_to_goal: 8.5, required_return_rate: 0.12 });
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "projection", "--current-value", "50000", "--n", "12", "--contribution", "500", "--rate", "5", "--mode", "accumulation"]);
+      await mod.dispatch(["bun", "src/cli.ts", "projection",
+        "--monthly-contribution", "2000",
+        "--annual-return-rate", "0.10",
+        "--target-value", "500000",
+        "--projection-years", "15",
+        "--inflation-rate", "0.025",
+      ]);
       const output = JSON.parse(logSpy.mock.calls[0][0]);
       expect(output.ok).toBe(true);
-      expect(output.data.mode).toBe("accumulation");
-      expect(output.data.values).toHaveLength(13);
+      expect(output.command).toBe("projection");
+      expect(output.data.target_value).toBe(500000);
+      expect(output.data.years_to_goal).toBe(8.5);
+      expect(output.data.monthly_contribution).toBe(2000);
+      expect(output.data.required_return_rate).toBe(0.12);
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();
     }
   });
 
-  test("dispatches projection — goal mode", async () => {
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
-
-    try {
-      await mod.dispatch(["bun", "src/cli.ts", "projection", "--current-value", "100000", "--contribution", "1000", "--rate", "7", "--mode", "goal", "--target", "1000000"]);
-      const output = JSON.parse(logSpy.mock.calls[0][0]);
-      expect(output.ok).toBe(true);
-      expect(output.data.mode).toBe("goal");
-      expect(output.data.feasible).toBe(true);
-      expect(output.data.months_needed).toBeGreaterThan(0);
-    } finally {
-      logSpy.mockRestore();
-      exitSpy.mockRestore();
-    }
-  });
-
-  test("projection — goal mode without target returns error", async () => {
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
-
-    try {
-      await mod.dispatch(["bun", "src/cli.ts", "projection", "--mode", "goal"]);
-      const output = JSON.parse(logSpy.mock.calls[0][0]);
-      expect(output.ok).toBe(false);
-      expect(output.error.code).toBe("VALIDATION_ERROR");
-    } finally {
-      logSpy.mockRestore();
-      exitSpy.mockRestore();
-    }
-  });
-
-  test("projection help text mentions projection", async () => {
+  test("projection help text matches SQL-backed contract", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
@@ -560,6 +553,9 @@ describe("Projection — CLI integration", () => {
       await mod.dispatch(["bun", "src/cli.ts", "--help"]);
       const output = logSpy.mock.calls[0][0];
       expect(output).toContain("projection");
+      expect(output).toContain("monthly-contribution");
+      expect(output).toContain("annual-return-rate");
+      expect(output).toContain("target-value");
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();
@@ -571,40 +567,49 @@ describe("Projection — DB-gated integration", () => {
   const dbUrl = process.env.PORTFOLIO_DB_URL;
   const runDb = test.if(dbUrl !== undefined && dbUrl !== "");
 
-  runDb("projection fetches current portfolio value from live DB (detailed)", async () => {
+  runDb("projection fetches current portfolio value from live DB and returns SQL-backed result", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "projection", "--n", "12", "--contribution", "1000", "--rate", "7"]);
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--monthly-contribution", "1000", "--annual-return-rate", "0.12"]);
 
       const output = JSON.parse(logSpy.mock.calls[0][0]);
       expect(output.ok).toBe(true);
       expect(output.command).toBe("projection");
-      expect(output.data.mode).toBe("detailed");
-      expect(output.data.projection).toBeDefined();
-      expect(output.data.projection).toHaveLength(13);
       expect(typeof output.data.current_value).toBe("number");
+      expect(typeof output.data.annual_return_rate).toBe("number");
+      expect(typeof output.data.monthly_contribution).toBe("number");
+      expect(typeof output.data.projected_value_nominal).toBe("number");
+      expect(typeof output.data.projected_value_real).toBe("number");
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();
     }
   });
 
-  runDb("projection goal mode with live DB", async () => {
+  runDb("projection goal mode with live DB returns years_to_goal", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     try {
-      await mod.dispatch(["bun", "src/cli.ts", "projection", "--contribution", "1000", "--rate", "7", "--mode", "goal", "--target", "1000000"]);
+      const result = await mod.dispatch(["bun", "src/cli.ts", "projection",
+        "--monthly-contribution", "1000",
+        "--annual-return-rate", "0.12",
+        "--target-value", "30000",
+        "--projection-years", "5",
+      ]);
 
       const output = JSON.parse(logSpy.mock.calls[0][0]);
       expect(output.ok).toBe(true);
       expect(output.command).toBe("projection");
-      expect(output.data.mode).toBe("goal");
       expect(typeof output.data.current_value).toBe("number");
+      expect(output.data.target_value).toBe(30000);
+      expect(output.data.years_to_goal).toBeGreaterThan(0);
+      expect(output.data.years_to_goal).toBeLessThanOrEqual(5);
+      expect(typeof output.data.required_return_rate).toBe("number");
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();

@@ -2749,6 +2749,7 @@ DECLARE
     v_fv               DOUBLE PRECISION;
     v_total_contr      DOUBLE PRECISION;
     v_months           INTEGER;
+    v_i                INTEGER;
     v_fv_step          DOUBLE PRECISION;
     v_found            BOOLEAN;
     v_m_max            INTEGER := 1200; -- 100 years cap
@@ -2818,23 +2819,25 @@ BEGIN
     IF v_r > 0 OR v_m > 0 THEN
         -- Exponential growth: search month by month
         v_fv := v_cv;
-        FOR v_months IN 1..v_m_max LOOP
+        FOR v_i IN 1..v_m_max LOOP
             IF v_m = 0.0 THEN
-                v_fv := v_cv + v_c * v_months;
+                v_fv := v_cv + v_c * v_i;
             ELSE
-                v_fv := v_cv * (1.0 + v_m)^v_months + v_c * ((1.0 + v_m)^v_months - 1.0) / v_m;
+                v_fv := v_cv * (1.0 + v_m)^v_i + v_c * ((1.0 + v_m)^v_i - 1.0) / v_m;
             END IF;
             IF v_fv >= p_target_value THEN
                 v_found := TRUE;
+                v_months := v_i;  -- persist found month (FOR loop variable shadows DECLARE v_months)
                 EXIT;
             END IF;
         END LOOP;
     ELSE
         -- r <= 0: check if PV + C*n ever reaches target
-        FOR v_months IN 1..v_m_max LOOP
-            v_fv := v_cv + v_c * v_months;
+        FOR v_i IN 1..v_m_max LOOP
+            v_fv := v_cv + v_c * v_i;
             IF v_fv >= p_target_value THEN
                 v_found := TRUE;
+                v_months := v_i;  -- persist found month
                 EXIT;
             END IF;
         END LOOP;
