@@ -57,6 +57,9 @@ describe("getDecomposition", () => {
     expect(result.total_gain).toBe(25000);
     expect(result.total_income).toBe(8000);
     expect(result.total_fees_and_taxes).toBe(3000);
+
+    // Sanity: identity invariant
+    expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
   });
 
   test("returns default values when SQL returns no row", async () => {
@@ -153,6 +156,40 @@ describe("getDecomposition", () => {
     expect(result.from_contributions_pct).toBe(0);
     expect(result.from_returns_pct).toBe(0);
     expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
+  });
+
+  test("identity invariant: from_contributions + from_returns == total_growth", async () => {
+    const row = makeDecompRow({
+      total_growth_usd: 6510,
+      total_growth_pct: 65.2,
+      from_contributions_usd: 4000,
+      from_contributions_pct: 61.4,
+      from_returns_usd: 2510,
+      from_returns_pct: 38.6,
+      initial_value: 9985,
+      current_value: 16495,
+      net_deposits: 4000,
+      total_gain: 2100,
+      total_income: 500,
+      total_fees_and_taxes: 90,
+    });
+    mockQuerySingle.mockResolvedValue(row);
+
+    const { getDecomposition } = await import("../src/commands/decomposition.js");
+    const result = await getDecomposition("2026-01-05");
+
+    expect(result.initial_value).toBe(9985);
+    expect(result.current_value).toBe(16495);
+    expect(result.total_growth_usd).toBe(6510);
+
+    // Core accounting identity: from_contributions_usd + from_returns_usd = total_growth_usd
+    expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
+
+    // from_contributions_usd = net_deposits (deposits delta - withdrawals delta)
+    expect(result.from_contributions_usd).toBe(result.net_deposits);
+
+    // total_growth_usd = current_value - initial_value
+    expect(result.total_growth_usd).toBe(result.current_value - result.initial_value);
   });
 
   test("handles negative-growth case (total_growth_usd < 0)", async () => {
