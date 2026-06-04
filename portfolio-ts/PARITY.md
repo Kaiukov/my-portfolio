@@ -85,6 +85,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `currency_exposure` | `currency_exposure` | `GET /currency_exposure` | Yes | Identical envelope to CLI and API |
 | `income` | `income` | `GET /income` | — | Identical envelope to CLI and API |
 | `realized_gains` | `realized-gains` | `GET /realized_gains` | — | Identical envelope to CLI and API |
+| `asset_metadata` | `asset-metadata` | `GET /asset_metadata` | — | Read cache by default; `--refresh`/`?refresh=true` triggers Yahoo fetch |
 
 All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.
 No business logic is duplicated in the MCP adapter. Error handling maps through the
@@ -109,7 +110,7 @@ Both `repair_prices` and `recalculate` write process history to PostgreSQL:
 
 Files preserved in `portfolio_db/sql/`:
 - `schema.sql` — table definitions (including `repair_log`, `refresh_log`, `service_state`)
-- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`
+- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers

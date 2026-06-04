@@ -44,6 +44,7 @@ import { publishToKv } from "./cloudflare/publish.js";
 import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
 import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
+import { getAssetMetadataRecords } from "./commands/asset_metadata.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -63,6 +64,7 @@ Commands:
   recalculate     Rebuild daily_returns from cached prices
   verify_prices   Show price coverage diagnostics (read-only)
   repair_prices   Fetch missing prices from Yahoo Finance
+  asset-metadata  Show asset metadata (sector/industry/region, ETF sector weights) from cache; use --refresh to fetch
   cash            Cash balances by currency with USD values
   allocation      Portfolio allocation breakdown by asset
   summary         High-level portfolio summary metrics
@@ -367,6 +369,16 @@ export async function dispatch(argv: string[]): Promise<void> {
       const maxAgeDays = int(flags, "max-age-days");
       const result = await verifyPrices(maxAgeDays);
       console.log(JSON.stringify(success("verify_prices", result), null, 2));
+      return;
+    }
+
+    case "asset-metadata":
+    case "asset_metadata": {
+      const ticker = str(flags, "asset");
+      const refresh = bool(flags, "refresh");
+      const result = await getAssetMetadataRecords({ asset: ticker, refresh });
+      const count = result.assets.length;
+      console.log(JSON.stringify(success("asset-metadata", result, count), null, 2));
       return;
     }
 
