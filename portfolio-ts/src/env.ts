@@ -1,12 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-export interface LoadEnvOptions {
+interface LoadEnvOptions {
   cwd?: string;
   filename?: string;
 }
 
-export interface LoadEnvResult {
+interface LoadEnvResult {
   loaded: boolean;
   path: string | null;
   keysLoaded: number;

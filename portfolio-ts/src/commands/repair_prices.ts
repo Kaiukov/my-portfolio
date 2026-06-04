@@ -5,9 +5,9 @@ import { fetchAssetMetadata } from "../asset_kind.js";
 import type { AssetMetadata } from "../asset_kind.js";
 import { verifyPrices } from "./verify_prices.js";
 
-export type MetadataFetchFn = (ticker: string) => Promise<AssetMetadata | null>;
+type MetadataFetchFn = (ticker: string) => Promise<AssetMetadata | null>;
 
-export interface RepairPricesUnresolved {
+interface RepairPricesUnresolved {
   missing: Array<{ ticker: string; issues: string[] }>;
   stale: Array<{ ticker: string; last_price_date: string; age_days: number }>;
 }

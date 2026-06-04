@@ -147,7 +147,8 @@ export async function editTransaction(
   }
 
   const fromDate = newDate < existing.date ? newDate : existing.date;
-  
+
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updated = await runTx(async (tx: any) => {
     const [atRow] = (await tx.unsafe(

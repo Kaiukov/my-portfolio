@@ -7,7 +7,7 @@ import { getStatus } from "../commands/status.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { putKvValueViaApi, type FetchLike } from "./kv_api.js";
 
-export interface PublishOptions {
+interface PublishOptions {
   fetchImpl?: FetchLike;
   spawnWrangler?: typeof spawnWrangler;
   putKvValueViaApi?: typeof putKvValueViaApi;
