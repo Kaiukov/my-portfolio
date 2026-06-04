@@ -8,7 +8,7 @@
  * where:
  *   P₀ = current portfolio value (principal, lump sum)
  *   C  = monthly contribution (added at END of each month)
- *   r  = monthly effective rate
+ *   r  = monthly effective rate = (1 + R_annual)^(1/12) − 1
  *   n  = number of months
  *
  * Derivation — geometric series:
@@ -21,22 +21,33 @@
  *     lim_{r→0} C·[(1+r)ⁿ − 1] / r = C·n
  *   ∴  FV(n) = P₀ + C·n
  *
+ *   Numerically: when |r| < 1e-14 the zero-return branch avoids
+ *   catastrophic cancellation in (1+r)ⁿ − 1.
+ *
  * Inverse (goal mode) — solve for n given target T:
+ *   T = P₀·(1+r)ⁿ + C·[(1+r)ⁿ − 1] / r
+ *   T·r = P₀·r·(1+r)ⁿ + C·(1+r)ⁿ − C
+ *   T·r + C = (1+r)ⁿ·(P₀·r + C)
+ *   (1+r)ⁿ = (T·r + C) / (P₀·r + C)
  *   n = ln[(T·r + C) / (P₀·r + C)] / ln(1+r)
+ *
  *   r = 0 case:  n = (T − P₀) / C
  *
- * The SQL-backed getProjection() delegates to portfolio_projection_sql() in PostgreSQL.
- * It uses nominal monthly rate m = r/12 (simple division), not effective rate.
- * SQL function computes current_value from portfolio_status_sql,
- * annual_return_rate from portfolio_performance_sql.cagr (if not provided),
- * and handles both projection mode (no target) and goal mode (with target).
+ * Asymptotic bound for negative r:
+ *   lim_{n→∞} FV(n) = C / |r|
+ *   Maximum achievable = max(P₀, C/|r|)  when r < 0.
+ *   If target > max_achievable → infeasible.
+ *
+ * Two engines:
+ *   getProjection()  — SQL-backed (portfolio_projection_sql), for API/MCP compatibility
+ *   computeProjection() — pure TypeScript, month-by-month with multiple modes
  */
 
 import { querySingle } from "../db.js";
 import { getSummary } from "./summary.js";
 import type { SummaryData } from "./summary.js";
 
-// ── SQL-backed projection result (from portfolio_projection_sql) ──
+// ── SQL-backed projection (API/MCP compatibility) ──
 
 export interface SqlProjectionResult {
   current_value: number;
@@ -126,7 +137,7 @@ export async function getProjection(opts: ProjectionOptions = {}): Promise<SqlPr
   };
 }
 
-// ── Pure TypeScript projection (existing computeProjection) ──
+// ── Pure TypeScript projection engine ──
 
 export type ProjectionMode = "detailed" | "accumulation" | "goal";
 
@@ -235,7 +246,7 @@ function maxAchievable(P0: number, monthlyRate: number, contribution: number): n
   return Math.max(P0, bound);
 }
 
-export interface ProjectionInput {
+export interface ComputeProjectionInput {
   asOfDate?: string;
   currentValue?: number;
   months?: number;
@@ -246,7 +257,7 @@ export interface ProjectionInput {
   maxMonths?: number;
 }
 
-export async function computeProjection(input: ProjectionInput): Promise<ProjectionResult> {
+export async function computeProjection(input: ComputeProjectionInput): Promise<ProjectionResult> {
   const mode: ProjectionMode = input.mode ?? "detailed";
   const asOfDate = input.asOfDate ?? new Date().toISOString().split("T")[0];
 
@@ -330,7 +341,7 @@ export async function computeProjection(input: ProjectionInput): Promise<Project
     };
   }
 
-  const n = input.months ?? (mode === "detailed" ? 120 : 120);
+  const n = input.months ?? 120;
   if (n < 0) throw new Error("--n must be non-negative");
 
   const fvFinal = futureValue(P0, monthlyRate, C, n);

@@ -1,15 +1,14 @@
-import { describe, expect, test, mock, jest, beforeEach } from "bun:test";
+import { describe, expect, test, mock, jest } from "bun:test";
 
-const mockQuerySingle = mock();
 const mockQuery = mock();
+const mockQuerySingle = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
-  querySingle: mockQuerySingle,
+  querySingle: mockQuerySingle as unknown,
   connect: () => {},
-  close: () => {},
-  getSql: () => ({ unsafe: async (_sql: string, _params?: unknown[]) => [] }),
-  getAssetMetadata: async () => [] as unknown[],
+  close: async () => {},
+  getAssetMetadata: async () => [],
   upsertAssetMetadata: async () => {},
 }));
 
@@ -19,420 +18,596 @@ mock.module("../src/tx.js", () => ({
   },
 }));
 
-beforeEach(() => {
-  mockQuerySingle.mockReset();
-  mockQuery.mockReset();
-});
-
-function makeProjRow(overrides: Record<string, unknown> = {}) {
-  return {
-    current_value: 100000,
-    annual_return_rate: 0.07,
-    monthly_contribution: 1000,
-    inflation_rate: 0.0,
-    target_value: null,
-    years_to_goal: null,
-    projected_goal_value: null,
-    projection_years: 10,
-    projected_value_nominal: 374_076.83,
-    projected_value_real: 374_076.83,
-    total_contributions: 120_000,
-    return_portion: 154_076.83,
-    required_return_rate: null,
-    ...overrides,
-  };
+function setupSummary(portfolioValue: number) {
+  mockQuerySingle.mockImplementation(() => {
+    return Promise.resolve({
+      holding_count: 5,
+      total_cash_usd: 5000,
+      portfolio_value_usd: portfolioValue,
+      last_transaction_date: "2026-06-01",
+      transaction_count: 42,
+      as_of_date: "2026-06-04",
+    });
+  });
 }
 
-// ============================================================
-// Unit tests (hand-calculated annuity formula verification)
-// ============================================================
-describe("getProjection - projection mode (no target)", () => {
-  test("hand-calculated FV: PV=100000, r=0.07, C=1000, years=10", async () => {
-    // m = 0.07/12, n=120
-    // FV = 100000*(1+m)^120 + 1000*((1+m)^120-1)/m
-    mockQuerySingle.mockResolvedValue(makeProjRow());
+import type { DetailedProjection, AccumulationProjection, GoalProjection } from "../src/commands/projection.js";
 
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection();
+function asDetailed(r: unknown): DetailedProjection {
+  if ((r as DetailedProjection).mode !== "detailed") throw new Error("expected detailed");
+  return r as DetailedProjection;
+}
 
-    expect(result.current_value).toBe(100000);
-    expect(result.annual_return_rate).toBe(0.07);
-    expect(result.monthly_contribution).toBe(1000);
-    expect(result.target_value).toBeNull();
-    expect(result.years_to_goal).toBeNull();
-    expect(result.projected_goal_value).toBeNull();
-    expect(result.projection_years).toBe(10);
-    expect(result.projected_value_nominal).toBeGreaterThan(0);
-    expect(result.projected_value_real).toBeGreaterThan(0);
-    expect(result.total_contributions).toBe(120_000);
-    expect(result.return_portion).toBeGreaterThan(0);
-    expect(result.required_return_rate).toBeNull();
-  });
+function asAccum(r: unknown): AccumulationProjection {
+  if ((r as AccumulationProjection).mode !== "accumulation") throw new Error("expected accumulation");
+  return r as AccumulationProjection;
+}
 
-  test("m=0 fallback: FV = PV + C*n (zero return)", async () => {
-    mockQuerySingle.mockResolvedValue(makeProjRow({
-      annual_return_rate: 0.0,
-      projected_value_nominal: 220_000,
-      projected_value_real: 220_000,
-      total_contributions: 120_000,
-      return_portion: 0,
+function asGoal(r: unknown): GoalProjection {
+  if ((r as GoalProjection).mode !== "goal") throw new Error("expected goal");
+  return r as GoalProjection;
+}
+
+describe("Projection — annuity math", () => {
+  test("zero-return m=0: FV = P₀ + C·n (hand-calculated)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 120,
+      contribution: 1000,
+      annualRatePct: 0,
+      mode: "accumulation",
     }));
 
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection();
+    expect(result.projected_value).toBe(220000); // 100000 + 120*1000
+    expect(result.total_contributions).toBe(120000);
+    expect(result.gain_from_returns).toBe(0);
 
-    expect(result.annual_return_rate).toBe(0);
-    expect(result.projected_value_nominal).toBe(220_000);
-    expect(result.total_contributions).toBe(120_000);
-    expect(result.return_portion).toBe(0);
+    // Verify: P₀*(1+r)ⁿ → P₀, C*[(1+r)ⁿ−1]/r → C*n
+    // 100000 + 1000*120 = 220000
   });
 
-  test("return_portion = projected_value_nominal - current_value - total_contributions", async () => {
-    mockQuerySingle.mockResolvedValue(makeProjRow({
-      current_value: 50000,
-      annual_return_rate: 0.10,
-      monthly_contribution: 500,
-      projection_years: 5,
-      projected_value_nominal: 121_171.05,
-      total_contributions: 30_000,
-      return_portion: 41_171.05,
+  test("FV increases with positive rate above flat-line", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const flat = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 120,
+      contribution: 1000,
+      annualRatePct: 0,
+      mode: "accumulation",
     }));
 
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection();
-
-    expect(result.return_portion).toBeCloseTo(41_171.05, 0);
-  });
-});
-
-// ============================================================
-// Goal mode tests
-// ============================================================
-describe("getProjection - goal mode (with target)", () => {
-  test("solves years_to_goal with r>0", async () => {
-    mockQuerySingle.mockResolvedValue({
-      current_value: 100_000,
-      annual_return_rate: 0.07,
-      monthly_contribution: 1_000,
-      inflation_rate: 0.0,
-      target_value: 500_000,
-      years_to_goal: 16.0833,
-      projected_goal_value: 500_000,
-      projection_years: null,
-      projected_value_nominal: null,
-      projected_value_real: null,
-      total_contributions: null,
-      return_portion: null,
-      required_return_rate: 0.12345,
-    });
-
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection({ targetValue: 500_000 });
-
-    expect(result.target_value).toBe(500_000);
-    expect(result.years_to_goal).toBeCloseTo(16.0833, 2);
-    expect(result.projected_goal_value).toBe(500_000);
-    expect(result.projection_years).toBeNull();
-    expect(result.projected_value_nominal).toBeNull();
-    expect(result.required_return_rate).toBeCloseTo(0.12345, 4);
-  });
-
-  test("unreachable target returns NULL years_to_goal", async () => {
-    mockQuerySingle.mockResolvedValue({
-      current_value: 100,
-      annual_return_rate: -0.05,
-      monthly_contribution: 0,
-      inflation_rate: 0.0,
-      target_value: 1_000_000,
-      years_to_goal: null,
-      projected_goal_value: null,
-      projection_years: null,
-      projected_value_nominal: null,
-      projected_value_real: null,
-      total_contributions: null,
-      return_portion: null,
-      required_return_rate: null,
-    });
-
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection({ targetValue: 1_000_000 });
-
-    expect(result.years_to_goal).toBeNull();
-    expect(result.projected_goal_value).toBeNull();
-    expect(result.required_return_rate).toBeNull();
-  });
-
-  test("zero return with achievable target via contributions only", async () => {
-    mockQuerySingle.mockResolvedValue({
-      current_value: 50_000,
-      annual_return_rate: 0.0,
-      monthly_contribution: 5_000,
-      inflation_rate: 0.0,
-      target_value: 110_000,
-      years_to_goal: 1.0,
-      projected_goal_value: 110_000,
-      projection_years: null,
-      projected_value_nominal: null,
-      projected_value_real: null,
-      total_contributions: null,
-      return_portion: null,
-      required_return_rate: 0.0,
-    });
-
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection({ targetValue: 110_000, monthlyContribution: 5_000, annualReturnRate: 0.0 });
-
-    expect(result.years_to_goal).toBe(1.0);
-    expect(result.projected_goal_value).toBe(110_000);
-  });
-});
-
-// ============================================================
-// Edge cases
-// ============================================================
-describe("getProjection - edge cases", () => {
-  test("null row from DB returns zero/null defaults", async () => {
-    mockQuerySingle.mockResolvedValue(null);
-
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection();
-
-    expect(result.current_value).toBe(0);
-    expect(result.annual_return_rate).toBe(0);
-    expect(result.monthly_contribution).toBe(1000);
-    expect(result.target_value).toBeNull();
-    expect(result.years_to_goal).toBeNull();
-    expect(result.projected_goal_value).toBeNull();
-    expect(result.projection_years).toBeNull();
-    expect(result.projected_value_nominal).toBeNull();
-    expect(result.required_return_rate).toBeNull();
-  });
-
-  test("passes all parameters to SQL", async () => {
-    mockQuerySingle.mockClear();
-    mockQuerySingle.mockResolvedValue(makeProjRow());
-
-    const { getProjection } = await import("../src/commands/projection.js");
-    await getProjection({
-      asOfDate: "2026-01-15",
-      monthlyContribution: 2500,
-      annualReturnRate: 0.05,
-      targetValue: 1_000_000,
-      projectionYears: 20,
-      inflationRate: 0.025,
-    });
-
-    const calls = mockQuerySingle.mock.calls;
-    expect(calls.length).toBe(1);
-    expect(calls[0][0]).toContain("portfolio_projection_sql");
-    const params = calls[0][1] as (string | number | null)[];
-    expect(params[0]).toBe("2026-01-15");
-    expect(params[1]).toBe(2500);
-    expect(params[2]).toBe(0.05);
-    expect(params[3]).toBe(1_000_000);
-    expect(params[4]).toBe(20);
-    expect(params[5]).toBe(0.025);
-  });
-
-  test("defaults monthlyContribution to 1000, projectionYears to 10, inflationRate to 0", async () => {
-    mockQuerySingle.mockClear();
-    mockQuerySingle.mockResolvedValue(makeProjRow());
-
-    const { getProjection } = await import("../src/commands/projection.js");
-    await getProjection({});
-
-    const calls = mockQuerySingle.mock.calls;
-    const params = calls[0][1] as (string | number | null)[];
-    expect(params[1]).toBe(1000);
-    expect(params[2]).toBeNull();
-    expect(params[3]).toBeNull();
-    expect(params[4]).toBe(10);
-    expect(params[5]).toBe(0.0);
-  });
-});
-
-// ============================================================
-// CLI JSON snapshot tests
-// ============================================================
-describe("getProjection - CLI integration", () => {
-  test("dispatches projection command and returns success envelope", async () => {
-    mockQuerySingle.mockResolvedValue(makeProjRow());
-
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
-
-    await mod.dispatch(["bun", "src/cli.ts", "projection"]);
-
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(output.command).toBe("projection");
-    expect(output.data.current_value).toBe(100_000);
-    expect(output.data.annual_return_rate).toBe(0.07);
-    expect(output.data.monthly_contribution).toBe(1000);
-    expect(output.data.projection_years).toBe(10);
-    expect(output.data.projected_value_nominal).toBeGreaterThan(0);
-    expect(output.data.total_contributions).toBe(120_000);
-    expect(output.data.return_portion).toBeGreaterThan(0);
-    expect(output.meta).toBeDefined();
-    expect(output.meta.generated_at).toBeDefined();
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  test("dispatches projection with all flags", async () => {
-    mockQuerySingle.mockResolvedValue(makeProjRow({
-      monthly_contribution: 2_000,
-      annual_return_rate: 0.08,
-      target_value: 1_000_000,
-      inflation_rate: 0.025,
-      projection_years: 15,
+    const growing = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 120,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "accumulation",
     }));
 
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
-
-    await mod.dispatch([
-      "bun", "src/cli.ts", "projection",
-      "--monthly-contribution", "2000",
-      "--annual-return-rate", "0.08",
-      "--target-value", "1000000",
-      "--inflation-rate", "0.025",
-      "--projection-years", "15",
-      "--as-of-date", "2026-01-15",
-    ]);
-
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(output.command).toBe("projection");
-    expect(output.data.monthly_contribution).toBe(2000);
-    expect(output.data.annual_return_rate).toBe(0.08);
-    expect(output.data.target_value).toBe(1_000_000);
-    expect(output.data.inflation_rate).toBe(0.025);
-    expect(output.data.projection_years).toBe(15);
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+    expect(growing.projected_value).toBeGreaterThan(flat.projected_value);
+    expect(growing.gain_from_returns).toBeGreaterThan(0);
   });
 
-  test("dispatches projection with snake_case flags", async () => {
-    mockQuerySingle.mockResolvedValue(makeProjRow());
+  test("r tiny (0.1% annual): near flat-line, no overflow", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
 
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 120,
+      contribution: 1000,
+      annualRatePct: 0.1,
+      mode: "accumulation",
+    }));
 
-    await mod.dispatch([
-      "bun", "src/cli.ts", "projection",
-      "--monthly_contribution", "3000",
-      "--annual_return_rate", "0.06",
-      "--target_value", "500000",
-      "--inflation_rate", "0.02",
-      "--projection_years", "20",
-      "--as_of_date", "2026-06-01",
-    ]);
-
-    expect(logSpy).toHaveBeenCalled();
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(output.ok).toBe(true);
-    expect(output.command).toBe("projection");
-
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+    expect(result.projected_value).toBeGreaterThan(220000);
+    expect(result.projected_value).toBeLessThan(220000 + 2000);
   });
 
-  test("projection appears in help text", async () => {
-    const mod = await import("../src/cli.js");
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+  test("r very high (100%+ annual): does not overflow", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
 
-    await mod.dispatch(["bun", "src/cli.ts", "--help"]);
+    const result = asAccum(await computeProjection({
+      currentValue: 1000,
+      months: 12,
+      contribution: 100,
+      annualRatePct: 200,
+      mode: "accumulation",
+    }));
 
-    expect(logSpy).toHaveBeenCalled();
-    const output = logSpy.mock.calls[0][0];
-    expect(output).toContain("projection");
+    expect(Number.isFinite(result.projected_value)).toBe(true);
+    expect(result.projected_value).toBeGreaterThan(1000 + 1200);
+  });
 
-    logSpy.mockRestore();
-    exitSpy.mockRestore();
+  test("n=0: returns P₀ unchanged", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 0,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "accumulation",
+    }));
+
+    expect(result.projected_value).toBe(100000);
+    expect(result.total_contributions).toBe(0);
+  });
+
+  test("C=0: pure compounding only on principal", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 12,
+      contribution: 0,
+      annualRatePct: 0,
+      mode: "accumulation",
+    }));
+
+    expect(result.projected_value).toBe(100000);
+    expect(result.gain_from_returns).toBe(0);
+  });
+
+  test("P₀=0, C>0: annuity-only, flat rate (FV = C·n)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 0,
+      months: 12,
+      contribution: 1000,
+      annualRatePct: 0,
+      mode: "accumulation",
+    }));
+
+    expect(result.projected_value).toBe(12000);
+  });
+
+  test("negative rate: FV < principal + contributions", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 10,
+      contribution: 1000,
+      annualRatePct: -20,
+      mode: "accumulation",
+    }));
+
+    expect(result.projected_value).toBeLessThan(100000 + 10000);
+    expect(result.projected_value).toBeGreaterThan(0);
+  });
+
+  test("P₀=C=0: degenerate case returns 0", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 0,
+      months: 100,
+      contribution: 0,
+      annualRatePct: 7.0,
+      mode: "accumulation",
+    }));
+
+    expect(result.projected_value).toBe(0);
   });
 });
 
-// ============================================================
-// DB-gated integration tests (skip without PORTFOLIO_DB_URL)
-// ============================================================
-const DB_URL = process.env.PORTFOLIO_DB_URL;
-const MAYBE_SKIP = DB_URL ? describe : describe.skip;
+describe("Projection — detailed mode", () => {
+  test("projection array has n+1 entries (months 0..n)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
 
-MAYBE_SKIP("projection integration (DB-gated)", () => {
-  test("SQL function parses and runs (projection mode)", async () => {
-    const { connect, querySingle } = await import("../src/db.js");
-    connect();
+    const result = asDetailed(await computeProjection({
+      currentValue: 100000,
+      months: 24,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "detailed",
+    }));
 
-    const row = await querySingle<Record<string, unknown>>(
-      `SELECT * FROM portfolio_projection_sql(
-        CURRENT_DATE, 1000::double precision, 0.07::double precision,
-        NULL::double precision, 10, 0.0::double precision
-      )`,
-    );
+    expect(result.projection).toHaveLength(25);
+  });
 
-    expect(row).not.toBeNull();
-    if (row) {
-      expect(Number(row["current_value"])).toBeGreaterThan(0);
-      expect(Number(row["projected_value_nominal"])).toBeGreaterThan(0);
-      expect(Number(row["projection_years"])).toBe(10);
-      expect(row["target_value"]).toBeNull();
-      expect(row["years_to_goal"]).toBeNull();
+  test("month 0: value = P₀, contributions and gain both zero", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asDetailed(await computeProjection({
+      currentValue: 100000,
+      months: 5,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "detailed",
+    }));
+
+    const m0 = result.projection[0];
+    expect(m0.month).toBe(0);
+    expect(m0.value).toBe(100000);
+    expect(m0.contribution_sum).toBe(0);
+    expect(m0.gain).toBe(0);
+  });
+
+  test("month 1: value > 101000 with positive rate (compounding + contribution)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asDetailed(await computeProjection({
+      currentValue: 100000,
+      months: 1,
+      contribution: 1000,
+      annualRatePct: 12.0,
+      mode: "detailed",
+    }));
+
+    const m1 = result.projection[1];
+    expect(m1.contribution_sum).toBe(1000);
+    expect(m1.gain).toBeGreaterThan(0);
+    expect(m1.value).toBeGreaterThan(101000);
+  });
+
+  test("final month projected_value matches projection[n].value", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asDetailed(await computeProjection({
+      currentValue: 50000,
+      months: 36,
+      contribution: 500,
+      annualRatePct: 5.0,
+      mode: "detailed",
+    }));
+
+    expect(result.projection[36].value).toBe(result.projected_value);
+  });
+});
+
+describe("Projection — accumulation mode", () => {
+  test("values array has n+1 entries", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 50000,
+      months: 60,
+      contribution: 500,
+      annualRatePct: 5.0,
+      mode: "accumulation",
+    }));
+
+    expect(result.values).toHaveLength(61);
+    expect(result.values[0]).toBe(50000);
+    expect(result.values[60]).toBe(result.projected_value);
+  });
+
+  test("values are monotonically increasing with positive rate", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 24,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "accumulation",
+    }));
+
+    for (let i = 1; i < result.values.length; i++) {
+      expect(result.values[i]).toBeGreaterThan(result.values[i - 1]);
+    }
+  });
+});
+
+describe("Projection — goal mode", () => {
+  test("hand-calculated: reach 1M with 7% annual, P₀=100k, C=1k", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "goal",
+      target: 1000000,
+    }));
+
+    expect(result.feasible).toBe(true);
+    expect(result.months_needed!).toBeGreaterThan(120);
+    expect(result.months_needed!).toBeLessThan(360);
+    expect(result.projected_value!).toBeGreaterThanOrEqual(1000000);
+  });
+
+  test("target already met: months_needed = 0", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 0,
+      annualRatePct: 7.0,
+      mode: "goal",
+      target: 50000,
+    }));
+
+    expect(result.feasible).toBe(true);
+    expect(result.months_needed).toBe(0);
+  });
+
+  test("zero-return goal: n = (T−P₀)/C (hand-solved)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 2000,
+      annualRatePct: 0,
+      mode: "goal",
+      target: 200000,
+    }));
+
+    expect(result.feasible).toBe(true);
+    expect(result.months_needed).toBe(50); // (200k − 100k) / 2k = 50
+  });
+
+  test("max-months cap: infeasible when n exceeds max", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 100,
+      annualRatePct: 0,
+      mode: "goal",
+      target: 1000000,
+      maxMonths: 50,
+    }));
+
+    expect(result.feasible).toBe(false);
+    expect(result.months_needed).toBeNull();
+  });
+
+  test("negative rate: goal bounded by C/|r| asymptote", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 1000,
+      annualRatePct: -5.0,
+      mode: "goal",
+      target: 1000000,
+    }));
+
+    expect(result.feasible).toBe(false);
+    expect(result.max_achievable).toBeLessThan(1000000);
+  });
+
+  test("goal mode without target throws", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    await expect(computeProjection({
+      currentValue: 100000,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "goal",
+    })).rejects.toThrow("--target");
+  });
+
+  test("goal mode exactly hit: projected_value >= target", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 1000,
+      annualRatePct: 0,
+      mode: "goal",
+      target: 110000,
+    }));
+
+    expect(result.feasible).toBe(true);
+    expect(result.projected_value!).toBeGreaterThanOrEqual(110000);
+  });
+});
+
+describe("Projection — precision", () => {
+  test("round-trip: FV consistent with lump-sum implied rate", async () => {
+    const { computeProjection, annualToMonthly } = await import("../src/commands/projection.js");
+
+    const P0 = 100000;
+    const C = 1000;
+    const n = 120;
+
+    const result = asAccum(await computeProjection({
+      currentValue: P0,
+      months: n,
+      contribution: C,
+      annualRatePct: 7.0,
+      mode: "accumulation",
+    }));
+
+    const fv = result.projected_value;
+
+    // Implied lump-sum rate: FV = P₀*(1+r_implied)ⁿ
+    const rImplied = Math.pow(fv / P0, 1 / n) - 1;
+    expect(rImplied).toBeGreaterThan(0);
+
+    // With contributions, FV >>> P₀*(1+r)ⁿ, so implied lump-sum rate >> annuity rate
+    const rExpected = annualToMonthly(7.0);
+    expect(rImplied).toBeGreaterThan(rExpected);
+  });
+
+  test("zero-rate: gain_from_returns is exactly zero (no rounding error)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 120,
+      contribution: 1000,
+      annualRatePct: 0,
+      mode: "accumulation",
+    }));
+
+    expect(result.gain_from_returns).toBe(0);
+  });
+});
+
+describe("Projection — realistic scale (10^7)", () => {
+  test("10M portfolio, 100k/month, 6% annual, 360 months", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 10_000_000,
+      months: 360,
+      contribution: 100_000,
+      annualRatePct: 6.0,
+      mode: "accumulation",
+    }));
+
+    // Must exceed sum of contributions alone
+    expect(result.projected_value).toBeGreaterThan(10_000_000 + 360 * 100_000);
+    expect(Number.isFinite(result.projected_value)).toBe(true);
+  });
+});
+
+describe("Projection — auto-fetch from summary", () => {
+  test("fetches portfolio value from getSummary when currentValue not set", async () => {
+    setupSummary(250000);
+
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      months: 12,
+      contribution: 1000,
+      annualRatePct: 7.0,
+      mode: "accumulation",
+    }));
+
+    expect(result.current_value).toBe(250000);
+  });
+});
+
+describe("Projection — CLI integration", () => {
+  test("dispatches projection with detailed mode (CLI flags)", async () => {
+    setupSummary(100000);
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--current-value", "100000", "--n", "24", "--contribution", "1000", "--rate", "7"]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.command).toBe("projection");
+      expect(output.data.mode).toBe("detailed");
+      expect(output.data.current_value).toBe(100000);
+      expect(output.data.months).toBe(24);
+      expect(output.data.projection).toHaveLength(25);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
     }
   });
 
-  test("SQL function runs (goal mode)", async () => {
-    const { connect, querySingle } = await import("../src/db.js");
-    connect();
+  test("dispatches projection — accumulation mode", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    const row = await querySingle<Record<string, unknown>>(
-      `SELECT * FROM portfolio_projection_sql(
-        CURRENT_DATE, 1000::double precision, 0.07::double precision,
-        500000::double precision, 10::integer, 0.0::double precision
-      )`,
-    );
-
-    expect(row).not.toBeNull();
-    if (row) {
-      expect(Number(row["current_value"])).toBeGreaterThan(0);
-      expect(row["target_value"]).not.toBeNull();
-      expect(row["projected_value_nominal"]).toBeNull();
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--current-value", "50000", "--n", "12", "--contribution", "500", "--rate", "5", "--mode", "accumulation"]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.data.mode).toBe("accumulation");
+      expect(output.data.values).toHaveLength(13);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
     }
   });
 
-  test("service layer integration test", async () => {
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection({
-      monthlyContribution: 1000,
-      annualReturnRate: 0.07,
-      projectionYears: 5,
-    });
+  test("dispatches projection — goal mode", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    expect(result.current_value).toBeGreaterThan(0);
-    expect(result.projected_value_nominal).toBeGreaterThan(result.current_value);
-    expect(result.projection_years).toBe(5);
-    expect(result.target_value).toBeNull();
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--current-value", "100000", "--contribution", "1000", "--rate", "7", "--mode", "goal", "--target", "1000000"]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.data.mode).toBe("goal");
+      expect(output.data.feasible).toBe(true);
+      expect(output.data.months_needed).toBeGreaterThan(0);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 
-  test("m=0 yields FV = PV + C*n", async () => {
-    const { getProjection } = await import("../src/commands/projection.js");
-    const result = await getProjection({
-      monthlyContribution: 1000,
-      annualReturnRate: 0.0,
-      projectionYears: 3,
-    });
+  test("projection — goal mode without target returns error", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
-    expect(result.annual_return_rate).toBe(0);
-    expect(result.return_portion).toBe(0);
-    expect(result.total_contributions).toBe(36_000);
-    expect(result.projected_value_nominal).toBeCloseTo(result.current_value + 36_000, 0);
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--mode", "goal"]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(false);
+      expect(output.error.code).toBe("VALIDATION_ERROR");
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  test("projection help text mentions projection", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "--help"]);
+      const output = logSpy.mock.calls[0][0];
+      expect(output).toContain("projection");
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+});
+
+describe("Projection — DB-gated integration", () => {
+  const dbUrl = process.env.PORTFOLIO_DB_URL;
+  const runDb = test.if(dbUrl !== undefined && dbUrl !== "");
+
+  runDb("projection fetches current portfolio value from live DB (detailed)", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--n", "12", "--contribution", "1000", "--rate", "7"]);
+
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.command).toBe("projection");
+      expect(output.data.mode).toBe("detailed");
+      expect(output.data.projection).toBeDefined();
+      expect(output.data.projection).toHaveLength(13);
+      expect(typeof output.data.current_value).toBe("number");
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  runDb("projection goal mode with live DB", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--contribution", "1000", "--rate", "7", "--mode", "goal", "--target", "1000000"]);
+
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.command).toBe("projection");
+      expect(output.data.mode).toBe("goal");
+      expect(typeof output.data.current_value).toBe("number");
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 });

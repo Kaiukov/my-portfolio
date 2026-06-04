@@ -49,7 +49,7 @@ import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./c
 import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { getAssetMetadataRecords } from "./commands/asset_metadata.js";
-import { getProjection } from "./commands/projection.js";
+import { getProjection, computeProjection } from "./commands/projection.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -72,7 +72,7 @@ Commands:
   asset-metadata  Show asset metadata (sector/industry/region, ETF sector weights) from cache; use --refresh to fetch
   cash            Cash balances by currency with USD values
   cash_drag       Opportunity cost of idle cash vs being invested (--as-of-date, --from-date, --benchmark-return-rate, --cash-return-rate)
-  projection      Long-term future value projection and goal tracking (FIRE) — read-only, no network (--monthly-contribution, --annual-return-rate, --target-value, --projection-years, --inflation-rate, --as-of-date)
+  projection      Portfolio future-value projection (--n, --contribution, --rate, --mode detailed|accumulation|goal, --target)
   allocation      Portfolio allocation breakdown by asset
   rebalance       Target-vs-actual drift report with suggested trades (--target "VTI=50,VXUS=20,BND=30", --as-of-date)
   summary         High-level portfolio summary metrics
@@ -482,20 +482,39 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "projection": {
+      const mode = (str(flags, "mode") ?? "detailed") as "detailed" | "accumulation" | "goal";
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const monthlyContribution = float(flags, "monthly-contribution") ?? float(flags, "monthly_contribution");
-      const annualReturnRate = float(flags, "annual-return-rate") ?? float(flags, "annual_return_rate");
-      const targetValue = float(flags, "target-value") ?? float(flags, "target_value");
+      const currentValue = float(flags, "current-value") ?? float(flags, "current_value");
+      const n = int(flags, "n");
+      const contribution = float(flags, "contribution") ?? float(flags, "monthly-contribution") ?? float(flags, "monthly_contribution") ?? 0;
+      const rate = float(flags, "rate") ?? float(flags, "annual-return-rate") ?? float(flags, "annual_return_rate") ?? 7.0;
+      const target = float(flags, "target") ?? float(flags, "target-value") ?? float(flags, "target_value");
+      const maxMonths = int(flags, "max-months") ?? int(flags, "max_months");
       const projectionYears = int(flags, "projection-years") ?? int(flags, "projection_years");
-      const inflationRate = float(flags, "inflation-rate") ?? float(flags, "inflation_rate");
-      const result = await getProjection({
+
+      if (mode === "goal" && (target === undefined || target <= 0)) {
+        console.log(JSON.stringify(error("projection", "VALIDATION_ERROR", "--target is required for goal mode and must be positive"), null, 2));
+        process.exit(1);
+        return;
+      }
+
+      if (n !== undefined && n < 0) {
+        console.log(JSON.stringify(error("projection", "VALIDATION_ERROR", "--n must be non-negative"), null, 2));
+        process.exit(1);
+        return;
+      }
+
+      const result = await computeProjection({
         asOfDate,
-        monthlyContribution,
-        annualReturnRate,
-        targetValue,
-        projectionYears,
-        inflationRate,
+        currentValue,
+        months: n ?? (projectionYears !== undefined ? projectionYears * 12 : undefined),
+        contribution,
+        annualRatePct: rate,
+        mode,
+        target,
+        maxMonths,
       });
+
       console.log(JSON.stringify(success("projection", result), null, 2));
       return;
     }
