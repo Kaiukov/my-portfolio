@@ -11,6 +11,8 @@ import { getPerformance } from "../commands/performance.js";
 import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
+import { getDiversification } from "../commands/diversification.js";
+import { getConcentration } from "../commands/concentration.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { ValidationError } from "../validators.js";
@@ -55,6 +57,21 @@ const ROUTES: Record<string, Handler> = {
     const freshnessMeta = await getPriceFreshness(asOf);
     const data = await getAllocation(asOf);
     return success("allocation", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+  },
+  "/concentration": async (p) => {
+    const asOf = strParam(p, "as_of");
+    const topN = parseIntParam(p, "top_n") ?? 5;
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getConcentration(asOf, topN);
+    return success("concentration", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+  },
+  "/diversification": async (p) => {
+    const asOf = strParam(p, "as_of");
+    const lookbackDays = parseIntParam(p, "lookback_days") ?? 252;
+    const minCorrelation = parseFloatParam(p, "min_correlation") ?? 0.0;
+    const freshnessMeta = await getPriceFreshness(asOf);
+    const data = await getDiversification(asOf, lookbackDays, minCorrelation);
+    return success("diversification", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
   },
   "/cash": async (p) => {
     const asOf = strParam(p, "as_of");

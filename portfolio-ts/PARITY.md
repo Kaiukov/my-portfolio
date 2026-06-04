@@ -28,6 +28,8 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio allocation` | `portfolio-ts allocation` | **accepted behavior change** | Calls `portfolio_allocation_sql(as_of_date)` — PostgreSQL owns all calculations. Returns FX-converted per-asset USD values with allocation percentages. TypeScript only sums `value_usd` for `portfolio_value` and formats rows. Supports `--as-of-date`. |
 | `portfolio cash` | `portfolio-ts cash` | **accepted behavior change** | Calls `portfolio_cash_sql(as_of_date)` — PostgreSQL owns all calculations. Returns per-currency cash buckets (including stablecoins: USDT, USDC, DAI, etc.) with FX-converted (or 1:1 for stablecoins) USD values. TypeScript only sums `usd_value` to compute `total_usd` (aggregation only, no financial calculation). Supports `--as-of-date` for historical snapshots. |
 | `portfolio summary` | `portfolio-ts summary` | **accepted behavior change** | Calls `portfolio_summary_sql(as_of_date)` — PostgreSQL owns all calculations. Returns holding count, total cash, portfolio value, transaction metadata. Supports `--as-of-date`. |
+| `portfolio concentration` | `portfolio-ts concentration` | **parity tested** | Calls `portfolio_concentration_sql` — HHI (0-10000), holding count, top-N holdings by allocation. Supports `--as-of-date` and `--top-n`. |
+| — | `portfolio-ts diversification` | **TS-only command** | Correlation-aware diversification depth. Calls `portfolio_diversification_depth_sql()` — HHI, effective holdings, pairwise Pearson correlations from price series, correlation-weighted HHI. Supports `--as-of-date`, `--lookback-days`, `--min-correlation`. |
 | `portfolio performance` | `portfolio-ts performance` | **implemented** | Calls `portfolio_performance_sql(as_of_date, benchmark, from_date)` — PostgreSQL owns all TWR/Sharpe/MDD/benchmark calculations. Returns total_gain (investment returns only, reconciled with TWR), median_monthly_return via PERCENTILE_CONT, CAGR, risk metrics, benchmark comparison. Also includes `period_returns` (1M/3M/6M/YTD/1Y/SII via `portfolio_period_returns_sql`) and `rolling_12m_returns` (via `portfolio_rolling_returns_sql`). All period/rolling returns are TWR (geometric-linked investment_return). Supports `--as-of-date`, `--benchmark`, `--from-date`, `--period` (ytd/1y/6m/3m). |
 | `portfolio mwr` | `portfolio-ts mwr` | **implemented** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as percentage. Supports `--as-of-date`. |
 | `portfolio currency_exposure` | `portfolio-ts currency_exposure` | **accepted behavior change** | Calls `portfolio_currency_exposure_sql(as_of_date)` — PostgreSQL owns all calculations. Groups holdings and cash by currency with usd_value, pct, holdings_usd, cash_usd sub-columns. Same `--as-of-date` support and freshness meta as other read-only commands. |
@@ -55,10 +57,11 @@ Mode: Phase 5 (TS structure validation only)
   PASS  cash — JSON shape valid, cash rows with USD values present
   PASS  allocation — JSON shape valid, allocation rows with percentages present
   PASS  summary — JSON shape valid, portfolio summary metrics present
-  PASS  concentration — JSON shape valid, HHI and top holdings present
+  PASS concentration — JSON shape valid, HHI and top holdings present
+  PASS diversification — JSON shape valid, HHI, correlations, and CWHHI present
   PASS  currency_exposure — JSON shape valid, per-currency exposure rows present
 
-Results: 15 pass, 0 fail, 0 skip
+Results: 16 pass, 0 fail, 0 skip
 ```
 
 `bun run typecheck`: ✓  
@@ -76,7 +79,8 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `cash` | `cash` | `GET /cash` | Yes | Identical envelope to CLI and API |
 | `cash_drag` | `cash_drag` | `GET /cash_drag` | Yes | Identical envelope to CLI and API |
 | `allocation` | `allocation` | `GET /allocation` | Yes | Identical envelope to CLI and API |
-| `concentration` | `concentration` | — | Yes | Identical envelope to CLI |
+| `concentration` | `concentration` | `GET /concentration` | Yes | Identical envelope to CLI and API |
+| `diversification` | `diversification` | `GET /diversification` | Yes | Identical envelope to CLI and API |
 | `performance` | `performance` | `GET /performance` | Yes | Identical envelope to CLI and API |
 | `mwr` | `mwr` | `GET /mwr` | Yes | Identical envelope to CLI and API |
 | `transactions` | `transactions` | — | — | Identical envelope to CLI (pagination) |
@@ -112,7 +116,7 @@ Both `repair_prices` and `recalculate` write process history to PostgreSQL:
 
 Files preserved in `portfolio_db/sql/`:
 - `schema.sql` — table definitions (including `repair_log`, `refresh_log`, `service_state`)
-- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_cash_drag_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
+- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_cash_drag_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `portfolio_diversification_depth_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
