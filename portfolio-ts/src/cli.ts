@@ -49,6 +49,7 @@ import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./c
 import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { getAssetMetadataRecords } from "./commands/asset_metadata.js";
+import { getProjection } from "./commands/projection.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -71,6 +72,7 @@ Commands:
   asset-metadata  Show asset metadata (sector/industry/region, ETF sector weights) from cache; use --refresh to fetch
   cash            Cash balances by currency with USD values
   cash_drag       Opportunity cost of idle cash vs being invested (--as-of-date, --from-date, --benchmark-return-rate, --cash-return-rate)
+  projection      Long-term future value projection and goal tracking (FIRE) — read-only, no network (--monthly-contribution, --annual-return-rate, --target-value, --projection-years, --inflation-rate, --as-of-date)
   allocation      Portfolio allocation breakdown by asset
   rebalance       Target-vs-actual drift report with suggested trades (--target "VTI=50,VXUS=20,BND=30", --as-of-date)
   summary         High-level portfolio summary metrics
@@ -476,6 +478,25 @@ export async function dispatch(argv: string[]): Promise<void> {
       const maxAgeDays = int(flags, "max-age-days");
       const result = await getHealth(maxAgeDays);
       console.log(JSON.stringify(success("health", result), null, 2));
+      return;
+    }
+
+    case "projection": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const monthlyContribution = float(flags, "monthly-contribution") ?? float(flags, "monthly_contribution");
+      const annualReturnRate = float(flags, "annual-return-rate") ?? float(flags, "annual_return_rate");
+      const targetValue = float(flags, "target-value") ?? float(flags, "target_value");
+      const projectionYears = int(flags, "projection-years") ?? int(flags, "projection_years");
+      const inflationRate = float(flags, "inflation-rate") ?? float(flags, "inflation_rate");
+      const result = await getProjection({
+        asOfDate,
+        monthlyContribution,
+        annualReturnRate,
+        targetValue,
+        projectionYears,
+        inflationRate,
+      });
+      console.log(JSON.stringify(success("projection", result), null, 2));
       return;
     }
 

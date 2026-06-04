@@ -17,6 +17,7 @@ import { getConcentration } from "../commands/concentration.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { getDecomposition } from "../commands/decomposition.js";
+import { getProjection } from "../commands/projection.js";
 import { ValidationError } from "../validators.js";
 import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
@@ -154,6 +155,23 @@ const ROUTES: Record<string, Handler> = {
     const data = await getAssetMetadataRecords({ asset, refresh });
     return success("asset_metadata", data, data.assets.length);
   },
+  "/projection": async (p) => {
+    const asOfDate = strParam(p, "as_of");
+    const monthlyContribution = parseFloatParam(p, "monthly_contribution");
+    const annualReturnRate = parseFloatParam(p, "annual_return_rate");
+    const targetValue = parseFloatParam(p, "target_value");
+    const projectionYears = parseIntParam(p, "projection_years");
+    const inflationRate = parseFloatParam(p, "inflation_rate");
+    const data = await getProjection({
+      asOfDate,
+      monthlyContribution,
+      annualReturnRate,
+      targetValue,
+      projectionYears,
+      inflationRate,
+    });
+    return success("projection", data);
+  },
 };
 
 function strParam(p: URLSearchParams, key: string): string | undefined {
@@ -229,6 +247,7 @@ function boolFlag(search: URLSearchParams, body: JsonObject, ...keys: string[]):
 
 function allowedMethodsForPath(path: string): string[] | null {
   if (path === "/ready") return ["GET"];
+  if (path === "/projection") return ["GET"];
   if (path === "/transactions") return ["POST"];
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
   if (path === "/exchange") return ["POST"];
