@@ -21,6 +21,7 @@ import { getWidget } from "../commands/widget.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { getDecomposition } from "../commands/decomposition.js";
+import { getProjection } from "../commands/projection.js";
 import { strField, intField, floatField } from "./adapter.js";
 
 type JsonObject = Record<string, unknown>;
@@ -193,6 +194,24 @@ export async function mcpRead(
       const refresh = (args["refresh"]) === true || args["refresh"] === "true";
       const data = await getAssetMetadataRecords({ asset, refresh });
       return success("asset_metadata", data, data.assets.length);
+    }
+
+    if (toolName === "projection") {
+      const asOfDate = asOfVal(args);
+      const monthlyContribution = floatField(args, "monthly_contribution", "monthlyContribution");
+      const annualReturnRate = floatField(args, "annual_return_rate", "annualReturnRate");
+      const targetValue = floatField(args, "target_value", "targetValue");
+      const projectionYears = intField(args, "projection_years", "projectionYears");
+      const inflationRate = floatField(args, "inflation_rate", "inflationRate");
+      const data = await getProjection({
+        asOfDate,
+        monthlyContribution,
+        annualReturnRate,
+        targetValue,
+        projectionYears,
+        inflationRate,
+      });
+      return success("projection", data);
     }
 
     return error("mcp", "NOT_FOUND", `Unsupported MCP read tool: ${toolName}`);

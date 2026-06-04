@@ -2677,4 +2677,241 @@ AS $$
     FROM pieces p
 $$;
 
+-- ============================================================================
+-- Projection: long-term future value (FV) + goal tracking / FIRE.
+--
+-- Annuity formula derivation (hand-verifiable):
+--   Let r  = annual return rate (decimal, e.g. 0.07)
+--       m  = r/12  (monthly rate)
+--       C  = monthly contribution (end of month, ordinary annuity)
+--       PV = current_value (portfolio_value as of p_as_of_date)
+--       n  = number of months
+--
+--   Contributions deposited at END of each month (ordinary annuity).
+--   FV after n months:
+--     FV(n) = PV * (1+m)^n  +  C * ((1+m)^n - 1) / m    [if m != 0]
+--     FV(n) = PV            +  C * n                      [if m = 0]
+--
+--   Projection mode (p_target_value IS NULL):
+--     n = p_projection_years * 12
+--     projected_value_nominal = FV(n)
+--     projected_value_real    = FV(n) / (1+p_inflation_rate)^p_projection_years
+--     total_contributions     = C * n
+--     return_portion          = projected_value_nominal - PV - total_contributions
+--     Goal fields NULL. required_return_rate NULL.
+--
+--   Goal mode (p_target_value provided):
+--     Solve smallest integer n (months) where FV(n) >= target.
+--     Uses iterative month-by-month approach (cap: 100 years = 1200 months).
+--     If r <= 0: check if PV + C*n >= target within 1200 months.
+--     years_to_goal = n / 12.0 (fractional months ceiling).
+--     projected_goal_value = FV(n) (>= target).
+--     Projection fields NULL.
+--     required_return_rate: bisection on annual r ∈ [-0.20, 2.00]
+--       such that FV(p_projection_years*12) = p_target_value.
+--       Tolerance: 1e-8. Returns NULL if no solution.
+--
+--   Guard: negative or zero current_value → NULL row.
+-- ============================================================================
+DROP FUNCTION IF EXISTS portfolio_projection_sql(DATE, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, INTEGER, DOUBLE PRECISION) CASCADE;
+CREATE OR REPLACE FUNCTION portfolio_projection_sql(
+    p_as_of_date            DATE DEFAULT CURRENT_DATE,
+    p_monthly_contribution  DOUBLE PRECISION DEFAULT 1000,
+    p_annual_return_rate    DOUBLE PRECISION DEFAULT NULL,
+    p_target_value          DOUBLE PRECISION DEFAULT NULL,
+    p_projection_years      INTEGER DEFAULT 10,
+    p_inflation_rate        DOUBLE PRECISION DEFAULT 0.0
+)
+RETURNS TABLE (
+    current_value               DOUBLE PRECISION,
+    annual_return_rate          DOUBLE PRECISION,
+    monthly_contribution        DOUBLE PRECISION,
+    inflation_rate              DOUBLE PRECISION,
+    target_value                DOUBLE PRECISION,
+    years_to_goal               DOUBLE PRECISION,
+    projected_goal_value        DOUBLE PRECISION,
+    projection_years            INTEGER,
+    projected_value_nominal     DOUBLE PRECISION,
+    projected_value_real        DOUBLE PRECISION,
+    total_contributions         DOUBLE PRECISION,
+    return_portion              DOUBLE PRECISION,
+    required_return_rate        DOUBLE PRECISION
+)
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    v_cv               DOUBLE PRECISION;
+    v_r                DOUBLE PRECISION;
+    v_m                DOUBLE PRECISION;
+    v_n                INTEGER;
+    v_c                DOUBLE PRECISION;
+    v_fv               DOUBLE PRECISION;
+    v_total_contr      DOUBLE PRECISION;
+    v_months           INTEGER;
+    v_i                INTEGER;
+    v_fv_step          DOUBLE PRECISION;
+    v_found            BOOLEAN;
+    v_m_max            INTEGER := 1200; -- 100 years cap
+
+    -- bisection for required_return_rate
+    v_lo               DOUBLE PRECISION;
+    v_hi               DOUBLE PRECISION;
+    v_mid              DOUBLE PRECISION;
+    v_fv_mid           DOUBLE PRECISION;
+    v_iter             INTEGER;
+    v_max_iter         INTEGER := 200;
+    v_tol              DOUBLE PRECISION := 1e-8;
+    v_targ_months      INTEGER;
+BEGIN
+    -- 1. Get current_value from portfolio_status_sql
+    SELECT ps.portfolio_value INTO v_cv
+    FROM portfolio_status_sql(p_as_of_date) ps;
+    IF v_cv IS NULL OR v_cv <= 0 THEN
+        RETURN;
+    END IF;
+
+    -- 2. Determine annual_return_rate
+    IF p_annual_return_rate IS NULL THEN
+        SELECT pperf.cagr / 100.0 INTO v_r
+        FROM portfolio_performance_sql(p_as_of_date, 'SPY', NULL, 0.02, 0.025) pperf;
+        IF v_r IS NULL THEN
+            v_r := 0.0;
+        END IF;
+    ELSE
+        v_r := p_annual_return_rate; -- assumed passed as decimal, e.g. 0.07
+    END IF;
+
+    v_c := p_monthly_contribution;
+    v_m := v_r / 12.0;
+
+    -- 3. Projection mode (no target)
+    IF p_target_value IS NULL THEN
+        v_n := GREATEST(p_projection_years, 1) * 12;
+        v_total_contr := v_c * v_n;
+
+        IF v_m = 0.0 THEN
+            v_fv := v_cv + v_c * v_n;
+        ELSE
+            v_fv := v_cv * (1.0 + v_m)^v_n + v_c * ((1.0 + v_m)^v_n - 1.0) / v_m;
+        END IF;
+
+        RETURN QUERY SELECT
+            v_cv,
+            v_r,
+            v_c,
+            p_inflation_rate,
+            NULL::DOUBLE PRECISION,   -- target_value
+            NULL::DOUBLE PRECISION,   -- years_to_goal
+            NULL::DOUBLE PRECISION,   -- projected_goal_value
+            p_projection_years,
+            v_fv,
+            v_fv / (1.0 + p_inflation_rate)^p_projection_years,
+            v_total_contr,
+            v_fv - v_cv - v_total_contr,
+            NULL::DOUBLE PRECISION;   -- required_return_rate
+        RETURN;
+    END IF;
+
+    -- 4. Goal mode (target provided)
+    v_found := FALSE;
+
+    IF v_r > 0 OR v_m > 0 THEN
+        -- Exponential growth: search month by month
+        v_fv := v_cv;
+        FOR v_i IN 1..v_m_max LOOP
+            IF v_m = 0.0 THEN
+                v_fv := v_cv + v_c * v_i;
+            ELSE
+                v_fv := v_cv * (1.0 + v_m)^v_i + v_c * ((1.0 + v_m)^v_i - 1.0) / v_m;
+            END IF;
+            IF v_fv >= p_target_value THEN
+                v_found := TRUE;
+                v_months := v_i;  -- persist found month (FOR loop variable shadows DECLARE v_months)
+                EXIT;
+            END IF;
+        END LOOP;
+    ELSE
+        -- r <= 0: check if PV + C*n ever reaches target
+        FOR v_i IN 1..v_m_max LOOP
+            v_fv := v_cv + v_c * v_i;
+            IF v_fv >= p_target_value THEN
+                v_found := TRUE;
+                v_months := v_i;  -- persist found month
+                EXIT;
+            END IF;
+        END LOOP;
+    END IF;
+
+    IF NOT v_found THEN
+        -- Unreachable: return with NULL years_to_goal
+        RETURN QUERY SELECT
+            v_cv,
+            v_r,
+            v_c,
+            p_inflation_rate,
+            p_target_value,
+            NULL::DOUBLE PRECISION,   -- years_to_goal
+            NULL::DOUBLE PRECISION,   -- projected_goal_value
+            NULL::INTEGER,            -- projection_years
+            NULL::DOUBLE PRECISION,   -- projected_value_nominal
+            NULL::DOUBLE PRECISION,   -- projected_value_real
+            NULL::DOUBLE PRECISION,   -- total_contributions
+            NULL::DOUBLE PRECISION,   -- return_portion
+            NULL::DOUBLE PRECISION;   -- required_return_rate
+        RETURN;
+    END IF;
+
+    -- 5. Compute required_return_rate (bisection on r)
+    v_targ_months := GREATEST(p_projection_years, 1) * 12;
+    v_lo := -0.20;
+    v_hi := 2.00;  -- 200% annual
+    v_mid := v_r;
+    v_iter := 0;
+
+    -- Check if target is achievable at hi rate
+    v_fv_mid := v_cv * (1.0 + v_hi / 12.0)^v_targ_months
+              + v_c * ((1.0 + v_hi / 12.0)^v_targ_months - 1.0) / (v_hi / 12.0);
+    IF v_fv_mid < p_target_value THEN
+        v_mid := NULL; -- not achievable within bracket
+    ELSE
+        WHILE v_iter < v_max_iter LOOP
+            v_mid := (v_lo + v_hi) / 2.0;
+            IF v_mid / 12.0 = 0.0 THEN
+                v_fv_mid := v_cv + v_c * v_targ_months;
+            ELSE
+                v_fv_mid := v_cv * (1.0 + v_mid / 12.0)^v_targ_months
+                          + v_c * ((1.0 + v_mid / 12.0)^v_targ_months - 1.0) / (v_mid / 12.0);
+            END IF;
+
+            IF ABS(v_fv_mid - p_target_value) < v_tol OR (v_hi - v_lo) < v_tol THEN
+                EXIT;
+            END IF;
+
+            IF v_fv_mid < p_target_value THEN
+                v_lo := v_mid;
+            ELSE
+                v_hi := v_mid;
+            END IF;
+            v_iter := v_iter + 1;
+        END LOOP;
+    END IF;
+
+    RETURN QUERY SELECT
+        v_cv,
+        v_r,
+        v_c,
+        p_inflation_rate,
+        p_target_value,
+        v_months::DOUBLE PRECISION / 12.0,   -- years_to_goal (fractional)
+        v_fv,                                 -- projected_goal_value (>= target)
+        NULL::INTEGER,                        -- projection_years
+        NULL::DOUBLE PRECISION,               -- projected_value_nominal
+        NULL::DOUBLE PRECISION,               -- projected_value_real
+        NULL::DOUBLE PRECISION,               -- total_contributions
+        NULL::DOUBLE PRECISION,               -- return_portion
+        v_mid;                                -- required_return_rate
+END;
+$$;
+
 SET check_function_bodies = on;

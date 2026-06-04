@@ -34,6 +34,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio mwr` | `portfolio-ts mwr` | **implemented** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as percentage. Supports `--as-of-date`. |
 | `portfolio currency_exposure` | `portfolio-ts currency_exposure` | **accepted behavior change** | Calls `portfolio_currency_exposure_sql(as_of_date)` — PostgreSQL owns all calculations. Groups holdings and cash by currency with usd_value, pct, holdings_usd, cash_usd sub-columns. Same `--as-of-date` support and freshness meta as other read-only commands. |
 | — | `portfolio-ts cash_drag` | **TS-only command** | Read-only opportunity cost of idle cash vs being invested. Calls `portfolio_cash_drag_sql(as_of_date, from_date, benchmark_return_rate, cash_return_rate)` which reuses `portfolio_cash_sql` + `portfolio_performance_sql`. Returns total cash, portfolio value, CAGR, and drag $/% vs portfolio and benchmark rates. Supports `--as-of-date`, `--from-date`, `--benchmark-return-rate`, `--cash-return-rate`. |
+| — | `portfolio-ts projection` | **TS-only command** | Read-only long-term future value projection and goal tracking (FIRE). Calls `portfolio_projection_sql(as_of_date, monthly_contribution, annual_return_rate, target_value, projection_years, inflation_rate)` — PostgreSQL owns all calculations. Supports projection mode (no target: compute FV, real value, return portion) and goal mode (with target: solve years_to_goal, compute required_return_rate via bisection). Supports `--as-of-date`, `--monthly-contribution`, `--annual-return-rate`, `--target-value`, `--projection-years`, `--inflation-rate`. |
 | — | `portfolio-ts rebalance` | **TS-only command** | Read-only target-vs-actual drift report. Takes `--target "VTI=50,VXUS=20,BND=30"` and optional `--as-of-date`. Reuses `portfolio_allocation_sql` via `getAllocation()` — no new SQL, no persistence. Drift/trade math is a pure TypeScript function (`computeDrift`). Emits `command:"rebalance"` envelope with summary + rows sorted by `abs(drift_pct)` desc. |
 | — | `portfolio-ts decomposition` | **TS-only command** | Read-only growth decomposition: splits total growth into contributions (net deposits) vs market returns. Calls `portfolio_decomposition_sql(as_of_date)` which reuses `portfolio_status_sql()` + `daily_returns` initial value. Emits `command:"decomposition"` envelope. Supports `--as-of-date`. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
@@ -94,6 +95,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `income` | `income` | `GET /income` | — | Identical envelope to CLI and API |
 | `realized_gains` | `realized-gains` | `GET /realized_gains` | — | Identical envelope to CLI and API |
 | `asset_metadata` | `asset-metadata` | `GET /asset_metadata` | — | Read cache by default; `--refresh`/`?refresh=true` triggers Yahoo fetch |
+| `projection` | `projection` | `GET /projection` | — | Calls `portfolio_projection_sql`; projection or goal mode |
 | `rebalance` | `rebalance` | `GET /rebalance` | — | Identical envelope to CLI and API; requires `target` param |
 | `decomposition` | `decomposition` | `GET /decomposition` | Yes | Identical envelope to CLI and API |
 
@@ -120,7 +122,7 @@ Both `repair_prices` and `recalculate` write process history to PostgreSQL:
 
 Files preserved in `portfolio_db/sql/`:
 - `schema.sql` — table definitions (including `repair_log`, `refresh_log`, `service_state`)
-- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_cash_drag_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `portfolio_diversification_depth_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
+- `functions.sql` — SQL functions including `portfolio_status_sql()`, `portfolio_cash_sql()`, `portfolio_cash_drag_sql()`, `portfolio_projection_sql()`, `portfolio_allocation_sql()`, `portfolio_summary_sql()`, `portfolio_concentration_sql()`, `portfolio_diversification_depth_sql()`, `get_asset_type_sql()`, `is_cash_like_sql()`, `is_stablecoin_sql()`, `needs_recalc()`, `discover_required_tickers_sql()`, `get_required_price_checkpoints_sql()`, `portfolio_asset_metadata_sql()`
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
