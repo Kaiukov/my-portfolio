@@ -248,12 +248,12 @@ describe("getPerformance", () => {
 
   test("period_returns maps SQL rows correctly", async () => {
     const periodRows = [
-      { window: "1M", return_pct: 1.2 },
-      { window: "3M", return_pct: 3.4 },
-      { window: "6M", return_pct: 6.7 },
-      { window: "YTD", return_pct: 8.9 },
-      { window: "1Y", return_pct: 15.0 },
-      { window: "SII", return_pct: 25.5 },
+      { period: "1M", return_pct: 1.2 },
+      { period: "3M", return_pct: 3.4 },
+      { period: "6M", return_pct: 6.7 },
+      { period: "YTD", return_pct: 8.9 },
+      { period: "1Y", return_pct: 15.0 },
+      { period: "SII", return_pct: 25.5 },
     ];
     setupMocks(makeRow(), periodRows, []);
 

@@ -2093,6 +2093,8 @@ AS $$
     FROM detail
     GROUP BY EXTRACT(YEAR FROM sell_date)
     ORDER BY tax_year
+$$;
+
 ---------- portfolio_period_returns_sql ----------
 -- #223 Multi-window period returns: 1M, 3M, 6M, YTD, 1Y, SII
 -- All returns are TWR (geometric-linked investment_return, cash-flow-neutral).
@@ -2100,7 +2102,7 @@ AS $$
 
 CREATE OR REPLACE FUNCTION portfolio_period_returns_sql(
     p_as_of_date DATE DEFAULT CURRENT_DATE
-) RETURNS TABLE(window TEXT, from_date TEXT, return_pct DOUBLE PRECISION)
+) RETURNS TABLE(period TEXT, from_date TEXT, return_pct DOUBLE PRECISION)
 LANGUAGE sql
 STABLE
 AS $$
@@ -2124,10 +2126,10 @@ AS $$
         UNION ALL
         SELECT '1Y',  as_of_date - INTERVAL '1 year'                FROM params
         UNION ALL
-        SELECT 'SII', COALESCE(sii_from, as_of_date)                FROM min_dr
+        SELECT 'SII', COALESCE(min_dr.sii_from, params.as_of_date)  FROM min_dr CROSS JOIN params
     )
     SELECT
-        w.w AS window,
+        w.w AS period,
         w.from_d::TEXT AS from_date,
         COALESCE(
             (EXP(SUM(LN(GREATEST(1.0 + dr.investment_return / 100.0, 1e-12))))

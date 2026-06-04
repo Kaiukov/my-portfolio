@@ -160,13 +160,13 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
 
   const r = row[0];
 
-  const periodRows = await query<{ window: string; return_pct: number }>(
+  const periodRows = await query<{ period: string; return_pct: number }>(
     "SELECT * FROM portfolio_period_returns_sql($1::date)",
     [asOfDate],
   );
   const periodReturns: Record<string, number> = { "1M": 0, "3M": 0, "6M": 0, YTD: 0, "1Y": 0, SII: 0 };
   for (const pr of periodRows) {
-    periodReturns[pr.window] = Number.isFinite(Number(pr.return_pct)) ? Number(pr.return_pct) : 0;
+    periodReturns[pr.period] = Number.isFinite(Number(pr.return_pct)) ? Number(pr.return_pct) : 0;
   }
 
   const rollingRows = await query<{ date: string; return_pct: number }>(

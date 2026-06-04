@@ -208,7 +208,7 @@ MAYBE_SKIP("integration: cross-engine consistency guard (#87)", () => {
 
           const periodMap: Record<string, number> = {};
           for (const pr of periodRows) {
-            periodMap[pr.window] = Number(pr.return_pct);
+            periodMap[pr.period] = Number(pr.return_pct);
           }
 
           const twrFromPerf = Number(perf.time_weighted_return_pct);
