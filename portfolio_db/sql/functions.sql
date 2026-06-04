@@ -2703,7 +2703,7 @@ $$;
 --   Goal mode (p_target_value provided):
 --     Solve smallest integer n (months) where FV(n) >= target.
 --     Uses iterative month-by-month approach (cap: 100 years = 1200 months).
---     If r <= 0: check if PV + C*n >= target within 1200 months.
+--     Uses the same FV recurrence/formula for positive, zero, and negative rates.
 --     years_to_goal = n / 12.0 (fractional months ceiling).
 --     projected_goal_value = FV(n) (>= target).
 --     Projection fields NULL.
@@ -2750,9 +2750,9 @@ DECLARE
     v_total_contr      DOUBLE PRECISION;
     v_months           INTEGER;
     v_i                INTEGER;
-    v_fv_step          DOUBLE PRECISION;
     v_found            BOOLEAN;
     v_m_max            INTEGER := 1200; -- 100 years cap
+    v_projection_years INTEGER;
 
     -- bisection for required_return_rate
     v_lo               DOUBLE PRECISION;
@@ -2784,10 +2784,11 @@ BEGIN
 
     v_c := p_monthly_contribution;
     v_m := v_r / 12.0;
+    v_projection_years := GREATEST(p_projection_years, 0);
 
     -- 3. Projection mode (no target)
     IF p_target_value IS NULL THEN
-        v_n := GREATEST(p_projection_years, 1) * 12;
+        v_n := v_projection_years * 12;
         v_total_contr := v_c * v_n;
 
         IF v_m = 0.0 THEN
@@ -2804,9 +2805,9 @@ BEGIN
             NULL::DOUBLE PRECISION,   -- target_value
             NULL::DOUBLE PRECISION,   -- years_to_goal
             NULL::DOUBLE PRECISION,   -- projected_goal_value
-            p_projection_years,
+            v_projection_years,
             v_fv,
-            v_fv / (1.0 + p_inflation_rate)^p_projection_years,
+            v_fv / (1.0 + p_inflation_rate)^v_projection_years,
             v_total_contr,
             v_fv - v_cv - v_total_contr,
             NULL::DOUBLE PRECISION;   -- required_return_rate
@@ -2814,34 +2815,39 @@ BEGIN
     END IF;
 
     -- 4. Goal mode (target provided)
-    v_found := FALSE;
-
-    IF v_r > 0 OR v_m > 0 THEN
-        -- Exponential growth: search month by month
-        v_fv := v_cv;
-        FOR v_i IN 1..v_m_max LOOP
-            IF v_m = 0.0 THEN
-                v_fv := v_cv + v_c * v_i;
-            ELSE
-                v_fv := v_cv * (1.0 + v_m)^v_i + v_c * ((1.0 + v_m)^v_i - 1.0) / v_m;
-            END IF;
-            IF v_fv >= p_target_value THEN
-                v_found := TRUE;
-                v_months := v_i;  -- persist found month (FOR loop variable shadows DECLARE v_months)
-                EXIT;
-            END IF;
-        END LOOP;
-    ELSE
-        -- r <= 0: check if PV + C*n ever reaches target
-        FOR v_i IN 1..v_m_max LOOP
-            v_fv := v_cv + v_c * v_i;
-            IF v_fv >= p_target_value THEN
-                v_found := TRUE;
-                v_months := v_i;  -- persist found month
-                EXIT;
-            END IF;
-        END LOOP;
+    IF v_cv >= p_target_value THEN
+        RETURN QUERY SELECT
+            v_cv,
+            v_r,
+            v_c,
+            p_inflation_rate,
+            p_target_value,
+            0::DOUBLE PRECISION,      -- years_to_goal
+            v_cv,                     -- projected_goal_value
+            NULL::INTEGER,            -- projection_years
+            NULL::DOUBLE PRECISION,   -- projected_value_nominal
+            NULL::DOUBLE PRECISION,   -- projected_value_real
+            NULL::DOUBLE PRECISION,   -- total_contributions
+            NULL::DOUBLE PRECISION,   -- return_portion
+            NULL::DOUBLE PRECISION;   -- required_return_rate
+        RETURN;
     END IF;
+
+    v_found := FALSE;
+    v_fv := v_cv;
+
+    FOR v_i IN 1..v_m_max LOOP
+        IF v_m = 0.0 THEN
+            v_fv := v_cv + v_c * v_i;
+        ELSE
+            v_fv := v_cv * (1.0 + v_m)^v_i + v_c * ((1.0 + v_m)^v_i - 1.0) / v_m;
+        END IF;
+        IF v_fv >= p_target_value THEN
+            v_found := TRUE;
+            v_months := v_i;  -- persist found month
+            EXIT;
+        END IF;
+    END LOOP;
 
     IF NOT v_found THEN
         -- Unreachable: return with NULL years_to_goal
@@ -2863,7 +2869,7 @@ BEGIN
     END IF;
 
     -- 5. Compute required_return_rate (bisection on r)
-    v_targ_months := GREATEST(p_projection_years, 1) * 12;
+    v_targ_months := v_projection_years * 12;
     v_lo := -0.20;
     v_hi := 2.00;  -- 200% annual
     v_mid := v_r;
@@ -2945,7 +2951,9 @@ $$;
 --   shortfall_risk = 100 - success_likelihood
 --
 -- max_safe_withdrawal: largest W0 (today's $) such that terminal_value >= 0
---   solved by bisection on W0 in bracket [0, portfolio_value] (tolerance 1e-8).
+--   solved by expanding an upper bracket until terminal_value < 0, then
+--   bisection between the last safe lower bound and unsafe upper bound
+--   (tolerance 1e-8). For horizon=0 it is undefined and returned as NULL.
 -- max_safe_withdrawal_rate = max_safe_withdrawal / portfolio_value * 100
 --
 -- years_until_depletion: smallest t where V_t <= 0 (fractional via linear
@@ -3006,6 +3014,8 @@ DECLARE
     v_iter    INTEGER;
     v_max_iter INTEGER := 200;
     v_tol     DOUBLE PRECISION := 1e-8;
+    v_bracket_iter INTEGER;
+    v_bracket_max_iter INTEGER := 60;
 
     -- simulation loop
     v_t       INTEGER;
@@ -3101,42 +3111,56 @@ BEGIN
     END IF;
 
     -- 9. max_safe_withdrawal via bisection
-    v_W_lo := 0.0;
-    v_W_hi := v_pv;
-    v_W_mid := v_W0;
-    v_iter := 0;
-
-    -- Check if hi-bound is already safe (terminal >= 0 at W_hi)
-    v_V := v_pv;
-    FOR v_t IN 1..v_horizon LOOP
-        v_withdraw := v_W_hi * POWER(1.0 + v_infl, v_t - 1);
-        v_V := v_V * (1.0 + v_r) - v_withdraw;
-    END LOOP;
-    IF v_V >= 0.0 THEN
-        -- portfolio survives even withdrawing everything → max = portfolio_value
-        v_W_mid := v_W_hi;
+    IF v_horizon = 0 THEN
+        v_W_mid := NULL;
     ELSE
-        WHILE v_iter < v_max_iter LOOP
-            v_W_mid := (v_W_lo + v_W_hi) / 2.0;
+        v_W_lo := 0.0;
+        v_W_hi := GREATEST(v_W0, v_pv, 1.0);
+        v_W_mid := v_W_hi;
+        v_iter := 0;
+        v_bracket_iter := 0;
 
-            -- simulate with W_mid
+        LOOP
             v_V := v_pv;
             FOR v_t IN 1..v_horizon LOOP
-                v_withdraw := v_W_mid * POWER(1.0 + v_infl, v_t - 1);
+                v_withdraw := v_W_hi * POWER(1.0 + v_infl, v_t - 1);
                 v_V := v_V * (1.0 + v_r) - v_withdraw;
             END LOOP;
 
-            IF ABS(v_V) < v_tol OR (v_W_hi - v_W_lo) < v_tol THEN
-                EXIT;
-            END IF;
+            EXIT WHEN v_V < 0.0 OR v_bracket_iter >= v_bracket_max_iter;
 
-            IF v_V >= 0.0 THEN
-                v_W_lo := v_W_mid;
-            ELSE
-                v_W_hi := v_W_mid;
-            END IF;
-            v_iter := v_iter + 1;
+            v_W_lo := v_W_hi;
+            v_W_hi := v_W_hi * 2.0;
+            v_bracket_iter := v_bracket_iter + 1;
         END LOOP;
+
+        IF v_V >= 0.0 THEN
+            v_W_mid := v_W_hi;
+        ELSE
+            WHILE v_iter < v_max_iter LOOP
+                v_W_mid := (v_W_lo + v_W_hi) / 2.0;
+
+                -- simulate with W_mid
+                v_V := v_pv;
+                FOR v_t IN 1..v_horizon LOOP
+                    v_withdraw := v_W_mid * POWER(1.0 + v_infl, v_t - 1);
+                    v_V := v_V * (1.0 + v_r) - v_withdraw;
+                END LOOP;
+
+                IF ABS(v_V) < v_tol OR (v_W_hi - v_W_lo) < v_tol THEN
+                    EXIT;
+                END IF;
+
+                IF v_V >= 0.0 THEN
+                    v_W_lo := v_W_mid;
+                ELSE
+                    v_W_hi := v_W_mid;
+                END IF;
+                v_iter := v_iter + 1;
+            END LOOP;
+
+            v_W_mid := v_W_lo;
+        END IF;
     END IF;
 
     RETURN QUERY SELECT
@@ -3150,7 +3174,11 @@ BEGIN
         v_term,
         v_succ,
         v_W_mid,
-        CASE WHEN v_pv > 0 THEN v_W_mid / v_pv * 100.0 ELSE 0.0 END,
+        CASE
+            WHEN v_W_mid IS NULL THEN NULL::DOUBLE PRECISION
+            WHEN v_pv > 0 THEN v_W_mid / v_pv * 100.0
+            ELSE 0.0
+        END,
         v_tw,
         v_term - v_pv + v_tw,
         100.0 - v_succ;

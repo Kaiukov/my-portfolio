@@ -373,6 +373,24 @@ describe("Projection — goal mode", () => {
     expect(result.max_achievable).toBeLessThan(1000000);
   });
 
+  test("negative rate goal search uses compounding, not linear carry-forward", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asGoal(await computeProjection({
+      currentValue: 100000,
+      contribution: 1000,
+      annualRatePct: -20.0,
+      mode: "goal",
+      target: 110000,
+      maxMonths: 10,
+    }));
+
+    // A linear approximation would hit this in exactly 10 months.
+    // Under negative compounding it is not reachable within the same window.
+    expect(result.feasible).toBe(false);
+    expect(result.months_needed).toBeNull();
+  });
+
   test("goal mode without target throws", async () => {
     const { computeProjection } = await import("../src/commands/projection.js");
 
@@ -544,6 +562,64 @@ describe("Projection — CLI integration", () => {
     }
   });
 
+  test("dispatches zero-year projection and preserves SQL zero-horizon fields", async () => {
+    setupProjection({
+      current_value: 100000,
+      projection_years: 0,
+      projected_value_nominal: 100000,
+      projected_value_real: 100000,
+      total_contributions: 0,
+      return_portion: 0,
+    });
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--projection-years", "0"]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.data.projection_years).toBe(0);
+      expect(output.data.projected_value_nominal).toBe(100000);
+      expect(output.data.projected_value_real).toBe(100000);
+      expect(output.data.total_contributions).toBe(0);
+      expect(output.data.return_portion).toBe(0);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  test("dispatches already-met goal projection with years_to_goal=0", async () => {
+    setupProjection({
+      current_value: 100000,
+      target_value: 100000,
+      years_to_goal: 0,
+      projected_goal_value: 100000,
+      projection_years: null,
+      projected_value_nominal: null,
+      projected_value_real: null,
+      total_contributions: null,
+      return_portion: null,
+      required_return_rate: null,
+    });
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection", "--target-value", "100000"]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.data.years_to_goal).toBe(0);
+      expect(output.data.projected_goal_value).toBe(100000);
+      expect(output.data.required_return_rate).toBeNull();
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
   test("projection help text matches SQL-backed contract", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -614,5 +690,72 @@ describe("Projection — DB-gated integration", () => {
       logSpy.mockRestore();
       exitSpy.mockRestore();
     }
+  });
+
+  runDb("projection zero horizon keeps current_value unchanged and echoes projection_years=0", async () => {
+    const { getProjection } = await import("../src/commands/projection.js");
+
+    const result = await getProjection({
+      monthlyContribution: 1000,
+      annualReturnRate: 0.12,
+      projectionYears: 0,
+      inflationRate: 0.025,
+    });
+
+    if (result.current_value <= 0) return;
+
+    expect(result.projection_years).toBe(0);
+    expect(result.projected_value_nominal).toBe(result.current_value);
+    expect(result.projected_value_real).toBe(result.current_value);
+    expect(result.total_contributions).toBe(0);
+    expect(result.return_portion).toBe(0);
+  });
+
+  runDb("projection goal mode already-met target returns years_to_goal=0", async () => {
+    const { getProjection } = await import("../src/commands/projection.js");
+
+    const baseline = await getProjection({
+      monthlyContribution: 1000,
+      annualReturnRate: 0.07,
+      projectionYears: 5,
+    });
+
+    if (baseline.current_value <= 0) return;
+
+    const result = await getProjection({
+      monthlyContribution: 1000,
+      annualReturnRate: 0.07,
+      projectionYears: 5,
+      targetValue: baseline.current_value,
+    });
+
+    expect(result.years_to_goal).toBe(0);
+    expect(result.projected_goal_value).toBe(baseline.current_value);
+    expect(result.required_return_rate).toBeNull();
+  });
+
+  runDb("projection goal mode negative rate does not use linear carry-forward", async () => {
+    const { getProjection } = await import("../src/commands/projection.js");
+
+    const baseline = await getProjection({
+      monthlyContribution: 1000,
+      annualReturnRate: -0.2,
+      projectionYears: 1,
+    });
+
+    if (baseline.current_value <= 0) return;
+
+    const contribution = 1000;
+    const monthlyLoss = Math.abs(-0.2 / 12.0) * baseline.current_value;
+    const targetValue = baseline.current_value + contribution - monthlyLoss * 0.25;
+
+    const result = await getProjection({
+      monthlyContribution: contribution,
+      annualReturnRate: -0.2,
+      projectionYears: 1,
+      targetValue,
+    });
+
+    expect(result.years_to_goal === null || result.years_to_goal > (1 / 12)).toBe(true);
   });
 });

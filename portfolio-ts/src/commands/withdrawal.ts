@@ -25,8 +25,8 @@ export interface WithdrawalResult {
   years_until_depletion: number | null;
   terminal_value: number;
   success_likelihood: number;
-  max_safe_withdrawal: number;
-  max_safe_withdrawal_rate: number;
+  max_safe_withdrawal: number | null;
+  max_safe_withdrawal_rate: number | null;
   total_withdrawn: number;
   return_generated: number;
   shortfall_risk: number;
@@ -79,8 +79,8 @@ export async function getWithdrawal(opts: WithdrawalOptions = {}): Promise<Withd
       years_until_depletion: null,
       terminal_value: 0,
       success_likelihood: 0,
-      max_safe_withdrawal: 0,
-      max_safe_withdrawal_rate: 0,
+      max_safe_withdrawal: null,
+      max_safe_withdrawal_rate: null,
       total_withdrawn: 0,
       return_generated: 0,
       shortfall_risk: 100,
@@ -97,8 +97,8 @@ export async function getWithdrawal(opts: WithdrawalOptions = {}): Promise<Withd
     years_until_depletion: nullableNum(row["years_until_depletion"]),
     terminal_value: num(row["terminal_value"]),
     success_likelihood: num(row["success_likelihood"]),
-    max_safe_withdrawal: num(row["max_safe_withdrawal"]),
-    max_safe_withdrawal_rate: num(row["max_safe_withdrawal_rate"]),
+    max_safe_withdrawal: nullableNum(row["max_safe_withdrawal"]),
+    max_safe_withdrawal_rate: nullableNum(row["max_safe_withdrawal_rate"]),
     total_withdrawn: num(row["total_withdrawn"]),
     return_generated: num(row["return_generated"]),
     shortfall_risk: num(row["shortfall_risk"]),
