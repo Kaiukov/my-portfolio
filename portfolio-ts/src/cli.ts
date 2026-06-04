@@ -45,6 +45,7 @@ import { deployWorker } from "./cloudflare/deploy.js";
 import { getWidgetUrl } from "./cloudflare/url.js";
 import { runWranglerLogin, runWranglerLogout, runWranglerWhoami } from "./cloudflare/auth.js";
 import { publishToKv } from "./cloudflare/publish.js";
+import { publishDashboardToKv } from "./cloudflare/dashboard_publish.js";
 import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
 import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
@@ -84,6 +85,7 @@ Commands:
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
   cloudflare      Cloudflare Workers: init, deploy, publish, sync, url, login, logout, whoami
+  dashboard       Publish a richer dashboard snapshot to Cloudflare KV (subcommands: publish)
   sync            repair_prices + recalculate (daily maintenance)
   refresh         Fetch Yahoo prices via HTTPS, recalculate, and return summary (OS-cron)
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
@@ -823,6 +825,63 @@ export async function dispatch(argv: string[]): Promise<void> {
       const result = await getWidget(days, asOfDate);
       console.log(JSON.stringify(success("widget", result, result.series.length), null, 2));
       return;
+    }
+
+    case "dashboard": {
+      const sub = argv[3];
+      if (!sub || sub.startsWith("--")) {
+        console.log(
+          JSON.stringify(
+            error("dashboard", "VALIDATION_ERROR", "Subcommand required: dashboard publish"),
+            null,
+            2,
+          ),
+        );
+        process.exit(1);
+        return;
+      }
+
+      switch (sub) {
+        case "publish": {
+          const result = await publishDashboardToKv();
+          if (result.success && result.snapshot) {
+            console.log(
+              JSON.stringify(
+                success("dashboard:publish", {
+                  key: result.key,
+                  namespace_id: result.namespaceId,
+                  updatedAt: result.snapshot.updatedAt,
+                }),
+                null,
+                2,
+              ),
+            );
+          } else {
+            const errCode = result.namespaceId ? "KV_PUBLISH_FAILED" : "KV_NOT_CONFIGURED";
+            console.log(
+              JSON.stringify(
+                error("dashboard:publish", errCode, result.error ?? "Publish failed"),
+                null,
+                2,
+              ),
+            );
+            process.exit(1);
+          }
+          return;
+        }
+
+        default: {
+          console.log(
+            JSON.stringify(
+              error("dashboard", "UNKNOWN_SUBCOMMAND", `Unknown: dashboard ${sub}. Use: dashboard publish`),
+              null,
+              2,
+            ),
+          );
+          process.exit(1);
+          return;
+        }
+      }
     }
 
     case "cloudflare": {
