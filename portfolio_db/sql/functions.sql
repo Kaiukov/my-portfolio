@@ -2567,4 +2567,93 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+-- Portfolio growth decomposition: split total growth into "from my savings"
+-- (net contributions) vs "from the market" (returns).
+--
+-- Identity: end_value = start_value + net_deposits + total_gain + total_income - fees - taxes
+--   current_value = status.portfolio_value
+--   initial_value = portfolio_value at the FIRST daily_returns row (0 if none)
+--   net_deposits = status.deposits - status.withdrawals
+--   total_gain = status.realized_gain + status.unrealized_gain
+--   total_income = status.income
+--   total_fees_and_taxes = status.fees + status.taxes
+--   total_growth_usd = current_value - initial_value
+--   from_contributions_usd = net_deposits
+--   from_returns_usd = total_gain + total_income - total_fees_and_taxes
+-- Guards:
+--   total_growth_usd <= 0  -> both pct set to 0 (USD split still meaningful)
+--   initial_value = 0      -> both pct set to 0
+--   from_contributions_pct capped at 100 via LEAST
+--   from_returns_pct = 100 - from_contributions_pct (complement)
+-- Sanity invariant: from_contributions_usd + from_returns_usd ≈ total_growth_usd
+DROP FUNCTION IF EXISTS portfolio_decomposition_sql(DATE) CASCADE;
+
+CREATE OR REPLACE FUNCTION portfolio_decomposition_sql(
+    p_as_of_date DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    as_of_date             TEXT,
+    total_growth_usd       DOUBLE PRECISION,
+    total_growth_pct       DOUBLE PRECISION,
+    from_contributions_usd DOUBLE PRECISION,
+    from_contributions_pct DOUBLE PRECISION,
+    from_returns_usd       DOUBLE PRECISION,
+    from_returns_pct       DOUBLE PRECISION,
+    initial_value          DOUBLE PRECISION,
+    current_value          DOUBLE PRECISION,
+    net_deposits           DOUBLE PRECISION,
+    total_gain             DOUBLE PRECISION,
+    total_income           DOUBLE PRECISION,
+    total_fees_and_taxes   DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH status AS (
+        SELECT * FROM portfolio_status_sql(p_as_of_date)
+    ),
+    initial_val AS (
+        SELECT COALESCE(
+            (SELECT portfolio_value FROM daily_returns ORDER BY date ASC LIMIT 1),
+            0.0
+        ) AS initial_value
+    ),
+    pieces AS (
+        SELECT
+            s.as_of_date,
+            COALESCE(s.portfolio_value, 0.0)                                  AS current_value,
+            iv.initial_value,
+            s.deposits - s.withdrawals                                        AS net_deposits,
+            COALESCE(s.realized_gain, 0.0) + COALESCE(s.unrealized_gain, 0.0) AS total_gain,
+            COALESCE(s.income, 0.0)                                            AS total_income,
+            COALESCE(s.fees, 0.0) + COALESCE(s.taxes, 0.0)                    AS total_fees_and_taxes
+        FROM status s
+        CROSS JOIN initial_val iv
+    )
+    SELECT
+        p.as_of_date,
+        p.current_value - p.initial_value                                                                               AS total_growth_usd,
+        CASE WHEN p.initial_value > 0.0
+             THEN (p.current_value - p.initial_value) / p.initial_value * 100.0
+             ELSE 0.0
+        END                                                                                                              AS total_growth_pct,
+        p.net_deposits                                                                                                   AS from_contributions_usd,
+        CASE WHEN (p.current_value - p.initial_value) > 0.0 AND p.initial_value > 0.0
+             THEN LEAST(p.net_deposits / (p.current_value - p.initial_value) * 100.0, 100.0)
+             ELSE 0.0
+        END                                                                                                              AS from_contributions_pct,
+        p.total_gain + p.total_income - p.total_fees_and_taxes                                                           AS from_returns_usd,
+        CASE WHEN (p.current_value - p.initial_value) > 0.0 AND p.initial_value > 0.0
+             THEN 100.0 - LEAST(p.net_deposits / (p.current_value - p.initial_value) * 100.0, 100.0)
+             ELSE 0.0
+        END                                                                                                              AS from_returns_pct,
+        p.initial_value,
+        p.current_value,
+        p.net_deposits,
+        p.total_gain,
+        p.total_income,
+        p.total_fees_and_taxes
+    FROM pieces p
+$$;
+
 SET check_function_bodies = on;

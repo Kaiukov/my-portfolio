@@ -27,6 +27,7 @@ import { getCurrencyExposure } from "./commands/currency_exposure.js";
 import { getRebalance } from "./commands/rebalance.js";
 import { getIncome } from "./commands/income.js";
 import { getRealizedGains } from "./commands/realized_gains.js";
+import { getDecomposition } from "./commands/decomposition.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import {
@@ -74,6 +75,7 @@ Commands:
   rebalance       Target-vs-actual drift report with suggested trades (--target "VTI=50,VXUS=20,BND=30", --as-of-date)
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
+  decomposition   Split portfolio growth into contributions vs market returns (--as-of-date)
   currency_exposure  Portfolio exposure broken down by currency
   performance     Performance metrics: TWR, CAGR, Calmar, Sharpe, max drawdown, benchmark-relative (beta, alpha, IR), real (inflation-adjusted) return. Includes period_returns (1M,3M,6M,YTD,1Y,SII) and rolling_12m_returns. Use --benchmark SPY (default) for full risk-adjusted suite; --inflation-rate 0.025 for real return.
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
@@ -711,6 +713,14 @@ export async function dispatch(argv: string[]): Promise<void> {
       const freshnessMeta = await getPriceFreshness(asOfDate);
       const result = await getConcentration(asOfDate, topN);
       console.log(JSON.stringify(success("concentration", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "decomposition": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getDecomposition(asOfDate);
+      console.log(JSON.stringify(success("decomposition", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 

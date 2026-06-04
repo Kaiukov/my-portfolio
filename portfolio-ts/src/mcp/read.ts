@@ -20,6 +20,7 @@ import { verifyPrices } from "../commands/verify_prices.js";
 import { getWidget } from "../commands/widget.js";
 import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
+import { getDecomposition } from "../commands/decomposition.js";
 import { strField, intField, floatField } from "./adapter.js";
 
 type JsonObject = Record<string, unknown>;
@@ -120,6 +121,13 @@ export async function mcpRead(
       const freshnessMeta = await getPriceFreshness(asOf);
       const data = await getDiversification(asOf, lookbackDays, minCorrelation ?? 0.0);
       return success("diversification", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+    }
+
+    if (toolName === "decomposition") {
+      const asOf = asOfVal(args);
+      const freshnessMeta = await getPriceFreshness(asOf);
+      const data = await getDecomposition(asOf);
+      return success("decomposition", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
     }
 
     if (toolName === "performance") {

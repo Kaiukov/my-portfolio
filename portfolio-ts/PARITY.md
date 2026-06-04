@@ -35,6 +35,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | `portfolio currency_exposure` | `portfolio-ts currency_exposure` | **accepted behavior change** | Calls `portfolio_currency_exposure_sql(as_of_date)` — PostgreSQL owns all calculations. Groups holdings and cash by currency with usd_value, pct, holdings_usd, cash_usd sub-columns. Same `--as-of-date` support and freshness meta as other read-only commands. |
 | — | `portfolio-ts cash_drag` | **TS-only command** | Read-only opportunity cost of idle cash vs being invested. Calls `portfolio_cash_drag_sql(as_of_date, from_date, benchmark_return_rate, cash_return_rate)` which reuses `portfolio_cash_sql` + `portfolio_performance_sql`. Returns total cash, portfolio value, CAGR, and drag $/% vs portfolio and benchmark rates. Supports `--as-of-date`, `--from-date`, `--benchmark-return-rate`, `--cash-return-rate`. |
 | — | `portfolio-ts rebalance` | **TS-only command** | Read-only target-vs-actual drift report. Takes `--target "VTI=50,VXUS=20,BND=30"` and optional `--as-of-date`. Reuses `portfolio_allocation_sql` via `getAllocation()` — no new SQL, no persistence. Drift/trade math is a pure TypeScript function (`computeDrift`). Emits `command:"rebalance"` envelope with summary + rows sorted by `abs(drift_pct)` desc. |
+| — | `portfolio-ts decomposition` | **TS-only command** | Read-only growth decomposition: splits total growth into contributions (net deposits) vs market returns. Calls `portfolio_decomposition_sql(as_of_date)` which reuses `portfolio_status_sql()` + `daily_returns` initial value. Emits `command:"decomposition"` envelope. Supports `--as-of-date`. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
 
 ## Validation results (live against PostgreSQL)
@@ -94,6 +95,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `realized_gains` | `realized-gains` | `GET /realized_gains` | — | Identical envelope to CLI and API |
 | `asset_metadata` | `asset-metadata` | `GET /asset_metadata` | — | Read cache by default; `--refresh`/`?refresh=true` triggers Yahoo fetch |
 | `rebalance` | `rebalance` | `GET /rebalance` | — | Identical envelope to CLI and API; requires `target` param |
+| `decomposition` | `decomposition` | `GET /decomposition` | Yes | Identical envelope to CLI and API |
 
 All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.
 No business logic is duplicated in the MCP adapter. Error handling maps through the
