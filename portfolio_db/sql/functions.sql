@@ -2271,19 +2271,25 @@ AS $$
         SELECT COALESCE(SUM(c.usd_value), 0.0) AS total_cash_usd
         FROM portfolio_cash_sql(p_as_of_date) c
     ),
+    pv AS (
+        -- canonical total portfolio value (holdings + cash), aligned to the
+        -- status/cash/summary reporting snapshot; NOT the invested-only
+        -- start_value+total_gain trajectory from portfolio_performance_sql.
+        SELECT COALESCE(ps.portfolio_value, 0.0) AS portfolio_value
+        FROM portfolio_status_sql(p_as_of_date) ps
+    ),
     perf AS (
         SELECT
             p.cagr                                              AS portfolio_cagr,
             p.spy_cagr_pct                                      AS benchmark_cagr,
             p.start_date                                        AS start_date,
-            p.end_date                                          AS end_date,
-            COALESCE(p.start_value + p.total_gain, p.end_value) AS portfolio_value
+            p.end_date                                          AS end_date
         FROM portfolio_performance_sql(p_as_of_date, 'SPY', p_from_date, 0.02, 0.025) p
     ),
     drag AS (
         SELECT
             ct.total_cash_usd,
-            p.portfolio_value,
+            pv.portfolio_value,
             p.portfolio_cagr,
             p.benchmark_cagr,
             p_cash_return_rate                                      AS assumed_cash_return_rate,
@@ -2293,6 +2299,7 @@ AS $$
             COALESCE(p_benchmark_return_rate, COALESCE(p.benchmark_cagr, 0.0) / 100.0) - p_cash_return_rate AS rate_gap_benchmark
         FROM cash_total ct
         CROSS JOIN perf p
+        CROSS JOIN pv
     )
     SELECT
         d.portfolio_value                                          AS total_portfolio_value,
