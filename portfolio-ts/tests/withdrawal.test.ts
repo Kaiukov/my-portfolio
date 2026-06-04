@@ -17,6 +17,35 @@ mock.module("../src/tx.js", () => ({
   },
 }));
 
+describe("Withdrawal — SQL row mapping", () => {
+  test("preserves NULL max-safe sentinel for zero horizon", async () => {
+    mockQuerySingle.mockResolvedValueOnce({
+      portfolio_value: 500000,
+      annual_withdrawal: 10000,
+      withdrawal_rate_pct: 2.0,
+      time_horizon_years: 0,
+      expected_return: 0.07,
+      inflation_rate: 3.0,
+      years_until_depletion: null,
+      terminal_value: 500000,
+      success_likelihood: 100.0,
+      max_safe_withdrawal: null,
+      max_safe_withdrawal_rate: null,
+      total_withdrawn: 0,
+      return_generated: 0,
+      shortfall_risk: 0.0,
+    });
+
+    const { getWithdrawal } = await import("../src/commands/withdrawal.js");
+    const result = await getWithdrawal({ timeHorizonYears: 0, annualWithdrawal: 10000 });
+
+    expect(result.time_horizon_years).toBe(0);
+    expect(result.terminal_value).toBe(500000);
+    expect(result.max_safe_withdrawal).toBeNull();
+    expect(result.max_safe_withdrawal_rate).toBeNull();
+  });
+});
+
 // ── Hand-calculated recurrence tests (v1 deterministic single-path) ──
 // Recurrence: V_0 = PV, V_t = V_{t-1} * (1+r) - W0 * (1+infl)^(t-1)
 // Withdrawal at END of year, inflation-adjusted.
@@ -94,13 +123,13 @@ describe("Withdrawal — hand-calculated recurrence", () => {
 });
 
 describe("Withdrawal — max safe withdrawal bisection", () => {
-  test("max_safe leaves terminal ~0 at horizon", () => {
-    // PV = 100_000, r = 0.05, infl = 0.02, horizon = 20
-    // Bisect manually to verify
+  test("short horizon positive return: max_safe can exceed portfolio_value", () => {
+    // PV = 100_000, r = 10%, infl = 0%, horizon = 1
+    // Exact max safe is PV * (1+r) = 110_000.
     const pv = 100_000;
-    const r = 0.05;
-    const infl = 0.02;
-    const horizon = 20;
+    const r = 0.10;
+    const infl = 0.0;
+    const horizon = 1;
 
     function terminal(W0: number): number {
       let V = pv;
@@ -111,8 +140,15 @@ describe("Withdrawal — max safe withdrawal bisection", () => {
       return V;
     }
 
+    let bracketLo = 0;
+    let bracketHi = Math.max(pv, 1);
+    while (terminal(bracketHi) >= 0) {
+      bracketLo = bracketHi;
+      bracketHi *= 2;
+    }
+
     let lo = 0;
-    let hi = pv;
+    let hi = bracketHi;
     for (let i = 0; i < 50; i++) {
       const mid = (lo + hi) / 2;
       if (terminal(mid) >= 0) lo = mid;
@@ -121,8 +157,9 @@ describe("Withdrawal — max safe withdrawal bisection", () => {
     const maxSafe = lo;
     const tv = terminal(maxSafe);
     expect(tv).toBeGreaterThan(-1); // near zero
-    expect(maxSafe).toBeGreaterThan(0);
-    expect(maxSafe).toBeLessThan(pv);
+    expect(bracketLo).toBeGreaterThanOrEqual(pv);
+    expect(maxSafe).toBeGreaterThan(pv);
+    expect(Math.abs(maxSafe - 110_000)).toBeLessThan(1e-6);
 
     // A slightly higher withdrawal should go negative
     expect(terminal(maxSafe * 1.01)).toBeLessThan(0);
@@ -403,16 +440,34 @@ describe("Withdrawal — DB-gated integration", () => {
     const maxSafe = Number(data.max_safe_withdrawal);
     const pv = Number(data.portfolio_value);
 
-    // max_safe should be positive and ≤ portfolio_value
+    // max_safe should be positive
     expect(maxSafe).toBeGreaterThan(0);
-    expect(maxSafe).toBeLessThanOrEqual(pv);
 
     // max_safe_withdrawal_rate should match
     const expectedRate = pv > 0 ? maxSafe / pv * 100 : 0;
     expect(Math.abs(Number(data.max_safe_withdrawal_rate) - expectedRate)).toBeLessThan(1e-6);
   });
 
-  runDb("edge: zero-horizon returns portfolio_value as terminal_value", async () => {
+  runDb("short horizon positive return: SQL max_safe_withdrawal can exceed portfolio_value", async () => {
+    const { mcpRead } = await import("../src/mcp/read.js");
+    const result = await mcpRead("withdrawal", {
+      annual_withdrawal: 1000,
+      time_horizon_years: 1,
+      expected_return: 0.10,
+      inflation_rate: 0.0,
+    });
+
+    if (!result.ok || !result.data) return;
+
+    const data = result.data as Record<string, unknown>;
+    const pv = Number(data.portfolio_value);
+    const maxSafe = Number(data.max_safe_withdrawal);
+
+    expect(maxSafe).toBeGreaterThan(pv);
+    expect(Math.abs(maxSafe - pv * 1.10) / pv).toBeLessThan(1e-6);
+  });
+
+  runDb("edge: zero-horizon returns NULL max-safe sentinel and coherent outputs", async () => {
     const { mcpRead } = await import("../src/mcp/read.js");
     const result = await mcpRead("withdrawal", {
       time_horizon_years: 0,
@@ -425,5 +480,7 @@ describe("Withdrawal — DB-gated integration", () => {
     expect(data.terminal_value).toBe(data.portfolio_value);
     expect(data.years_until_depletion).toBeNull();
     expect(data.success_likelihood).toBe(100);
+    expect(data.max_safe_withdrawal).toBeNull();
+    expect(data.max_safe_withdrawal_rate).toBeNull();
   });
 });
