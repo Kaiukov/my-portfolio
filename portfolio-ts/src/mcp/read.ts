@@ -9,6 +9,7 @@ import { getIncome } from "../commands/income.js";
 import { getRealizedGains } from "../commands/realized_gains.js";
 import { getAllocation } from "../commands/allocation.js";
 import { getConcentration } from "../commands/concentration.js";
+import { getDiversification } from "../commands/diversification.js";
 import { getPerformance } from "../commands/performance.js";
 import { getMwr } from "../commands/mwr.js";
 import { getTransactions } from "../commands/transactions.js";
@@ -99,6 +100,15 @@ export async function mcpRead(
       const freshnessMeta = await getPriceFreshness(asOf);
       const data = await getConcentration(asOf, topN);
       return success("concentration", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+    }
+
+    if (toolName === "diversification") {
+      const asOf = asOfVal(args);
+      const lookbackDays = intField(args, "lookback_days", "lookbackDays") ?? 252;
+      const minCorrelation = (args["min_correlation"] ?? args["minCorrelation"]) as number | undefined;
+      const freshnessMeta = await getPriceFreshness(asOf);
+      const data = await getDiversification(asOf, lookbackDays, minCorrelation ?? 0.0);
+      return success("diversification", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
     }
 
     if (toolName === "performance") {

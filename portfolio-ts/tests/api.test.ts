@@ -445,6 +445,50 @@ describe("handleRequest", () => {
     expect(body.data.total_rows).toBe(1000);
   });
 
+  test("GET /diversification returns 200 with success envelope", async () => {
+    let qsCall = 0;
+    mockQuerySingle.mockImplementation(() => {
+      qsCall++;
+      if (qsCall === 1) {
+        return Promise.resolve({ prices_as_of: "2026-01-14" });
+      }
+      if (qsCall === 2) {
+        return Promise.resolve({ needs_recalc: false });
+      }
+      return Promise.resolve({
+        as_of_date: "2026-01-15",
+        hhi: 2500,
+        total_holdings: 5,
+        effective_holdings: 4.0,
+        avg_pairwise_correlation: 0.35,
+        max_pairwise_correlation: 0.72,
+        min_pairwise_correlation: -0.15,
+        correlation_weighted_hhi: 3800,
+      });
+    });
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("get_required_price_checkpoints_sql") || sql.includes("stale_tickers_sql")) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/diversification?as_of=2026-01-15&lookback_days=126&min_correlation=0.3");
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/json");
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("diversification");
+    expect(body.data.hhi).toBe(2500);
+    expect(body.data.effective_holdings).toBe(4.0);
+    expect(body.data.avg_pairwise_correlation).toBe(0.35);
+    expect(body.data.correlation_weighted_hhi).toBe(3800);
+    expect(body.meta).toHaveProperty("prices_as_of", "2026-01-14");
+  });
+
   test("unknown route returns 404 error envelope", async () => {
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/nonexistent");

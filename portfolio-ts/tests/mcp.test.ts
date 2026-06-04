@@ -343,6 +343,32 @@ describe("mcpRead", () => {
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
   });
 
+  test("diversification returns correct envelope with freshness meta", async () => {
+    setupFreshnessDb();
+    mockDbQuerySingle.mockResolvedValueOnce({
+      as_of_date: "2026-01-15",
+      hhi: 2500,
+      total_holdings: 5,
+      effective_holdings: 4.0,
+      avg_pairwise_correlation: 0.35,
+      max_pairwise_correlation: 0.72,
+      min_pairwise_correlation: -0.15,
+      correlation_weighted_hhi: 3800,
+    });
+
+    const { mcpRead } = await import("../src/mcp/read.js");
+    const result = await mcpRead("diversification", {});
+
+    if (!result.ok) throw new Error("Expected success envelope");
+    expect(result.command).toBe("diversification");
+    const data = result.data as Record<string, unknown>;
+    expect(data.hhi).toBe(2500);
+    expect(data.effective_holdings).toBe(4.0);
+    expect(data.avg_pairwise_correlation).toBe(0.35);
+    expect(data.correlation_weighted_hhi).toBe(3800);
+    expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
+  });
+
   test("performance returns correct envelope with freshness meta", async () => {
     setupFreshnessDb();
     mockDbQuery.mockResolvedValueOnce([{

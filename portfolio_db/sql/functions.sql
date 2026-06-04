@@ -1117,6 +1117,149 @@ AS $$
     FROM alloc
 $$;
 
+-- ============================================================================
+-- Diversification depth: correlation-aware portfolio diversification metrics.
+--
+-- Uses per-holding daily returns derived from the prices table to compute
+-- pairwise Pearson correlations, producing a risk-weighted Herfindahl-
+-- Hirschman Index (correlation_weighted_hhi) alongside standard concentration
+-- metrics.
+--
+-- Method:
+--   1. Holdings + weights: reuses portfolio_allocation_sql(p_as_of_date) for
+--      per-asset allocation_pct. Weights w_i = allocation_pct / 100.0.
+--      Only assets that have >=2 price rows in the lookback window participate
+--      in correlation. Cash, FX, and other assets with no prices rows are
+--      excluded from correlation computation but still contribute to HHI,
+--      total_holdings, and the diagonal of CWHHI (their off-diagonal pairwise
+--      contributions are treated as ρ=0).
+--   2. Per-holding daily returns: computed from the prices table as
+--      return_t = close_t / close_{t-1} - 1 over
+--      [p_as_of_date - p_lookback_days, p_as_of_date].
+--   3. Pairwise Pearson correlation ρ(i,j): computed via PostgreSQL's CORR()
+--      aggregate over return series joined ON date (not array position).
+--      Only dates where BOTH assets have a price are used.
+--      p_min_correlation filters which pairs contribute to avg/max/min:
+--      a pair is included only when |ρ| >= p_min_correlation.
+--   4. HHI: Σ w_i² (weights as fractions, 0-1 scale). Output HHI is
+--      multiplied by 10000 for compatibility with portfolio_concentration_sql()
+--      which uses the standard 0-10000 scale.
+--      effective_holdings = 1.0 / Σ w_i² (inverse Herfindahl).
+--   5. Correlation-weighted HHI (CWHHI):
+--        CWHHI = Σ_i Σ_j w_i w_j ρ(i,j)   with ρ(i,i) = 1
+--      Expands to:
+--        CWHHI = Σ_i w_i² + 2 * Σ_{i<j} w_i w_j ρ(i,j)
+--      (pairs where either asset lacks price data contribute ρ=0).
+--      Output is multiplied by 10000 (0-10000 scale, matching HHI).
+--      Reduces to plain HHI when all off-diagonal ρ=0.
+--
+-- Degenerate cases:
+--   - <2 holdings with price series → avg_pairwise_correlation, max/min = NULL
+--   - Single holding → HHI = 10000, effective_holdings = 1, CWHHI = 10000
+--   - Zero-variance return series → CORR returns NULL → pair excluded
+--   - No pairs survive p_min_correlation filter → avg/max/min = NULL
+-- ============================================================================
+DROP FUNCTION IF EXISTS portfolio_diversification_depth_sql(DATE, INTEGER, DOUBLE PRECISION);
+CREATE OR REPLACE FUNCTION portfolio_diversification_depth_sql(
+    p_as_of_date      DATE DEFAULT CURRENT_DATE,
+    p_lookback_days   INTEGER DEFAULT 252,
+    p_min_correlation DOUBLE PRECISION DEFAULT 0.0
+)
+RETURNS TABLE (
+    as_of_date                TEXT,
+    hhi                       DOUBLE PRECISION,
+    total_holdings            INTEGER,
+    effective_holdings        DOUBLE PRECISION,
+    avg_pairwise_correlation  DOUBLE PRECISION,
+    max_pairwise_correlation  DOUBLE PRECISION,
+    min_pairwise_correlation  DOUBLE PRECISION,
+    correlation_weighted_hhi  DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+    WITH alloc AS (
+        SELECT asset, allocation_pct / 100.0 AS wgt
+        FROM portfolio_allocation_sql(p_as_of_date)
+        WHERE allocation_pct > 0
+    ),
+    priced_assets AS (
+        SELECT a.asset, a.wgt
+        FROM alloc a
+        WHERE EXISTS (
+            SELECT 1 FROM prices p
+            WHERE p.ticker = a.asset
+              AND p.date BETWEEN p_as_of_date - p_lookback_days AND p_as_of_date
+            HAVING COUNT(*) >= 2
+        )
+    ),
+    priced_cnt AS (
+        SELECT COUNT(*) AS ct FROM priced_assets
+    ),
+    daily_ret AS (
+        SELECT
+            p.ticker AS asset_nm,
+            p.date,
+            p.price / NULLIF(
+                LAG(p.price) OVER (PARTITION BY p.ticker ORDER BY p.date),
+                0.0
+            ) - 1.0 AS ret
+        FROM prices p
+        JOIN priced_assets pa ON p.ticker = pa.asset
+        WHERE p.date BETWEEN p_as_of_date - p_lookback_days AND p_as_of_date
+    ),
+    pair_corr AS (
+        SELECT
+            a1.asset AS a_a,
+            a1.wgt   AS w_a,
+            a2.asset AS a_b,
+            a2.wgt   AS w_b,
+            CORR(d1.ret, d2.ret) AS rho_val
+        FROM priced_assets a1
+        CROSS JOIN priced_assets a2
+        JOIN daily_ret d1 ON d1.asset_nm = a1.asset
+        JOIN daily_ret d2
+            ON d2.asset_nm = a2.asset
+            AND d2.date = d1.date
+        WHERE a1.asset < a2.asset
+        GROUP BY a1.asset, a1.wgt, a2.asset, a2.wgt
+        HAVING COUNT(*) >= 2
+    ),
+    filtered_corr AS (
+        SELECT w_a, w_b, rho_val
+        FROM pair_corr
+        WHERE rho_val IS NOT NULL
+          AND ABS(rho_val) >= p_min_correlation
+    ),
+    base_hhi AS (
+        SELECT COALESCE(SUM(wgt * wgt), 0.0) AS hhi_frac FROM alloc
+    ),
+    total_h AS (
+        SELECT COUNT(*)::INTEGER AS th FROM alloc
+    ),
+    corr_adj AS (
+        SELECT COALESCE(SUM(w_a * w_b * rho_val), 0.0) AS adj FROM filtered_corr
+    )
+    SELECT
+        p_as_of_date::TEXT,
+        bh.hhi_frac * 10000.0,
+        th.th,
+        CASE WHEN bh.hhi_frac > 0 THEN 1.0 / bh.hhi_frac ELSE 0.0 END,
+        (SELECT CASE WHEN (SELECT ct FROM priced_cnt) < 2 THEN NULL::DOUBLE PRECISION
+                     ELSE (SELECT AVG(rho_val) FROM filtered_corr)
+                END),
+        (SELECT CASE WHEN (SELECT ct FROM priced_cnt) < 2 THEN NULL::DOUBLE PRECISION
+                     ELSE (SELECT MAX(rho_val) FROM filtered_corr)
+                END),
+        (SELECT CASE WHEN (SELECT ct FROM priced_cnt) < 2 THEN NULL::DOUBLE PRECISION
+                     ELSE (SELECT MIN(rho_val) FROM filtered_corr)
+                END),
+        (bh.hhi_frac + 2.0 * COALESCE(ca.adj, 0.0)) * 10000.0
+    FROM base_hhi bh
+    CROSS JOIN total_h th
+    CROSS JOIN corr_adj ca
+$$;
+
 -- Performance statistics: TWR, Sharpe, Sortino, Treynor, max drawdown, benchmark-relative metrics.
 -- ALL financial math is owned by PostgreSQL. TypeScript must not duplicate any calculation.
 -- avg_daily_return uses portfolio_daily_return (INCLUDES cash flows).
@@ -2325,5 +2468,95 @@ AS $$
         COALESCE(d.end_date, p_as_of_date::TEXT)                   AS period_end_date
     FROM drag d
 $$;
+-- Correlation matrix for portfolio diversification analysis.
+-- Returns pairwise Pearson correlation of daily price returns
+-- for non-cash holdings over the configured window.
+DROP FUNCTION IF EXISTS portfolio_correlation_matrix_sql(DATE, INTEGER) CASCADE;
+
+CREATE OR REPLACE FUNCTION portfolio_correlation_matrix_sql(
+    p_as_of_date DATE DEFAULT NULL,
+    p_window_months INTEGER DEFAULT 12
+)
+RETURNS TABLE (
+    asset_a TEXT,
+    asset_b TEXT,
+    correlation DOUBLE PRECISION
+) AS $$
+DECLARE
+    v_as_of DATE;
+    v_window_months INTEGER;
+BEGIN
+    v_as_of := COALESCE(p_as_of_date, CURRENT_DATE);
+    v_window_months := COALESCE(p_window_months, 12);
+
+    RETURN QUERY
+    WITH held_assets AS (
+        SELECT DISTINCT n.asset
+        FROM (
+            SELECT asset,
+                   SUM(CASE
+                       WHEN action IN ('BUY','DEPOSIT','DIVIDEND','INTEREST','TRANSFER','EXCHANGE_TO') THEN quantity
+                       WHEN action IN ('SELL','WITHDRAW','FEE','TAX','EXCHANGE_FROM') THEN -quantity
+                       ELSE 0
+                   END) AS net_quantity
+            FROM transactions
+            WHERE date <= v_as_of
+            GROUP BY asset
+        ) n
+        WHERE n.net_quantity > 0
+          AND n.asset NOT IN ('USD','EUR','GBP','CHF','CAD','AUD','HKD','SGD','JPY')
+          AND NOT (n.asset LIKE 'CASH %')
+          AND is_cash_like_sql(n.asset) = false
+          AND get_asset_type_sql(n.asset) NOT IN ('cash_base','cash_fx','cash_stable')
+    ),
+    price_series AS (
+        SELECT
+            p.ticker,
+            p.date,
+            p.price,
+            LAG(p.price) OVER (PARTITION BY p.ticker ORDER BY p.date) AS prev_price
+        FROM prices p
+        JOIN held_assets ha ON p.ticker = ha.asset
+        WHERE p.date > (v_as_of - (v_window_months || ' months')::INTERVAL)
+          AND p.date <= v_as_of
+          AND p.price > 0
+    ),
+    daily_rets AS (
+        SELECT
+            ticker,
+            date,
+            (price - prev_price) / prev_price AS ret
+        FROM price_series
+        WHERE prev_price IS NOT NULL AND prev_price > 0
+    ),
+    corr_calc AS (
+        SELECT
+            dr_a.ticker AS asset_a,
+            dr_b.ticker AS asset_b,
+            COUNT(*) AS n,
+            SUM(dr_a.ret) AS sum_x,
+            SUM(dr_b.ret) AS sum_y,
+            SUM(dr_a.ret * dr_b.ret) AS sum_xy,
+            SUM(dr_a.ret * dr_a.ret) AS sum_x2,
+            SUM(dr_b.ret * dr_b.ret) AS sum_y2
+        FROM daily_rets dr_a
+        JOIN daily_rets dr_b ON dr_a.date = dr_b.date
+        GROUP BY dr_a.ticker, dr_b.ticker
+    )
+    SELECT
+        cc.asset_a,
+        cc.asset_b,
+        CASE
+            WHEN cc.n < 5 THEN NULL::DOUBLE PRECISION
+            WHEN GREATEST((cc.n * cc.sum_x2 - cc.sum_x * cc.sum_x), 0.0) = 0.0 THEN NULL::DOUBLE PRECISION
+            WHEN GREATEST((cc.n * cc.sum_y2 - cc.sum_y * cc.sum_y), 0.0) = 0.0 THEN NULL::DOUBLE PRECISION
+            ELSE ((cc.n * cc.sum_xy - cc.sum_x * cc.sum_y) /
+                  SQRT(GREATEST((cc.n * cc.sum_x2 - cc.sum_x * cc.sum_x) * (cc.n * cc.sum_y2 - cc.sum_y * cc.sum_y), 1e-12)))
+                 ::DOUBLE PRECISION
+        END AS correlation
+    FROM corr_calc cc
+    ORDER BY cc.asset_a, cc.asset_b;
+END;
+$$ LANGUAGE plpgsql STABLE;
 
 SET check_function_bodies = on;

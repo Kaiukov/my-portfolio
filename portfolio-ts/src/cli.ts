@@ -18,6 +18,7 @@ import { getCashDrag } from "./commands/cash_drag.js";
 import { getAllocation } from "./commands/allocation.js";
 import { getSummary } from "./commands/summary.js";
 import { getConcentration } from "./commands/concentration.js";
+import { getDiversification } from "./commands/diversification.js";
 import { getPerformance } from "./commands/performance.js";
 import { getMwr } from "./commands/mwr.js";
 import { getHealth } from "./commands/health.js";
@@ -81,6 +82,7 @@ Commands:
   schedule        Manage OS crontab for automatic portfolio refresh (--emit/--install/--remove)
   report          Paginated daily portfolio returns
   health          DB reachability and price coverage diagnostic
+  diversification  Correlation matrix and effective-holdings diversification analysis (--as-of-date, --window-months)
   income          Dividend and interest income report (--as-of-date, --from-date, --asset)
   realized-gains  FIFO realized gains detail by lot and tax year (--from-date, --to-date, --asset, --by-year)
   init            Verify database schema is ready
@@ -694,6 +696,16 @@ export async function dispatch(argv: string[]): Promise<void> {
       const freshnessMeta = await getPriceFreshness(asOfDate);
       const result = await getConcentration(asOfDate, topN);
       console.log(JSON.stringify(success("concentration", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "diversification": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const lookbackDays = int(flags, "lookback-days") ?? int(flags, "lookback_days") ?? 252;
+      const minCorrelation = float(flags, "min-correlation") ?? float(flags, "min_correlation") ?? 0.0;
+      const freshnessMeta = await getPriceFreshness(asOfDate);
+      const result = await getDiversification(asOfDate, lookbackDays, minCorrelation);
+      console.log(JSON.stringify(success("diversification", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
       return;
     }
 
