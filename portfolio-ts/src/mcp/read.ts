@@ -8,6 +8,7 @@ import { getCurrencyExposure } from "../commands/currency_exposure.js";
 import { getIncome } from "../commands/income.js";
 import { getRealizedGains } from "../commands/realized_gains.js";
 import { getAllocation } from "../commands/allocation.js";
+import { getRebalance } from "../commands/rebalance.js";
 import { getConcentration } from "../commands/concentration.js";
 import { getDiversification } from "../commands/diversification.js";
 import { getPerformance } from "../commands/performance.js";
@@ -92,6 +93,16 @@ export async function mcpRead(
       const freshnessMeta = await getPriceFreshness(asOf);
       const data = await getAllocation(asOf);
       return success("allocation", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+    }
+
+    if (toolName === "rebalance") {
+      const targetStr = strField(args, "target");
+      if (!targetStr) {
+        return error("rebalance", "VALIDATION_ERROR", "target is required (e.g. { target: \"VTI=50,VXUS=20,BND=30\" })");
+      }
+      const asOf = asOfVal(args);
+      const data = await getRebalance(targetStr, asOf);
+      return success("rebalance", data, data.rows.length);
     }
 
     if (toolName === "concentration") {
