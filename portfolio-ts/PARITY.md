@@ -37,6 +37,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | — | `portfolio-ts projection` | **TS-only command** | Read-only long-term future value projection and goal tracking (FIRE). Calls `portfolio_projection_sql(as_of_date, monthly_contribution, annual_return_rate, target_value, projection_years, inflation_rate)` — PostgreSQL owns all calculations. Supports projection mode (no target: compute FV, real value, return portion) and goal mode (with target: solve years_to_goal, compute required_return_rate via bisection). Supports `--as-of-date`, `--monthly-contribution`, `--annual-return-rate`, `--target-value`, `--projection-years`, `--inflation-rate`. |
 | — | `portfolio-ts rebalance` | **TS-only command** | Read-only target-vs-actual drift report. Takes `--target "VTI=50,VXUS=20,BND=30"` and optional `--as-of-date`. Reuses `portfolio_allocation_sql` via `getAllocation()` — no new SQL, no persistence. Drift/trade math is a pure TypeScript function (`computeDrift`). Emits `command:"rebalance"` envelope with summary + rows sorted by `abs(drift_pct)` desc. |
 | — | `portfolio-ts decomposition` | **TS-only command** | Read-only growth decomposition: splits total growth into contributions (net deposits) vs market returns. Calls `portfolio_decomposition_sql(as_of_date)` which reuses `portfolio_status_sql()` + `daily_returns` initial value. Emits `command:"decomposition"` envelope. Supports `--as-of-date`. |
+| — | `portfolio-ts withdrawal` | **TS-only command** | Read-only safe withdrawal rate / decumulation analysis (#230). Calls `portfolio_withdrawal_sql(as_of_date, annual_withdrawal, withdrawal_rate, time_horizon_years, expected_return, inflation_rate)` — PostgreSQL owns all calculations. Annual simulation with inflation-adjusted end-of-year withdrawals, bisection for max safe withdrawal, deterministic v1 success_likelihood proxy (NOT Monte-Carlo). Supports `--as-of-date`, `--annual-withdrawal`, `--withdrawal-rate`, `--time-horizon-years`, `--expected-return`, `--inflation-rate`. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
 
 ## Validation results (live against PostgreSQL)
@@ -98,6 +99,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `projection` | `projection` | `GET /projection` | — | Calls `portfolio_projection_sql`; projection or goal mode |
 | `rebalance` | `rebalance` | `GET /rebalance` | — | Identical envelope to CLI and API; requires `target` param |
 | `decomposition` | `decomposition` | `GET /decomposition` | Yes | Identical envelope to CLI and API |
+| `withdrawal` | `withdrawal` | `GET /withdrawal` | — | Identical envelope to CLI and API |
 
 All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.
 No business logic is duplicated in the MCP adapter. Error handling maps through the

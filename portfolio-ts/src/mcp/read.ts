@@ -22,6 +22,7 @@ import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { getDecomposition } from "../commands/decomposition.js";
 import { getProjection } from "../commands/projection.js";
+import { getWithdrawal } from "../commands/withdrawal.js";
 import { strField, intField, floatField } from "./adapter.js";
 
 type JsonObject = Record<string, unknown>;
@@ -212,6 +213,24 @@ export async function mcpRead(
         inflationRate,
       });
       return success("projection", data);
+    }
+
+    if (toolName === "withdrawal") {
+      const asOfDate = asOfVal(args);
+      const annualWithdrawal = floatField(args, "annual_withdrawal", "annualWithdrawal");
+      const withdrawalRate = floatField(args, "withdrawal_rate", "withdrawalRate");
+      const timeHorizonYears = intField(args, "time_horizon_years", "timeHorizonYears");
+      const expectedReturn = floatField(args, "expected_return", "expectedReturn");
+      const inflationRate = floatField(args, "inflation_rate", "inflationRate");
+      const data = await getWithdrawal({
+        asOfDate,
+        annualWithdrawal,
+        withdrawalRate,
+        timeHorizonYears,
+        expectedReturn,
+        inflationRate,
+      });
+      return success("withdrawal", data);
     }
 
     return error("mcp", "NOT_FOUND", `Unsupported MCP read tool: ${toolName}`);

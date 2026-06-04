@@ -18,6 +18,7 @@ import { getPriceFreshness } from "../commands/freshness.js";
 import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { getDecomposition } from "../commands/decomposition.js";
 import { getProjection } from "../commands/projection.js";
+import { getWithdrawal } from "../commands/withdrawal.js";
 import { ValidationError } from "../validators.js";
 import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
@@ -172,6 +173,23 @@ const ROUTES: Record<string, Handler> = {
     });
     return success("projection", data);
   },
+  "/withdrawal": async (p) => {
+    const asOfDate = strParam(p, "as_of");
+    const annualWithdrawal = parseFloatParam(p, "annual_withdrawal");
+    const withdrawalRate = parseFloatParam(p, "withdrawal_rate");
+    const timeHorizonYears = parseIntParam(p, "time_horizon_years");
+    const expectedReturn = parseFloatParam(p, "expected_return");
+    const inflationRate = parseFloatParam(p, "inflation_rate");
+    const data = await getWithdrawal({
+      asOfDate,
+      annualWithdrawal,
+      withdrawalRate,
+      timeHorizonYears,
+      expectedReturn,
+      inflationRate,
+    });
+    return success("withdrawal", data);
+  },
 };
 
 function strParam(p: URLSearchParams, key: string): string | undefined {
@@ -247,6 +265,7 @@ function boolFlag(search: URLSearchParams, body: JsonObject, ...keys: string[]):
 
 function allowedMethodsForPath(path: string): string[] | null {
   if (path === "/ready") return ["GET"];
+  if (path === "/withdrawal") return ["GET"];
   if (path === "/projection") return ["GET"];
   if (path === "/transactions") return ["POST"];
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];

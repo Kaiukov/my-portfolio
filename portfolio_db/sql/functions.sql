@@ -2914,4 +2914,247 @@ BEGIN
 END;
 $$;
 
+-- Safe withdrawal rate / decumulation analysis (#230)
+-- Determines how long a portfolio lasts given an annual withdrawal amount/rate,
+-- accounts for inflation-adjusted spending, expected returns, and computes
+-- max safe withdrawal via bisection.
+--
+-- Recurrence (withdrawal at END of year, inflation-adjusted):
+--   V_0 = portfolio_value
+--   V_t = V_{t-1} * (1 + r) - W0 * (1 + infl)^(t-1)   for t = 1..horizon
+-- where:
+--   r    = expected_return (decimal, e.g. 0.06)
+--   infl = p_inflation_rate / 100.0 (p_inflation_rate is a PERCENT, default 3.0)
+--   W0   = annual withdrawal in year 1 (today's dollars)
+--   horizon = p_time_horizon_years
+--
+-- Withdrawal resolution:
+--   1. p_annual_withdrawal given → W0 = p_annual_withdrawal
+--   2. p_withdrawal_rate given (percent) → W0 = portfolio_value * p_withdrawal_rate / 100
+--   3. Neither → W0 = portfolio_value * 0.04 (4% rule)
+--   withdrawal_rate_pct = W0 / portfolio_value * 100
+--
+-- Expected return resolution:
+--   1. p_expected_return given (decimal, e.g. 0.06) → use it
+--   2. Otherwise → portfolio_performance_sql(p_as_of_date).cagr / 100.0
+--
+-- success_likelihood / shortfall_risk: v1 deterministic single-path proxy
+-- (NOT a probabilistic Monte-Carlo estimate — v1 placeholder).
+--   success_likelihood = 100 if terminal_value >= 0
+--                      else 100 * years_until_depletion / horizon (clamped 0–100)
+--   shortfall_risk = 100 - success_likelihood
+--
+-- max_safe_withdrawal: largest W0 (today's $) such that terminal_value >= 0
+--   solved by bisection on W0 in bracket [0, portfolio_value] (tolerance 1e-8).
+-- max_safe_withdrawal_rate = max_safe_withdrawal / portfolio_value * 100
+--
+-- years_until_depletion: smallest t where V_t <= 0 (fractional via linear
+--   interpolation within the year). Returns NULL if portfolio never depletes
+--   within the horizon.
+--
+-- total_withdrawn = Σ_{t=1..min(horizon, depletion)} W0*(1+infl)^(t-1) (nominal)
+-- return_generated = terminal_value - portfolio_value + total_withdrawn
+DROP FUNCTION IF EXISTS portfolio_withdrawal_sql(DATE, DOUBLE PRECISION, DOUBLE PRECISION, INTEGER, DOUBLE PRECISION, DOUBLE PRECISION) CASCADE;
+CREATE OR REPLACE FUNCTION portfolio_withdrawal_sql(
+    p_as_of_date          DATE DEFAULT CURRENT_DATE,
+    p_annual_withdrawal   DOUBLE PRECISION DEFAULT NULL,
+    p_withdrawal_rate     DOUBLE PRECISION DEFAULT NULL,
+    p_time_horizon_years  INTEGER DEFAULT 30,
+    p_expected_return     DOUBLE PRECISION DEFAULT NULL,
+    p_inflation_rate      DOUBLE PRECISION DEFAULT 3.0
+)
+RETURNS TABLE (
+    portfolio_value          DOUBLE PRECISION,
+    annual_withdrawal        DOUBLE PRECISION,
+    withdrawal_rate_pct      DOUBLE PRECISION,
+    time_horizon_years       INTEGER,
+    expected_return          DOUBLE PRECISION,
+    inflation_rate           DOUBLE PRECISION,
+    years_until_depletion    DOUBLE PRECISION,
+    terminal_value           DOUBLE PRECISION,
+    success_likelihood       DOUBLE PRECISION,
+    max_safe_withdrawal      DOUBLE PRECISION,
+    max_safe_withdrawal_rate DOUBLE PRECISION,
+    total_withdrawn          DOUBLE PRECISION,
+    return_generated         DOUBLE PRECISION,
+    shortfall_risk           DOUBLE PRECISION
+)
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    v_pv      DOUBLE PRECISION;
+    v_r       DOUBLE PRECISION;
+    v_infl    DOUBLE PRECISION;
+    v_W0      DOUBLE PRECISION;
+    v_wd_pct  DOUBLE PRECISION;
+    v_horizon INTEGER;
+
+    -- simulation working vars
+    v_V       DOUBLE PRECISION;
+    v_V_prev  DOUBLE PRECISION;
+    v_dep     DOUBLE PRECISION;  -- years_until_depletion, NULL if never
+    v_term    DOUBLE PRECISION;
+    v_tw      DOUBLE PRECISION;   -- total_withdrawn
+    v_succ    DOUBLE PRECISION;   -- success_likelihood
+
+    -- bisection on W0 for max safe withdrawal
+    v_W_lo    DOUBLE PRECISION;
+    v_W_hi    DOUBLE PRECISION;
+    v_W_mid   DOUBLE PRECISION;
+    v_term_mid DOUBLE PRECISION;
+    v_iter    INTEGER;
+    v_max_iter INTEGER := 200;
+    v_tol     DOUBLE PRECISION := 1e-8;
+
+    -- simulation loop
+    v_t       INTEGER;
+    v_withdraw DOUBLE PRECISION;
+    v_found   BOOLEAN;
+BEGIN
+    -- 1. portfolio_value from status
+    SELECT ps.portfolio_value INTO v_pv
+    FROM portfolio_status_sql(p_as_of_date) ps;
+    IF v_pv IS NULL OR v_pv <= 0 THEN
+        RETURN;
+    END IF;
+
+    -- 2. expected_return
+    IF p_expected_return IS NOT NULL THEN
+        v_r := p_expected_return;
+    ELSE
+        SELECT pperf.cagr / 100.0 INTO v_r
+        FROM portfolio_performance_sql(p_as_of_date, 'SPY', NULL, 0.02, 0.025) pperf;
+        IF v_r IS NULL THEN
+            v_r := 0.0;
+        END IF;
+    END IF;
+
+    -- 3. inflation_rate (passed as PERCENT → convert to decimal)
+    v_infl := p_inflation_rate / 100.0;
+
+    -- 4. horizon
+    v_horizon := GREATEST(p_time_horizon_years, 0);
+
+    -- 5. resolve withdrawal amount W0
+    IF p_annual_withdrawal IS NOT NULL THEN
+        v_W0 := p_annual_withdrawal;
+    ELSIF p_withdrawal_rate IS NOT NULL THEN
+        v_W0 := v_pv * p_withdrawal_rate / 100.0;
+    ELSE
+        v_W0 := v_pv * 0.04;
+    END IF;
+    v_wd_pct := CASE WHEN v_pv > 0 THEN v_W0 / v_pv * 100.0 ELSE 0.0 END;
+
+    -- 6. Annual simulation
+    v_V := v_pv;
+    v_dep := NULL;
+    v_found := FALSE;
+    v_tw := 0.0;
+
+    IF v_horizon = 0 THEN
+        v_term := v_pv;
+        v_dep := NULL;
+        v_tw := 0.0;
+    ELSE
+        FOR v_t IN 1..v_horizon LOOP
+            v_withdraw := v_W0 * POWER(1.0 + v_infl, v_t - 1);
+            v_V_prev := v_V;
+            v_V := v_V * (1.0 + v_r) - v_withdraw;
+
+            IF NOT v_found THEN
+                v_tw := v_tw + v_withdraw;
+            END IF;
+
+            IF (NOT v_found) AND v_V <= 0.0 THEN
+                v_found := TRUE;
+                IF v_V = 0.0 THEN
+                    v_dep := v_t::DOUBLE PRECISION;
+                ELSE
+                    -- fractional interpolation: depletion between t-1 and t
+                    -- V_{t-1} > 0, V_t < 0
+                    IF v_V_prev > 0 THEN
+                        v_dep := (v_t - 1)::DOUBLE PRECISION + v_V_prev / (v_V_prev - v_V);
+                    ELSE
+                        v_dep := v_t::DOUBLE PRECISION;
+                    END IF;
+                END IF;
+            END IF;
+        END LOOP;
+        v_term := v_V;
+    END IF;
+
+    -- 7. return_generated
+    -- return_generated = terminal_value - portfolio_value + total_withdrawn
+    -- (growth from market returns)
+
+    -- 8. success_likelihood (v1 deterministic proxy)
+    IF v_term >= 0.0 THEN
+        v_succ := 100.0;
+    ELSIF v_horizon = 0 THEN
+        v_succ := 100.0;
+    ELSE
+        -- linear: how far into horizon before depletion
+        v_succ := CASE WHEN v_dep IS NOT NULL AND v_dep > 0
+                       THEN GREATEST(0.0, LEAST(100.0, 100.0 * v_dep / v_horizon::DOUBLE PRECISION))
+                       ELSE 0.0 END;
+    END IF;
+
+    -- 9. max_safe_withdrawal via bisection
+    v_W_lo := 0.0;
+    v_W_hi := v_pv;
+    v_W_mid := v_W0;
+    v_iter := 0;
+
+    -- Check if hi-bound is already safe (terminal >= 0 at W_hi)
+    v_V := v_pv;
+    FOR v_t IN 1..v_horizon LOOP
+        v_withdraw := v_W_hi * POWER(1.0 + v_infl, v_t - 1);
+        v_V := v_V * (1.0 + v_r) - v_withdraw;
+    END LOOP;
+    IF v_V >= 0.0 THEN
+        -- portfolio survives even withdrawing everything → max = portfolio_value
+        v_W_mid := v_W_hi;
+    ELSE
+        WHILE v_iter < v_max_iter LOOP
+            v_W_mid := (v_W_lo + v_W_hi) / 2.0;
+
+            -- simulate with W_mid
+            v_V := v_pv;
+            FOR v_t IN 1..v_horizon LOOP
+                v_withdraw := v_W_mid * POWER(1.0 + v_infl, v_t - 1);
+                v_V := v_V * (1.0 + v_r) - v_withdraw;
+            END LOOP;
+
+            IF ABS(v_V) < v_tol OR (v_W_hi - v_W_lo) < v_tol THEN
+                EXIT;
+            END IF;
+
+            IF v_V >= 0.0 THEN
+                v_W_lo := v_W_mid;
+            ELSE
+                v_W_hi := v_W_mid;
+            END IF;
+            v_iter := v_iter + 1;
+        END LOOP;
+    END IF;
+
+    RETURN QUERY SELECT
+        v_pv,
+        v_W0,
+        v_wd_pct,
+        v_horizon,
+        v_r,
+        p_inflation_rate,
+        v_dep,
+        v_term,
+        v_succ,
+        v_W_mid,
+        CASE WHEN v_pv > 0 THEN v_W_mid / v_pv * 100.0 ELSE 0.0 END,
+        v_tw,
+        v_term - v_pv + v_tw,
+        100.0 - v_succ;
+END;
+$$;
+
 SET check_function_bodies = on;
