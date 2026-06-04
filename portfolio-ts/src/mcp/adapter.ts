@@ -13,14 +13,18 @@ export function strField(body: JsonObject, key: string): string | undefined {
   return typeof val === "string" ? val : undefined;
 }
 
-function floatField(body: JsonObject, key: string): number | undefined {
-  const raw = body[key];
-  if (typeof raw === "number") {
-    return Number.isFinite(raw) ? raw : undefined;
-  }
-  if (typeof raw === "string") {
-    const parsed = parseFloat(raw);
-    return Number.isFinite(parsed) ? parsed : undefined;
+export function floatField(body: JsonObject, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const raw = body[key];
+    if (typeof raw === "number") {
+      return Number.isFinite(raw) ? raw : undefined;
+    }
+    if (typeof raw === "string") {
+      const parsed = parseFloat(raw);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
   }
   return undefined;
 }
