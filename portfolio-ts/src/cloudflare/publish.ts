@@ -1,10 +1,10 @@
 import { spawnWrangler } from "./spawn.js";
 import { loadLocalConfig } from "./config.js";
 import type { PublishResult, PortfolioSnapshot } from "./types.js";
-import { getSummary } from "../commands/summary.js";
-import { getWidget } from "../commands/widget.js";
-import { getStatus } from "../commands/status.js";
-import { getPriceFreshness } from "../commands/freshness.js";
+import {
+  buildPortfolioSnapshotFromContext,
+  buildPublishSnapshotContext,
+} from "../commands/publish_snapshot.js";
 import { putKvValueViaApi, type FetchLike } from "./kv_api.js";
 
 interface PublishOptions {
@@ -15,25 +15,8 @@ interface PublishOptions {
 }
 
 export async function buildSnapshot(): Promise<PortfolioSnapshot> {
-  const [summary, widget, status, freshness] = await Promise.all([
-    getSummary(),
-    getWidget(180),
-    getStatus(),
-    getPriceFreshness(),
-  ]);
-
-  return {
-    portfolio_value_usd: summary.portfolio_value_usd,
-    today: { abs: widget.today.amount, pct: widget.today.pct },
-    total: {
-      abs: status.total_gain ?? 0,
-      pct: status.total_gain_pct ?? 0,
-    },
-    history: widget.series.map((s) => ({ date: s.date, value: s.value })),
-    prices_as_of: freshness.prices_as_of ?? "",
-    as_of_date: summary.as_of_date,
-    updatedAt: new Date().toISOString(),
-  };
+  const context = await buildPublishSnapshotContext();
+  return buildPortfolioSnapshotFromContext(context);
 }
 
 export function validateSnapshot(snapshot: PortfolioSnapshot): string | null {
