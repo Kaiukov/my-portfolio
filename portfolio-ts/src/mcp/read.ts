@@ -67,9 +67,11 @@ export async function mcpRead(
       const benchmark = strField(args, "benchmark");
       const fromDate = strField(args, "from_date") ?? strField(args, "fromDate");
       const period = strField(args, "period");
+      const inflationRate = strField(args, "inflation_rate") ?? strField(args, "inflationRate");
       const freshnessMeta = await getPriceFreshness(asOfDate);
-      const data = await getPerformance({ asOfDate, benchmark, fromDate, period });
-      return success("performance", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+      const { data, benchmark: resolvedBenchmark } = await getPerformance({ asOfDate, benchmark, fromDate, period, inflationRate });
+      const meta = { ...(freshnessMeta as unknown as Record<string, unknown>), benchmark: resolvedBenchmark };
+      return success("performance", data, null, undefined, meta);
     }
 
     if (toolName === "mwr") {
