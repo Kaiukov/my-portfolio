@@ -50,6 +50,7 @@ import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { getAssetMetadataRecords } from "./commands/asset_metadata.js";
 import { getProjection } from "./commands/projection.js";
+import { getWithdrawal } from "./commands/withdrawal.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -96,6 +97,7 @@ Commands:
   backup push     Upload portfolio snapshot to S3-compatible storage
   backup pull     Restore latest snapshot from S3-compatible storage
   cron            Manage pg_cron scheduled jobs (install / list / remove)
+  withdrawal      Safe withdrawal rate / decumulation analysis (--annual-withdrawal, --withdrawal-rate, --time-horizon-years, --expected-return, --inflation-rate, --as-of-date)
   api             Start a local read-only REST API server (--port 8787)
   --help          Show this help message
 
@@ -478,6 +480,27 @@ export async function dispatch(argv: string[]): Promise<void> {
       const maxAgeDays = int(flags, "max-age-days");
       const result = await getHealth(maxAgeDays);
       console.log(JSON.stringify(success("health", result), null, 2));
+      return;
+    }
+
+    case "withdrawal": {
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const annualWithdrawal = float(flags, "annual-withdrawal") ?? float(flags, "annual_withdrawal");
+      const withdrawalRate = float(flags, "withdrawal-rate") ?? float(flags, "withdrawal_rate");
+      const timeHorizonYears = int(flags, "time-horizon-years") ?? int(flags, "time_horizon_years");
+      const expectedReturn = float(flags, "expected-return") ?? float(flags, "expected_return");
+      const inflationRate = float(flags, "inflation-rate") ?? float(flags, "inflation_rate");
+
+      const data = await getWithdrawal({
+        asOfDate,
+        annualWithdrawal,
+        withdrawalRate,
+        timeHorizonYears,
+        expectedReturn,
+        inflationRate,
+      });
+
+      console.log(JSON.stringify(success("withdrawal", data), null, 2));
       return;
     }
 
