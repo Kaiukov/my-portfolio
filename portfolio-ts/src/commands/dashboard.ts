@@ -4,7 +4,11 @@ import { getWidget as _getWidget, type WidgetData } from "./widget.js";
 import { getAllocation as _getAllocation, type AllocationRow } from "./allocation.js";
 import { getCash as _getCash, type CashRow } from "./cash.js";
 import { getPerformance as _getPerformance, type PerformanceResult } from "./performance.js";
-import { getPriceFreshness as _getPriceFreshness, type PriceFreshness } from "./freshness.js";
+import { getPriceFreshness as _getPriceFreshness } from "./freshness.js";
+import {
+  buildPublishSnapshotContext,
+  type PublishSnapshotContext,
+} from "./publish_snapshot.js";
 
 export interface DashboardSnapshot {
   summary: {
@@ -47,6 +51,7 @@ export interface DashboardSnapshotDeps {
   getCash: typeof _getCash;
   getPerformance: typeof _getPerformance;
   getPriceFreshness: typeof _getPriceFreshness;
+  now?: () => Date;
 }
 
 const defaultDeps: DashboardSnapshotDeps = {
@@ -63,33 +68,35 @@ export async function buildDashboardSnapshot(
   asOfDate?: string,
   deps: DashboardSnapshotDeps = defaultDeps,
 ): Promise<DashboardSnapshot> {
-  const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
+  const context = await buildPublishSnapshotContext(asOfDate, {
+    getSummary: deps.getSummary,
+    getStatus: deps.getStatus,
+    getWidget: (days: number, actualDate?: string) =>
+      deps.getWidget(Math.max(days, 365), actualDate),
+    getPriceFreshness: deps.getPriceFreshness,
+    now: deps.now,
+  });
 
-  const [
-    summaryRaw,
-    status,
-    widget,
-    allocation,
-    cash,
-    performanceRaw,
-    freshness,
-  ] = await Promise.all([
-    deps.getSummary(actualDate),
-    deps.getStatus(actualDate),
-    deps.getWidget(365, actualDate),
-    deps.getAllocation(actualDate),
-    deps.getCash(actualDate),
-    deps.getPerformance({ asOfDate: actualDate }),
-    deps.getPriceFreshness(actualDate),
+  return buildDashboardSnapshotFromContext(context, deps);
+}
+
+export async function buildDashboardSnapshotFromContext(
+  context: PublishSnapshotContext,
+  deps: DashboardSnapshotDeps = defaultDeps,
+): Promise<DashboardSnapshot> {
+  const [allocation, cash, performanceRaw] = await Promise.all([
+    deps.getAllocation(context.asOfDate),
+    deps.getCash(context.asOfDate),
+    deps.getPerformance({ asOfDate: context.asOfDate }),
   ]);
 
   const summary: DashboardSnapshot["summary"] = {
-    holding_count: summaryRaw.holding_count,
-    total_cash_usd: summaryRaw.total_cash_usd,
-    portfolio_value_usd: summaryRaw.portfolio_value_usd,
-    last_transaction_date: summaryRaw.last_transaction_date ?? "",
-    transaction_count: summaryRaw.transaction_count,
-    as_of_date: summaryRaw.as_of_date ?? actualDate,
+    holding_count: context.summary.holding_count,
+    total_cash_usd: context.summary.total_cash_usd,
+    portfolio_value_usd: context.summary.portfolio_value_usd,
+    last_transaction_date: context.summary.last_transaction_date ?? "",
+    transaction_count: context.summary.transaction_count,
+    as_of_date: context.summary.as_of_date ?? context.asOfDate,
   };
 
   const allocation_rows = (allocation.rows as AllocationRow[]).map(
@@ -112,25 +119,25 @@ export async function buildDashboardSnapshot(
   }));
 
   const today = {
-    abs: widget.today.amount,
-    pct: widget.today.pct,
+    abs: context.widget.today.amount,
+    pct: context.widget.today.pct,
   };
 
   const total = {
-    abs: status.total_gain ?? 0,
-    pct: status.total_gain_pct ?? 0,
+    abs: context.status.total_gain ?? 0,
+    pct: context.status.total_gain_pct ?? 0,
   };
 
-  const history = widget.series.map((s) => ({ date: s.date, value: s.value }));
+  const history = context.widget.series.map((s) => ({
+    date: s.date,
+    value: s.value,
+  }));
 
-  const prices_as_of: string | null =
-    (freshness as PriceFreshness).prices_as_of ?? null;
-
-  const updatedAt = new Date().toISOString();
+  const prices_as_of: string | null = context.freshness.prices_as_of ?? null;
 
   return {
     summary,
-    status,
+    status: context.status,
     allocation_rows,
     cash_rows,
     performance: performanceRaw.data,
@@ -138,6 +145,6 @@ export async function buildDashboardSnapshot(
     total,
     history,
     prices_as_of,
-    updatedAt,
+    updatedAt: context.updatedAt,
   };
 }

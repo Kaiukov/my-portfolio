@@ -1,4 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, mock } from "bun:test";
+
+mock.module("../src/db.js", () => ({
+  query: mock(() => Promise.resolve([])),
+  querySingle: mock(() => Promise.resolve(null)),
+  connect: () => {},
+  close: () => {},
+  getSql: () => ({
+    unsafe: async () => [],
+  }),
+}));
+
+mock.module("../src/tx.js", () => ({
+  runTx: async <T>(
+    fn: (tx: { unsafe: (...args: unknown[]) => unknown }) => Promise<T>,
+  ): Promise<T> => fn({ unsafe: async () => [] }),
+  beginTx: mock(() => Promise.resolve({})),
+  commit: mock(() => Promise.resolve()),
+  rollback: mock(() => Promise.resolve()),
+}));
+
 import { readServiceConfig } from "../src/service.js";
 
 describe("readServiceConfig backup settings", () => {
@@ -40,5 +60,21 @@ describe("readServiceConfig backup settings", () => {
         "/app",
       ),
     ).toThrow("PORTFOLIO_BACKUP_INTERVAL must be greater than zero");
+  });
+
+  test("throws when widget and dashboard publish intervals differ while both are enabled", () => {
+    expect(() =>
+      readServiceConfig(
+        {
+          PORTFOLIO_CLOUDFLARE_PUBLISH: "true",
+          PORTFOLIO_DASHBOARD_PUBLISH: "true",
+          PORTFOLIO_PUBLISH_INTERVAL: "1h",
+          PORTFOLIO_DASHBOARD_PUBLISH_INTERVAL: "30m",
+        } as NodeJS.ProcessEnv,
+        "/app",
+      ),
+    ).toThrow(
+      "PORTFOLIO_PUBLISH_INTERVAL and PORTFOLIO_DASHBOARD_PUBLISH_INTERVAL must match when both publish jobs are enabled",
+    );
   });
 });

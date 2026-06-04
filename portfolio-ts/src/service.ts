@@ -7,6 +7,12 @@ import * as refreshModule from "./commands/refresh.js";
 import * as publishModule from "./cloudflare/publish.js";
 import * as dashboardPublishModule from "./cloudflare/dashboard_publish.js";
 import * as syncModule from "./cloudflare/sync.js";
+import {
+  buildPortfolioSnapshotFromContext,
+  buildPublishSnapshotContext,
+  type PublishSnapshotContext,
+} from "./commands/publish_snapshot.js";
+import { buildDashboardSnapshotFromContext } from "./commands/dashboard.js";
 import * as db from "./db.js";
 
 export interface ServiceJobSuccess<T> {
@@ -35,7 +41,7 @@ export interface RefreshJobDeps {
 }
 
 export interface PublishJobDeps {
-  publishToKv?: (projectRoot?: string) => Promise<unknown>;
+  publishToKv?: typeof publishModule.publishToKv;
   projectRoot?: string;
   now?: () => Date;
 }
@@ -112,7 +118,7 @@ export async function runCloudflarePublishJob(
 }
 
 export interface DashboardPublishJobDeps {
-  publishDashboardToKv?: (projectRoot?: string) => Promise<unknown>;
+  publishDashboardToKv?: typeof dashboardPublishModule.publishDashboardToKv;
   projectRoot?: string;
   now?: () => Date;
 }
@@ -139,6 +145,99 @@ export async function runDashboardPublishJob(
     return {
       ok: false,
       job: "dashboard_publish",
+      started_at: startedAt.toISOString(),
+      finished_at: finishedAt.toISOString(),
+      duration_ms: finishedAt.getTime() - startedAt.getTime(),
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export interface CombinedPublishJobDeps
+  extends PublishJobDeps,
+    DashboardPublishJobDeps {
+  buildPublishSnapshotContext?: () => Promise<PublishSnapshotContext>;
+  buildPortfolioSnapshotFromContext?: (
+    context: PublishSnapshotContext,
+  ) => ReturnType<typeof buildPortfolioSnapshotFromContext>;
+  buildDashboardSnapshotFromContext?: (
+    context: PublishSnapshotContext,
+  ) => ReturnType<typeof buildDashboardSnapshotFromContext>;
+}
+
+export async function runCombinedCloudflarePublishJob(
+  deps: CombinedPublishJobDeps = {},
+): Promise<ServiceJobResult<unknown>> {
+  const startedAt = (deps.now ?? (() => new Date()))();
+  try {
+    const buildContext =
+      deps.buildPublishSnapshotContext ??
+      (() =>
+        buildPublishSnapshotContext(undefined, {
+          now: deps.now,
+        }));
+    const buildWidgetSnapshot =
+      deps.buildPortfolioSnapshotFromContext ?? buildPortfolioSnapshotFromContext;
+    const buildDashboardSnapshot =
+      deps.buildDashboardSnapshotFromContext ?? buildDashboardSnapshotFromContext;
+    const publishToKv = deps.publishToKv ?? publishModule.publishToKv;
+    const publishDashboardToKv =
+      deps.publishDashboardToKv ?? dashboardPublishModule.publishDashboardToKv;
+
+    const context = await buildContext();
+    const widgetSnapshot = buildWidgetSnapshot(context);
+    const dashboardSnapshot = await buildDashboardSnapshot(context);
+
+    const [widgetResult, dashboardResult] = await Promise.all([
+      publishToKv(deps.projectRoot, {
+        buildSnapshot: async () => widgetSnapshot,
+      }),
+      publishDashboardToKv(deps.projectRoot, {
+        buildSnapshot: async () => dashboardSnapshot,
+      }),
+    ]);
+    const finishedAt = (deps.now ?? (() => new Date()))();
+
+    if (!widgetResult.success || !dashboardResult.success) {
+      const errors: string[] = [];
+      if (!widgetResult.success) {
+        errors.push(
+          `cloudflare_publish failed: ${widgetResult.error ?? "Publish failed"}`,
+        );
+      }
+      if (!dashboardResult.success) {
+        errors.push(
+          `dashboard_publish failed: ${dashboardResult.error ?? "Publish failed"}`,
+        );
+      }
+      return {
+        ok: false,
+        job: "cloudflare_publish_cycle",
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        error: errors.join("; "),
+      };
+    }
+
+    return {
+      ok: true,
+      job: "cloudflare_publish_cycle",
+      started_at: startedAt.toISOString(),
+      finished_at: finishedAt.toISOString(),
+      duration_ms: finishedAt.getTime() - startedAt.getTime(),
+      data: {
+        as_of_date: context.asOfDate,
+        updatedAt: context.updatedAt,
+        cloudflare_publish: widgetResult,
+        dashboard_publish: dashboardResult,
+      },
+    };
+  } catch (err) {
+    const finishedAt = (deps.now ?? (() => new Date()))();
+    return {
+      ok: false,
+      job: "cloudflare_publish_cycle",
       started_at: startedAt.toISOString(),
       finished_at: finishedAt.toISOString(),
       duration_ms: finishedAt.getTime() - startedAt.getTime(),
@@ -485,6 +584,15 @@ export function readServiceConfig(
   if (backupIntervalMs <= 0) {
     throw new Error("PORTFOLIO_BACKUP_INTERVAL must be greater than zero");
   }
+  if (
+    publishEnabled &&
+    dashboardPublishEnabled &&
+    publishIntervalMs !== dashboardPublishIntervalMs
+  ) {
+    throw new Error(
+      "PORTFOLIO_PUBLISH_INTERVAL and PORTFOLIO_DASHBOARD_PUBLISH_INTERVAL must match when both publish jobs are enabled",
+    );
+  }
 
   return {
     port,
@@ -515,6 +623,39 @@ export async function startPortfolioService(
   }
 
   const startedAt = new Date();
+  const publishJobs =
+    config.publishEnabled && config.dashboardPublishEnabled
+      ? [
+          {
+            name: "cloudflare_publish_cycle",
+            enabled: true,
+            intervalMs: config.publishIntervalMs,
+            run: () =>
+              runCombinedCloudflarePublishJob({
+                projectRoot: config.projectRoot,
+              }),
+          },
+        ]
+      : [
+          {
+            name: "cloudflare_publish",
+            enabled: config.publishEnabled,
+            intervalMs: config.publishIntervalMs,
+            run: () =>
+              runCloudflarePublishJob({
+                projectRoot: config.projectRoot,
+              }),
+          },
+          {
+            name: "dashboard_publish",
+            enabled: config.dashboardPublishEnabled,
+            intervalMs: config.dashboardPublishIntervalMs,
+            run: () =>
+              runDashboardPublishJob({
+                projectRoot: config.projectRoot,
+              }),
+          },
+        ];
   const scheduler = createServiceScheduler({
     jobs: [
       {
@@ -529,24 +670,7 @@ export async function startPortfolioService(
         intervalMs: config.backupIntervalMs,
         run: () => runBackupJob(),
       },
-      {
-        name: "cloudflare_publish",
-        enabled: config.publishEnabled,
-        intervalMs: config.publishIntervalMs,
-        run: () =>
-          runCloudflarePublishJob({
-            projectRoot: config.projectRoot,
-          }),
-      },
-      {
-        name: "dashboard_publish",
-        enabled: config.dashboardPublishEnabled,
-        intervalMs: config.dashboardPublishIntervalMs,
-        run: () =>
-          runDashboardPublishJob({
-            projectRoot: config.projectRoot,
-          }),
-      },
+      ...publishJobs,
     ],
     onEvent: (event) => {
       console.log(JSON.stringify({ source: "portfolio-service", ...event }));

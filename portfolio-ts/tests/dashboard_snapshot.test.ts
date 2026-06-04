@@ -5,9 +5,15 @@ mock.module("../src/db.js", () => ({
   querySingle: mock(() => Promise.resolve(null)),
   connect: () => {},
   close: () => {},
+  getSql: () => ({
+    unsafe: async () => [],
+  }),
 }));
 
 mock.module("../src/tx.js", () => ({
+  runTx: async <T>(
+    fn: (tx: { unsafe: (...args: unknown[]) => unknown }) => Promise<T>,
+  ): Promise<T> => fn({ unsafe: async () => [] }),
   beginTx: mock(() => Promise.resolve({})),
   commit: mock(() => Promise.resolve()),
   rollback: mock(() => Promise.resolve()),
@@ -386,5 +392,42 @@ describe("buildDashboardSnapshot", () => {
     expect(parsed instanceof Date).toBe(true);
     expect(Number.isNaN(parsed.getTime())).toBe(false);
     expect(snapshot.updatedAt).toBe(parsed.toISOString());
+  });
+
+  test("buildDashboardSnapshotFromContext reuses shared updatedAt and common metrics", async () => {
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+
+    const { buildDashboardSnapshotFromContext } = await import(
+      "../src/commands/dashboard.js"
+    );
+    const snapshot = await buildDashboardSnapshotFromContext(
+      {
+        asOfDate: "2026-06-03",
+        updatedAt: "2026-06-03T12:34:56.000Z",
+        summary: summaryFixture,
+        status: statusFixture,
+        widget: widgetFixture,
+        freshness: freshnessFixture,
+      },
+      {
+        getSummary: mock(async () => summaryFixture),
+        getStatus: mock(async () => statusFixture),
+        getWidget: mock(async () => widgetFixture),
+        getAllocation: mockGetAllocation,
+        getCash: mockGetCash,
+        getPerformance: mockGetPerformance,
+        getPriceFreshness: mock(async () => freshnessFixture),
+      },
+    );
+
+    expect(snapshot.updatedAt).toBe("2026-06-03T12:34:56.000Z");
+    expect(snapshot.summary.as_of_date).toBe("2026-06-03");
+    expect(snapshot.today.abs).toBe(125.5);
+    expect(snapshot.total.abs).toBe(4500.12);
+    expect(mockGetAllocation).toHaveBeenCalledWith("2026-06-03");
+    expect(mockGetCash).toHaveBeenCalledWith("2026-06-03");
+    expect(mockGetPerformance).toHaveBeenCalledWith({ asOfDate: "2026-06-03" });
   });
 });
