@@ -1414,8 +1414,8 @@ AS $$
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                 ) AS grp
             FROM drawdown_values
-            WHERE drawdown > 0
         ) x
+        WHERE drawdown > 0
         GROUP BY grp
     ),
     drawdown_stats AS (
@@ -1627,8 +1627,8 @@ AS $$
             END                                                                                     AS relative_return,
             COALESCE(d.te_daily * SQRT(252.0), 0.0)                                                AS tracking_error,
             CASE
-                WHEN COALESCE(d.spy_s, 0.0) > 0 THEN
-                    ((COALESCE(d.spy_e, 0.0) - d.spy_s) / d.spy_s) * 100.0
+                WHEN COALESCE(d.spy_twr, -1.0) > -1.0 THEN
+                    d.spy_twr * 100.0
                 ELSE 0.0
             END                                                                                     AS spy_twr_pct,
             CASE
