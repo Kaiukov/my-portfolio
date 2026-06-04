@@ -1414,8 +1414,8 @@ AS $$
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                 ) AS grp
             FROM drawdown_values
-            WHERE drawdown > 0
         ) x
+        WHERE drawdown > 0
         GROUP BY grp
     ),
     drawdown_stats AS (
@@ -1627,8 +1627,8 @@ AS $$
             END                                                                                     AS relative_return,
             COALESCE(d.te_daily * SQRT(252.0), 0.0)                                                AS tracking_error,
             CASE
-                WHEN COALESCE(d.spy_s, 0.0) > 0 THEN
-                    ((COALESCE(d.spy_e, 0.0) - d.spy_s) / d.spy_s) * 100.0
+                WHEN COALESCE(d.spy_twr, -1.0) > -1.0 THEN
+                    d.spy_twr * 100.0
                 ELSE 0.0
             END                                                                                     AS spy_twr_pct,
             CASE
@@ -2144,7 +2144,6 @@ BEGIN
         FROM transactions t
         WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT')
           AND NOT is_cash_like_sql(t.asset)
-          AND (p_from_date IS NULL OR t.date >= p_from_date)
           AND t.date <= p_to_date
           AND (p_asset IS NULL OR upper(t.asset) = upper(p_asset))
         ORDER BY t.date ASC, t.id ASC
@@ -2186,7 +2185,9 @@ BEGIN
                 matched_buy_id   := lot_rec.buy_id;
                 matched_buy_date := lot_rec.buy_date;
 
-                RETURN NEXT;
+                IF p_from_date IS NULL OR tx.date >= p_from_date THEN
+                    RETURN NEXT;
+                END IF;
 
                 UPDATE fifo_lots_detail f
                 SET remaining_qty = f.remaining_qty - v_consume
