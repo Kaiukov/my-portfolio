@@ -11,6 +11,7 @@ import { getMwr } from "../commands/mwr.js";
 import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 import { getPriceFreshness } from "../commands/freshness.js";
+import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { ValidationError } from "../validators.js";
 import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
@@ -102,6 +103,12 @@ const ROUTES: Record<string, Handler> = {
     const maxAgeDays = parseIntParam(p, "max_age_days");
     const data = await verifyPrices(maxAgeDays);
     return success("verify_prices", data);
+  },
+  "/asset_metadata": async (p) => {
+    const asset = strParam(p, "asset");
+    const refresh = parseBoolValue(p.get("refresh")) ?? false;
+    const data = await getAssetMetadataRecords({ asset, refresh });
+    return success("asset_metadata", data, data.assets.length);
   },
 };
 

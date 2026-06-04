@@ -1,6 +1,92 @@
 import YahooFinance from "yahoo-finance2";
+import { STABLECOINS, ALLOWED_CURRENCIES } from "../validators.js";
 
 const yahooFinance = new YahooFinance();
+
+export interface SectorWeight {
+  sector: string;
+  weight: number;
+}
+
+export interface AssetProfileAndSectorWeights {
+  sector?: string;
+  industry?: string;
+  region?: string;
+  sectorWeights?: SectorWeight[];
+}
+
+export function isYahooFetchable(ticker: string): boolean {
+  if (ticker === "USD") return false;
+  if (STABLECOINS.has(ticker.toUpperCase())) return false;
+  if (/^[A-Z]{3}$/.test(ticker.toUpperCase()) && ALLOWED_CURRENCIES.has(ticker.toUpperCase())) return false;
+  if (/^[A-Z]{3}USD=X$/.test(ticker)) return false;
+  if (ticker.startsWith("CASH ")) return false;
+  return true;
+}
+
+export function getStaticAssetProfile(ticker: string): AssetProfileAndSectorWeights | null {
+  if (ticker === "USD") {
+    return { sector: "Cash", region: "US" };
+  }
+
+  const upper = ticker.toUpperCase();
+  if (STABLECOINS.has(upper)) {
+    return { sector: "Crypto", region: "Global" };
+  }
+
+  if (ALLOWED_CURRENCIES.has(upper) && upper !== "USD") {
+    return { sector: "FX", region: upper };
+  }
+
+  const fxMatch = /^([A-Z]{3})USD=X$/.exec(ticker);
+  if (fxMatch && ALLOWED_CURRENCIES.has(fxMatch[1])) {
+    return { sector: "FX", region: fxMatch[1] };
+  }
+
+  if (ticker.startsWith("CASH ")) {
+    return { sector: "Cash", region: "US" };
+  }
+
+  if (/-USD$/.test(ticker)) {
+    return { sector: "Crypto", region: "Global" };
+  }
+
+  return null;
+}
+
+export async function fetchAssetProfile(
+  ticker: string,
+): Promise<AssetProfileAndSectorWeights> {
+  const result = await yahooFinance.quoteSummary(ticker, {
+    modules: ["assetProfile", "topHoldings"],
+  });
+
+  const assetProfile = result?.assetProfile;
+  const topHoldings = result?.topHoldings;
+
+  const sector = assetProfile?.sector ?? assetProfile?.sectorDisp ?? undefined;
+  const industry = assetProfile?.industry ?? assetProfile?.industryDisp ?? undefined;
+  const region = assetProfile?.country ?? undefined;
+
+  let sectorWeights: SectorWeight[] | undefined;
+  if (topHoldings?.sectorWeightings?.length) {
+    sectorWeights = [];
+    for (const sw of topHoldings.sectorWeightings) {
+      for (const [rawSector, weight] of Object.entries(sw)) {
+        if (rawSector === "maxAge") continue;
+        if (typeof weight === "number" && weight > 0) {
+          const normalized = rawSector
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+          sectorWeights.push({ sector: normalized, weight });
+        }
+      }
+    }
+    if (sectorWeights.length === 0) sectorWeights = undefined;
+  }
+
+  return { sector, industry, region, sectorWeights };
+}
 
 export interface PriceRow {
   ticker: string;

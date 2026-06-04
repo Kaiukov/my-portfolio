@@ -16,6 +16,7 @@ import { getHealth } from "../commands/health.js";
 import { verifyPrices } from "../commands/verify_prices.js";
 import { getWidget } from "../commands/widget.js";
 import { getPriceFreshness } from "../commands/freshness.js";
+import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { strField, intField } from "./adapter.js";
 
 type JsonObject = Record<string, unknown>;
@@ -145,6 +146,13 @@ export async function mcpRead(
       const asOf = asOfVal(args);
       const data = await getWidget(days, asOf);
       return success("widget", data, data.series.length);
+    }
+
+    if (toolName === "asset_metadata") {
+      const asset = strField(args, "asset");
+      const refresh = (args["refresh"]) === true || args["refresh"] === "true";
+      const data = await getAssetMetadataRecords({ asset, refresh });
+      return success("asset_metadata", data, data.assets.length);
     }
 
     return error("mcp", "NOT_FOUND", `Unsupported MCP read tool: ${toolName}`);

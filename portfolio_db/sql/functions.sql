@@ -2198,4 +2198,41 @@ AS $$
     ORDER BY e.me;
 $$;
 
+-- Asset metadata cache reader: returns cached sector/industry/region + staleness flag.
+-- Reads cache only (no network). Uses p_max_age_days to compute is_stale the same
+-- way the price cache does.
+DROP FUNCTION IF EXISTS portfolio_asset_metadata_sql(TEXT, INTEGER);
+CREATE OR REPLACE FUNCTION portfolio_asset_metadata_sql(
+    p_asset TEXT DEFAULT NULL,
+    p_max_age_days INTEGER DEFAULT 5
+)
+RETURNS TABLE(
+    asset TEXT,
+    asset_kind TEXT,
+    sector TEXT,
+    industry TEXT,
+    region TEXT,
+    sector_weights JSONB,
+    source TEXT,
+    fetched_at TEXT,
+    is_stale BOOLEAN
+)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT
+        am.ticker::TEXT,
+        am.asset_kind,
+        am.sector,
+        am.industry,
+        am.region,
+        am.sector_weights,
+        am.source,
+        to_char(am.fetched_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')::TEXT,
+        (am.fetched_at < (CURRENT_DATE - p_max_age_days) OR am.fetched_at IS NULL) AS is_stale
+    FROM asset_metadata am
+    WHERE (p_asset IS NULL OR upper(am.ticker) = upper(p_asset))
+    ORDER BY am.ticker;
+$$;
+
 SET check_function_bodies = on;
