@@ -5,6 +5,7 @@ import { getAllocation } from "../commands/allocation.js";
 import { getCash } from "../commands/cash.js";
 import { getCashDrag } from "../commands/cash_drag.js";
 import { getCurrencyExposure } from "../commands/currency_exposure.js";
+import { getRebalance } from "../commands/rebalance.js";
 import { getIncome } from "../commands/income.js";
 import { getRealizedGains } from "../commands/realized_gains.js";
 import { getPerformance } from "../commands/performance.js";
@@ -57,6 +58,15 @@ const ROUTES: Record<string, Handler> = {
     const freshnessMeta = await getPriceFreshness(asOf);
     const data = await getAllocation(asOf);
     return success("allocation", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+  },
+  "/rebalance": async (p) => {
+    const targetStr = strParam(p, "target");
+    if (!targetStr) {
+      throw new ValidationError("target query parameter is required (e.g. ?target=VTI=50,VXUS=20,BND=30)");
+    }
+    const asOf = strParam(p, "as_of");
+    const data = await getRebalance(targetStr, asOf);
+    return success("rebalance", data, data.rows.length);
   },
   "/concentration": async (p) => {
     const asOf = strParam(p, "as_of");

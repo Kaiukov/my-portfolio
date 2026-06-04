@@ -24,6 +24,7 @@ import { getMwr } from "./commands/mwr.js";
 import { getHealth } from "./commands/health.js";
 import { getWidget } from "./commands/widget.js";
 import { getCurrencyExposure } from "./commands/currency_exposure.js";
+import { getRebalance } from "./commands/rebalance.js";
 import { getIncome } from "./commands/income.js";
 import { getRealizedGains } from "./commands/realized_gains.js";
 import { initDb } from "./commands/init.js";
@@ -70,6 +71,7 @@ Commands:
   cash            Cash balances by currency with USD values
   cash_drag       Opportunity cost of idle cash vs being invested (--as-of-date, --from-date, --benchmark-return-rate, --cash-return-rate)
   allocation      Portfolio allocation breakdown by asset
+  rebalance       Target-vs-actual drift report with suggested trades (--target "VTI=50,VXUS=20,BND=30", --as-of-date)
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
   currency_exposure  Portfolio exposure broken down by currency
@@ -679,6 +681,19 @@ export async function dispatch(argv: string[]): Promise<void> {
       const freshnessMeta = await getPriceFreshness(asOfDate);
       const result = await getAllocation(asOfDate);
       console.log(JSON.stringify(success("allocation", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      return;
+    }
+
+    case "rebalance": {
+      const targetStr = str(flags, "target");
+      if (!targetStr) {
+        console.log(JSON.stringify(error("rebalance", "VALIDATION_ERROR", "--target is required (e.g. --target \"VTI=50,VXUS=20,BND=30\")"), null, 2));
+        process.exit(1);
+        return;
+      }
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const result = await getRebalance(targetStr, asOfDate);
+      console.log(JSON.stringify(success("rebalance", result, result.rows.length), null, 2));
       return;
     }
 
