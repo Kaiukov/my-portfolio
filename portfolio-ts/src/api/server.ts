@@ -86,9 +86,11 @@ const ROUTES: Record<string, Handler> = {
     const benchmark = strParam(p, "benchmark");
     const fromDate = strParam(p, "from_date");
     const period = strParam(p, "period");
+    const inflationRate = strParam(p, "inflation_rate");
     const freshnessMeta = await getPriceFreshness(asOfDate);
-    const data = await getPerformance({ asOfDate, benchmark, fromDate, period });
-    return success("performance", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+    const { data, benchmark: resolvedBenchmark } = await getPerformance({ asOfDate, benchmark, fromDate, period, inflationRate });
+    const meta = { ...(freshnessMeta as unknown as Record<string, unknown>), benchmark: resolvedBenchmark };
+    return success("performance", data, null, undefined, meta);
   },
   "/mwr": async (p) => {
     const asOf = strParam(p, "as_of");

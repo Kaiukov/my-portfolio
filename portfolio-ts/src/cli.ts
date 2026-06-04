@@ -68,7 +68,7 @@ Commands:
   summary         High-level portfolio summary metrics
   concentration   Portfolio concentration metrics (HHI + top holdings)
   currency_exposure  Portfolio exposure broken down by currency
-  performance     Performance metrics: TWR, Sharpe, max drawdown, benchmark
+  performance     Performance metrics: TWR, CAGR, Calmar, Sharpe, max drawdown, benchmark-relative (beta, alpha, IR), real (inflation-adjusted) return. Use --benchmark SPY (default) for full risk-adjusted suite; --inflation-rate 0.025 for real return.
   mwr             Money-weighted return (XIRR) accounting for deposit/withdrawal timing
   widget          Compact portfolio widget JSON for dashboards
   cloudflare      Cloudflare Workers: init, deploy, publish, sync, url, login, logout, whoami
@@ -685,9 +685,11 @@ export async function dispatch(argv: string[]): Promise<void> {
       const benchmark = str(flags, "benchmark");
       const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
       const period = str(flags, "period");
+      const inflationRate = str(flags, "inflation-rate") ?? str(flags, "inflation_rate");
       const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getPerformance({ asOfDate, benchmark, fromDate, period });
-      console.log(JSON.stringify(success("performance", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      const { data, benchmark: resolvedBenchmark } = await getPerformance({ asOfDate, benchmark, fromDate, period, inflationRate });
+      const meta = { ...(freshnessMeta as unknown as Record<string, unknown>), benchmark: resolvedBenchmark };
+      console.log(JSON.stringify(success("performance", data, null, undefined, meta), null, 2));
       return;
     }
 
