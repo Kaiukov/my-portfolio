@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Portfolio — Dashboard Preview</title>
+<style>
+:root{
+  --bg:#0b0e11; --panel:#141a21; --panel2:#1b232c; --line:#222c36;
+  --txt:#e6edf3; --mut:#8b98a5; --grn:#16c784; --red:#ea3943; --accent:#7c8cff;
+  --etf:#5b8def; --cash:#3ec6a0; --fx:#f0b429; --crypto:#b07cff; --stock:#ef6a9b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 18px 60px}
+a{color:inherit}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.pill{font-size:12px;color:var(--mut);background:var(--panel2);border:1px solid var(--line);padding:5px 10px;border-radius:999px}
+.grid{display:grid;gap:14px}
+.cols{grid-template-columns:1.55fr 1fr}
+@media(max-width:880px){.cols{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.card h3{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--mut);letter-spacing:.3px;text-transform:uppercase}
+.big{font-size:34px;font-weight:700;letter-spacing:-.5px}
+.sub{color:var(--mut);font-size:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.kv{display:flex;flex-direction:column;gap:3px}
+.kv .l{color:var(--mut);font-size:12px}
+.kv .v{font-weight:600;font-size:15px}
+.pos{color:var(--grn)} .neg{color:var(--red)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+@media(max-width:680px){.metrics{grid-template-columns:repeat(2,1fr)}}
+.splitbar{height:10px;border-radius:6px;overflow:hidden;display:flex;margin:14px 0 6px;background:var(--panel2)}
+.tabs{display:flex;gap:6px}
+.tab{font-size:12px;color:var(--mut);background:transparent;border:1px solid var(--line);padding:5px 11px;border-radius:8px;cursor:pointer}
+.tab.on{background:var(--accent);color:#0b0e11;border-color:var(--accent);font-weight:600}
+.chartwrap{position:relative}
+.badge{position:absolute;font-size:11px;padding:3px 7px;border-radius:6px;background:var(--panel2);border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:right;padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.3px}
+th:first-child,td:first-child{text-align:left}
+.tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:6px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.muted-col{color:#56616b}
+.subhead{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin:14px 0 2px;font-weight:600}
+.subhead:first-of-type{margin-top:4px}
+.bar{height:7px;border-radius:5px;background:var(--panel2);overflow:hidden}
+.bar>span{display:block;height:100%}
+.legend{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.legend .li{display:grid;grid-template-columns:12px 1fr auto auto;gap:9px;align-items:center;font-size:13px}
+.sw{width:11px;height:11px;border-radius:3px}
+.foot{margin-top:22px;color:var(--mut);font-size:12px;text-align:center;line-height:1.7}
+.note{font-size:11px;color:#6b7682;margin-top:6px}
+</style></head>
+<body><div class="wrap">
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> My Portfolio <span class="pill" id="asof"></span></div>
+  <div class="pill">Preview · live PROD data · read-only</div>
+</div>
+
+<div class="grid cols">
+  <!-- LEFT: summary + chart -->
+  <div class="grid">
+    <div class="card">
+      <h3>Holdings Summary</h3>
+      <div class="row" style="align-items:flex-end">
+        <div>
+          <div class="big" id="pv"></div>
+          <div class="sub" id="pvsub"></div>
+        </div>
+        <div style="text-align:right">
+          <div class="kv"><span class="l">Today</span><span class="v" id="today"></span></div>
+          <div class="kv" style="margin-top:8px"><span class="l">Total return</span><span class="v" id="total"></span></div>
+        </div>
+      </div>
+      <div class="splitbar" id="split"></div>
+      <div class="row sub"><span id="splitL"></span><span id="splitR"></span></div>
+      <div class="metrics">
+        <div class="kv"><span class="l">Invested</span><span class="v" id="m_inv"></span></div>
+        <div class="kv"><span class="l">Unrealized G/L</span><span class="v" id="m_unrl"></span></div>
+        <div class="kv"><span class="l">Realized G/L</span><span class="v" id="m_real"></span></div>
+        <div class="kv"><span class="l">Income</span><span class="v" id="m_inc"></span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row"><h3 style="margin:0">Value over time</h3><div class="tabs" id="tabs"></div></div>
+      <div class="chartwrap" id="chartwrap" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Holdings</h3>
+      <div style="overflow-x:auto">
+      <table id="holdings"><thead><tr>
+        <th>Asset</th><th>Kind</th><th>Shares</th><th>Last</th><th>Market value</th><th>Day</th><th>Alloc %</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div class="note">Shares / Last / Day are placeholders — current REST API exposes value &amp; allocation only; a per-holding endpoint is prep work (#218 / PR #219).</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: allocation, cash, metrics -->
+  <div class="grid">
+    <div class="card">
+      <h3>Asset Allocation</h3>
+      <div class="splitbar" id="allocbar" style="height:12px"></div>
+      <div class="legend" id="alloclegend"></div>
+    </div>
+    <div class="card">
+      <h3>Sector Allocation</h3>
+      <div class="splitbar" id="sectorbar" style="height:12px"></div>
+      <div class="legend" id="sectorlegend"></div>
+      <div class="note">Demo mapping — sectors are statically classified per ticker. TODO: investigate yahoo-finance2 (quoteSummary → assetProfile.sector for stocks, topHoldings.sectorWeightings for ETF look-through) to source real sector data. See issue for an asset-metadata function.</div>
+    </div>
+    <div class="card">
+      <h3>Cash &amp; Currency</h3>
+      <div class="big" id="cashtot" style="font-size:24px"></div>
+      <div class="legend" id="cashlegend" style="margin-top:14px"></div>
+    </div>
+    <div class="card">
+      <h3>Risk &amp; Performance</h3>
+
+      <div class="subhead">Returns</div>
+      <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+        <div class="kv"><span class="l">Time-weighted (TWR)</span><span class="v" id="p_twr"></span></div>
+        <div class="kv"><span class="l">Money-weighted (XIRR)</span><span class="v" id="p_mwr"></span></div>
+        <div class="kv"><span class="l">Total return</span><span class="v" id="p_tot"></span></div>
+        <div class="kv"><span class="l">Median monthly</span><span class="v" id="p_mm"></span></div>
+      </div>
+
+      <div class="subhead">Risk</div>
+      <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+        <div class="kv"><span class="l">Volatility (ann.)</span><span class="v" id="p_vol"></span></div>
+        <div class="kv"><span class="l">Std dev (daily)</span><span class="v" id="p_std"></span></div>
+        <div class="kv"><span class="l">Max drawdown</span><span class="v" id="p_mdd"></span></div>
+        <div class="kv"><span class="l">Avg drawdown</span><span class="v" id="p_avgdd"></span></div>
+        <div class="kv"><span class="l">VaR 95% / 99%</span><span class="v" id="p_var"></span></div>
+        <div class="kv"><span class="l">CVaR 95% / 99%</span><span class="v" id="p_cvar"></span></div>
+      </div>
+
+      <div class="subhead">Tracking period</div>
+      <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+        <div class="kv"><span class="l">Days tracked</span><span class="v" id="p_days"></span></div>
+        <div class="kv"><span class="l">Range</span><span class="v" id="p_range" style="font-size:12px"></span></div>
+        <div class="kv"><span class="l">Start value</span><span class="v" id="p_sv"></span></div>
+        <div class="kv"><span class="l">End value</span><span class="v" id="p_ev"></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  Portfolio Dashboard — local preview · stylistic reference: Yahoo Finance (not a clone)<br/>
+  Live snapshot served from Cloudflare KV · refreshed by the portfolio service
+</div>
+
+<script>
+(async function(){
+let DATA;
+try{
+  const __r = await fetch('/api/dashboard', {cache:'no-store'});
+  if(!__r.ok) throw new Error('HTTP '+__r.status);
+  DATA = await __r.json();
+}catch(__e){
+  document.body.innerHTML = '<div style="max-width:640px;margin:80px auto;padding:24px;font-family:system-ui;color:#888;text-align:center">Dashboard data is not available yet.<br><small>'+(__e&&__e.message||__e)+'</small></div>';
+  return;
+}
+const KIND={etf:'var(--etf)',cash:'var(--cash)',fx:'var(--fx)',crypto:'var(--crypto)',stock:'var(--stock)'};
+const usd=n=>'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const usd0=n=>'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0});
+const pct=n=>(n>=0?'+':'')+Number(n).toFixed(2)+'%';
+const sgn=n=>n>=0?'pos':'neg';
+const el=id=>document.getElementById(id);
+
+// ---- header / summary ----
+const s=DATA.summary, st=DATA.status, td=DATA.today||{abs:0,pct:0}, tt=DATA.total||{abs:0,pct:0};
+el('asof').textContent='as of '+(DATA.prices_as_of||'');
+el('pv').textContent=usd(s.portfolio_value_usd);
+el('pvsub').textContent='Market '+usd0(s.portfolio_value_usd - s.total_cash_usd)+'  ·  Cash '+usd0(s.total_cash_usd);
+el('today').innerHTML='<span class="'+sgn(td.abs)+'">'+usd(td.abs)+' ('+pct(td.pct)+')</span>';
+el('total').innerHTML='<span class="'+sgn(tt.abs)+'">'+usd(tt.abs)+' ('+pct(tt.pct)+')</span>';
+el('m_inv').textContent=usd(st.total_invested);
+el('m_unrl').innerHTML='<span class="'+sgn(st.unrealized_gain)+'">'+usd(st.unrealized_gain)+'</span>';
+el('m_real').innerHTML='<span class="'+sgn(st.realized_gain)+'">'+usd(st.realized_gain)+'</span>';
+el('m_inc').textContent=usd(st.income);
+// split bar market vs cash
+const mkt=s.portfolio_value_usd - s.total_cash_usd, cash=s.total_cash_usd, totv=mkt+cash;
+el('split').innerHTML='<span style="width:'+(mkt/totv*100)+'%;background:var(--accent)"></span><span style="width:'+(cash/totv*100)+'%;background:var(--cash)"></span>';
+el('splitL').innerHTML='<span style="color:var(--accent)">●</span> Holdings '+(mkt/totv*100).toFixed(0)+'%';
+el('splitR').innerHTML='Cash '+(cash/totv*100).toFixed(0)+'% <span style="color:var(--cash)">●</span>';
+
+// ---- chart ----
+const hist=DATA.history||[];
+const RANGES=[['1M',30],['3M',90],['6M',180],['All',9999]];
+let curRange=180;
+function drawChart(days){
+  const pts=hist.slice(Math.max(0,hist.length-days));
+  const W=560,H=210,pad=6;
+  const vals=pts.map(p=>p.value), mn=Math.min(...vals), mx=Math.max(...vals);
+  const rng=(mx-mn)||1;
+  const X=i=>pad+i*(W-2*pad)/(pts.length-1||1);
+  const Y=v=>pad+(1-(v-mn)/rng)*(H-2*pad);
+  let line='', area='';
+  pts.forEach((p,i)=>{const x=X(i).toFixed(1),y=Y(p.value).toFixed(1);line+=(i?'L':'M')+x+' '+y+' ';});
+  area='M'+X(0).toFixed(1)+' '+(H-pad)+' '+line.replace(/^M/,'L')+'L'+X(pts.length-1).toFixed(1)+' '+(H-pad)+' Z';
+  const up=pts[pts.length-1].value>=pts[0].value, col=up?'var(--grn)':'var(--red)';
+  const last=pts[pts.length-1];
+  el('chartwrap').innerHTML=
+   '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="210" preserveAspectRatio="none">'
+   +'<defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1">'
+   +'<stop offset="0" stop-color="'+col+'" stop-opacity="0.28"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></linearGradient></defs>'
+   +'<path d="'+area+'" fill="url(#g)"/>'
+   +'<path d="'+line+'" fill="none" stroke="'+col+'" stroke-width="2" stroke-linejoin="round"/>'
+   +'<circle cx="'+X(pts.length-1).toFixed(1)+'" cy="'+Y(last.value).toFixed(1)+'" r="3.5" fill="'+col+'"/>'
+   +'</svg>'
+   +'<div class="badge" style="right:6px;top:4px;color:'+col+'">'+usd0(mx)+'</div>'
+   +'<div class="badge" style="right:6px;bottom:4px;color:var(--mut)">'+usd0(mn)+'</div>'
+   +'<div class="badge" style="left:6px;top:4px;color:var(--mut)">'+pts[0].date+' → '+last.date+'</div>';
+}
+el('tabs').innerHTML=RANGES.map(([l,d])=>'<button class="tab'+(d===180?' on':'')+'" data-d="'+d+'">'+l+'</button>').join('');
+el('tabs').querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
+  el('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');drawChart(+b.dataset.d);});
+drawChart(curRange);
+
+// ---- holdings table ----
+const arows=DATA.allocation_rows.filter(r=>Math.abs(r.allocation_pct)>=0.05 && !['cash','fx'].includes(r.asset_kind)).sort((a,b)=>b.value_usd-a.value_usd);
+el('holdings').querySelector('tbody').innerHTML=arows.map(r=>{
+  const c=KIND[r.asset_kind]||'var(--mut)';
+  return '<tr><td><b>'+r.asset+'</b></td>'
+   +'<td><span class="tag" style="background:'+c+'22;color:'+c+'">'+r.asset_kind+'</span></td>'
+   +'<td class="muted-col">'+(r.net_quantity!=null?Number(r.net_quantity).toLocaleString('en-US',{maximumFractionDigits:4}):'—')+'</td>'
+   +'<td class="muted-col">—</td>'
+   +'<td>'+usd(r.value_usd)+'</td>'
+   +'<td class="muted-col">—</td>'
+   +'<td>'+r.allocation_pct.toFixed(1)+'%</td></tr>';
+}).join('');
+
+// ---- allocation by kind ----
+const byKind={};
+DATA.allocation_rows.forEach(r=>{if(r.allocation_pct>0){byKind[r.asset_kind]=(byKind[r.asset_kind]||0)+r.allocation_pct;}});
+const kinds=Object.entries(byKind).sort((a,b)=>b[1]-a[1]);
+el('allocbar').innerHTML=kinds.map(([k,v])=>'<span style="width:'+v+'%;background:'+(KIND[k]||'var(--mut)')+'"></span>').join('');
+el('alloclegend').innerHTML=kinds.map(([k,v])=>{
+  const c=KIND[k]||'var(--mut)';
+  return '<div class="li"><span class="sw" style="background:'+c+'"></span><span style="text-transform:capitalize">'+k+'</span>'
+   +'<span class="sub">'+v.toFixed(1)+'%</span></div>';}).join('');
+
+// ---- sector allocation (static demo mapping per ticker) ----
+const SECTOR_OF={
+  SCHD:'US Equity', SPYM:'US Equity',
+  'VGEU.DE':'Intl Equity',
+  XLU:'Utilities',
+  SGOV:'Bonds', VGIT:'Bonds',
+  'BTC-USD':'Crypto', 'ETH-USD':'Crypto', 'TON11419-USD':'Crypto', 'BNB-USD':'Crypto',
+  'PAXG-USD':'Gold',
+  USD:'Cash', 'EURUSD=X':'Cash', 'GBPUSD=X':'Cash', USDT:'Cash', USDC:'Cash'
+};
+const SECTOR_COL={'US Equity':'#5b8def','Intl Equity':'#ef6a9b','Utilities':'#3ec6a0','Bonds':'#f0b429','Crypto':'#b07cff','Gold':'#d4a017','Cash':'#6b7682'};
+const pvTot=DATA.summary.portfolio_value_usd;
+const bySector={};
+DATA.allocation_rows.forEach(r=>{const sec=SECTOR_OF[r.asset]||'Other';bySector[sec]=(bySector[sec]||0)+Math.max(0,r.value_usd);});
+const sectors=Object.entries(bySector).map(([k,v])=>[k,v,v/pvTot*100]).filter(s=>s[2]>=0.05).sort((a,b)=>b[1]-a[1]);
+el('sectorbar').innerHTML=sectors.map(([k,,p])=>'<span style="width:'+p+'%;background:'+(SECTOR_COL[k]||'var(--mut)')+'"></span>').join('');
+el('sectorlegend').innerHTML=sectors.map(([k,v,p])=>{
+  const c=SECTOR_COL[k]||'var(--mut)';
+  return '<div class="li"><span class="sw" style="background:'+c+'"></span><span>'+k+'</span>'
+   +'<span class="sub">'+p.toFixed(1)+'%</span><span style="font-weight:600">'+usd0(v)+'</span></div>';}).join('');
+
+// ---- cash ----
+const crows=DATA.cash_rows.slice().sort((a,b)=>b.usd_value-a.usd_value);
+const ctot=crows.reduce((a,r)=>a+r.usd_value,0);
+el('cashtot').textContent=usd(ctot);
+const cpal=['#3ec6a0','#f0b429','#5b8def','#b07cff','#ef6a9b'];
+el('cashlegend').innerHTML=crows.map((r,i)=>{
+  const c=cpal[i%cpal.length], w=(r.usd_value/ctot*100);
+  return '<div class="li"><span class="sw" style="background:'+c+'"></span>'
+   +'<span>'+r.display_bucket+' <span class="sub">'+Number(r.balance).toLocaleString('en-US',{maximumFractionDigits:2})+'</span></span>'
+   +'<span class="sub">'+w.toFixed(0)+'%</span><span style="font-weight:600">'+usd0(r.usd_value)+'</span></div>';
+}).join('');
+
+// ---- perf ----
+const p=DATA.performance;
+const MWR_PCT=14.0029; // /mwr XIRR — accounts for deposit/withdrawal timing
+const setp=(id,v,signed)=>{const e=el(id);e.innerHTML=signed?'<span class="'+sgn(v)+'">'+pct(v)+'</span>':v;};
+const negpct=(v,d=2)=>'<span class="neg">'+(v!=null?v.toFixed(d)+'%':'—')+'</span>';
+// returns
+setp('p_twr',p.time_weighted_return_pct,true);
+setp('p_mwr',MWR_PCT,true);
+setp('p_tot',p.total_return_pct,true);
+setp('p_mm',p.median_monthly_return,true);
+// risk
+el('p_vol').textContent=(p.hist_volatility!=null?p.hist_volatility.toFixed(1)+'%':'—');
+el('p_std').textContent=(p.std_dev!=null?p.std_dev.toFixed(2)+'%':'—');
+el('p_mdd').innerHTML='<span class="neg">'+(p.max_drawdown!=null?'-'+p.max_drawdown.toFixed(1)+'%':'—')+'</span>';
+el('p_avgdd').innerHTML='<span class="neg">'+(p.avg_drawdown!=null?'-'+p.avg_drawdown.toFixed(1)+'%':'—')+'</span>';
+el('p_var').innerHTML=negpct(p.var_95)+' <span class="sub">/</span> '+negpct(p.var_99);
+el('p_cvar').innerHTML=negpct(p.cvar_95)+' <span class="sub">/</span> '+negpct(p.cvar_99);
+// period
+el('p_days').textContent=(p.total_days!=null?p.total_days+' d':'—');
+el('p_range').textContent=(p.start_date||'')+' → '+(p.end_date||'');
+el('p_sv').textContent=usd0(p.start_value);
+el('p_ev').textContent=usd0(p.end_value);
+})();
+</script>
+</div></body></html>

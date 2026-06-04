@@ -1,0 +1,17 @@
+{
+  // Copy to wrangler.jsonc and fill account_id + kv_namespaces[].id from
+  // portfolio-ts/.portfolio/config.json (same account + KV namespace as the widget).
+  // The real wrangler.jsonc is gitignored — account/KV ids are not secrets, but we
+  // keep them out of the public repo. The CLOUDFLARE_API_TOKEN is NEVER committed.
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/templates/configuration/wrangler.jsonc",
+  "name": "portfolio-dashboard",
+  "main": "worker.js",
+  "compatibility_date": "2026-05-31",
+  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  "vars": {
+    "DASHBOARD_KV_KEY": "dashboard"
+  },
+  "kv_namespaces": [
+    { "binding": "PORTFOLIO_KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+  ]
+}
