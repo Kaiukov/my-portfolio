@@ -3,6 +3,7 @@ import { describe, expect, test, mock } from "bun:test";
 mock.module("../src/db.js", () => ({
   query: mock(() => Promise.resolve([])),
   querySingle: mock(() => Promise.resolve(null)),
+  getAssetMetadata: mock(() => Promise.resolve([])),
   connect: () => {},
   close: () => {},
   getSql: () => ({
@@ -66,10 +67,10 @@ const allocationFixture = {
   as_of_date: "2026-06-03",
   portfolio_value: 40000.0,
   rows: [
-    { asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 50, value_usd: 9750.0, allocation_pct: 24.375 },
-    { asset: "VTI", asset_type: "etf", asset_kind: "equity", net_quantity: 100, value_usd: 27250.0, allocation_pct: 56.875 },
+    { asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 50, value_usd: 9750.0, allocation_pct: 24.375, sector: "Technology" },
+    { asset: "VTI", asset_type: "etf", asset_kind: "equity", net_quantity: 100, value_usd: 27250.0, allocation_pct: 56.875, sector_weights: [{ sector: "Technology", weight: 30 }, { sector: "Financial Services", weight: 15 }] },
     { asset: "USD", asset_type: "cash", asset_kind: "cash", net_quantity: 2500.75, value_usd: 2500.75, allocation_pct: 6.25 },
-    { asset: "BND", asset_type: "etf", asset_kind: "fixed_income", net_quantity: 70, value_usd: 5000.0, allocation_pct: 12.5 },
+    { asset: "BND", asset_type: "etf", asset_kind: "fixed_income", net_quantity: 70, value_usd: 5000.0, allocation_pct: 12.5, sector: "Bonds" },
   ],
 };
 
@@ -174,6 +175,15 @@ describe("buildDashboardSnapshot", () => {
     expect(aapl.net_quantity).toBe(50);
     expect(aapl.value_usd).toBe(9750.0);
     expect(aapl.allocation_pct).toBe(24.375);
+    expect(aapl.sector).toBe("Technology");
+
+    const vti = snapshot.allocation_rows[1];
+    expect(vti.asset).toBe("VTI");
+    expect(vti.sector).toBeUndefined();
+    expect(vti.sector_weights).toBeDefined();
+    expect(vti.sector_weights!.length).toBe(2);
+    expect(vti.sector_weights![0].sector).toBe("Technology");
+    expect(vti.sector_weights![0].weight).toBe(30);
 
     expect(Array.isArray(snapshot.cash_rows)).toBe(true);
     expect(snapshot.cash_rows.length).toBe(1);
@@ -429,5 +439,70 @@ describe("buildDashboardSnapshot", () => {
     expect(mockGetAllocation).toHaveBeenCalledWith("2026-06-03");
     expect(mockGetCash).toHaveBeenCalledWith("2026-06-03");
     expect(mockGetPerformance).toHaveBeenCalledWith({ asOfDate: "2026-06-03" });
+  });
+
+  test("ETF sector_weights are passed through to snapshot allocation_rows", async () => {
+    const etfAlloc = {
+      as_of_date: "2026-06-03",
+      portfolio_value: 50000.0,
+      rows: [
+        {
+          asset: "SCHD",
+          asset_type: "etf",
+          asset_kind: "equity",
+          net_quantity: 200,
+          value_usd: 30000.0,
+          allocation_pct: 60,
+          sector_weights: [
+            { sector: "Financial Services", weight: 20 },
+            { sector: "Healthcare", weight: 15 },
+            { sector: "Technology", weight: 12 },
+          ],
+        },
+        {
+          asset: "AAPL",
+          asset_type: "stock",
+          asset_kind: "equity",
+          net_quantity: 50,
+          value_usd: 20000.0,
+          allocation_pct: 40,
+          sector: "Technology",
+        },
+      ],
+    };
+
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => etfAlloc);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
+
+    const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
+
+    expect(snapshot.allocation_rows).toHaveLength(2);
+
+    const schd = snapshot.allocation_rows[0];
+    expect(schd.asset).toBe("SCHD");
+    expect(schd.sector).toBeUndefined();
+    expect(schd.sector_weights).toBeDefined();
+    expect(schd.sector_weights!.length).toBe(3);
+    expect(schd.sector_weights![0].sector).toBe("Financial Services");
+    expect(schd.sector_weights![0].weight).toBe(20);
+
+    const aapl = snapshot.allocation_rows[1];
+    expect(aapl.asset).toBe("AAPL");
+    expect(aapl.sector).toBe("Technology");
+    expect(aapl.sector_weights).toBeUndefined();
   });
 });
