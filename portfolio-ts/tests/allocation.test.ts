@@ -53,6 +53,7 @@ describe("getAllocation", () => {
   test("passes as_of_date parameter to SQL", async () => {
     mockQuery.mockClear();
     mockQuery.mockResolvedValue([makeRow()]);
+    mockGetAssetMetadata.mockResolvedValue([]);
 
     const { getAllocation } = await import("../src/commands/allocation.js");
     const result = await getAllocation("2026-01-15");
@@ -202,6 +203,43 @@ describe("getAllocation", () => {
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].sector).toBeUndefined();
     expect(result.rows[0].sector_weights).toBeUndefined();
+  });
+
+  test("blank metadata rows fall back to read-only sector enrichment for known holdings", async () => {
+    const blankRow = (asset: string) => ({
+      asset,
+      asset_kind: null,
+      sector: null,
+      industry: null,
+      region: null,
+      sector_weights: null,
+      source: null,
+      fetched_at: null,
+      is_stale: false,
+    });
+    mockQuery.mockResolvedValue([
+      makeRow({ asset: "SCHD", asset_type: "etf", asset_kind: "etf", value_usd: 2672.38, allocation_pct: 14.04 }),
+      makeRow({ asset: "VGIT", asset_type: "etf", asset_kind: "fixed_income", value_usd: 2058.0, allocation_pct: 10.81 }),
+      makeRow({ asset: "EURUSD=X", asset_type: "cash_fx", asset_kind: "fx", value_usd: 2571.15, allocation_pct: 13.51 }),
+    ]);
+    mockGetAssetMetadata.mockResolvedValue([
+      blankRow("SCHD"),
+      blankRow("VGIT"),
+      blankRow("EURUSD=X"),
+    ]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation("2026-06-05");
+
+    expect(result.rows[0].sector).toBeUndefined();
+    expect(result.rows[0].sector_weights).toBeDefined();
+    expect(result.rows[0].sector_weights![0]).toEqual({
+      sector: "Consumer Defensive",
+      weight: 19.39,
+    });
+    expect(result.rows[1].sector).toBe("Bonds");
+    expect(result.rows[1].sector_weights).toBeUndefined();
+    expect(result.rows[2].sector).toBe("FX");
   });
 });
 

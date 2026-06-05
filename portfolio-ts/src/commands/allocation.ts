@@ -1,5 +1,6 @@
 import { query, getAssetMetadata } from "../db.js";
 import type { AssetMetadataRow } from "../db.js";
+import { getAssetMetadataFallback } from "../asset_metadata_fallback.js";
 
 export interface SectorWeight {
   sector: string;
@@ -60,6 +61,13 @@ function parseSectorWeights(raw: unknown): SectorWeight[] | undefined {
   return undefined;
 }
 
+function hasSectorMetadata(
+  sector: string | null | undefined,
+  sectorWeights: SectorWeight[] | undefined,
+): boolean {
+  return Boolean(sector) || Boolean(sectorWeights && sectorWeights.length > 0);
+}
+
 export async function getAllocation(asOfDate?: string): Promise<AllocationResult> {
   const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
 
@@ -87,6 +95,10 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
   const allocRows: AllocationRow[] = rows.map((r) => {
     const asset = str(r["asset"]);
     const meta = metaMap.get(asset);
+    const parsedSectorWeights = parseSectorWeights(meta?.sector_weights);
+    const fallback = !hasSectorMetadata(meta?.sector, parsedSectorWeights)
+      ? getAssetMetadataFallback(asset, str(r["asset_kind"]))
+      : undefined;
     return {
       asset,
       asset_type: str(r["asset_type"]),
@@ -94,8 +106,8 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
       net_quantity: num(r["net_quantity"]),
       value_usd: num(r["value_usd"]),
       allocation_pct: num(r["allocation_pct"]),
-      sector: meta?.sector ?? undefined,
-      sector_weights: parseSectorWeights(meta?.sector_weights),
+      sector: meta?.sector ?? fallback?.sector ?? undefined,
+      sector_weights: parsedSectorWeights ?? fallback?.sector_weights,
     };
   });
 

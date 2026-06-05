@@ -265,19 +265,33 @@ function secCol(k){
 }
 const pvTot=DATA.summary.portfolio_value_usd;
 const bySector={};
+function addSectorValue(sector, value){
+  if(!sector || !Number.isFinite(value) || value <= 0) return;
+  bySector[sector]=(bySector[sector]||0)+value;
+}
 DATA.allocation_rows.forEach(r=>{
   const val=Math.max(0,r.value_usd);
   if(!val) return;
   if(r.sector_weights && r.sector_weights.length){
-    const totalWt=r.sector_weights.reduce((s,sw)=>s+sw.weight,0);
-    r.sector_weights.forEach(sw=>{
-      const wt=totalWt>0 ? sw.weight/totalWt : 0;
-      bySector[sw.sector]=(bySector[sw.sector]||0)+val*wt;
+    const weights=r.sector_weights
+      .map(sw=>({sector:sw.sector,weight:Number(sw.weight)}))
+      .filter(sw=>sw.sector && Number.isFinite(sw.weight) && sw.weight>0);
+    if(!weights.length){addSectorValue('Other',val);return;}
+    // Auto-detect: percentage-style (>1 means % like 19.39) vs decimal fraction (<=1 like 0.0672)
+    const isPct=weights.some(sw=>sw.weight>1);
+    let assigned=0;
+    weights.forEach(sw=>{
+      const frac=isPct?sw.weight/100:sw.weight;
+      const slice=val*frac;
+      assigned+=slice;
+      addSectorValue(sw.sector,slice);
     });
+    const remainder=Math.max(0,val-assigned);
+    if(remainder>0.005) addSectorValue('Other',remainder);
   }else if(r.sector){
-    bySector[r.sector]=(bySector[r.sector]||0)+val;
+    addSectorValue(r.sector,val);
   }else{
-    bySector['Other']=(bySector['Other']||0)+val;
+    addSectorValue('Other',val);
   }
 });
 const sectors=Object.entries(bySector).map(([k,v])=>[k,v,v/pvTot*100]).filter(s=>s[2]>=0.05).sort((a,b)=>b[1]-a[1]);
