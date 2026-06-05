@@ -113,7 +113,8 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
     };
   });
 
-  // Fetch last prices and previous close for day-change calculation
+  // Fetch last prices and previous close for day-change calculation.
+  // Prices are capped at actualDate so historical snapshots stay aligned.
   const priceCandidates = allocRows.filter((r) => r.net_quantity > 0);
   if (priceCandidates.length > 0) {
     try {
@@ -126,19 +127,20 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
         `WITH latest AS (
           SELECT DISTINCT ON (ticker) ticker, price, date
           FROM prices
-          WHERE ticker = ANY($1::varchar[])
+          WHERE ticker = ANY($1::varchar[]) AND date <= $2::date
           ORDER BY ticker, date DESC
         ),
         prev AS (
           SELECT DISTINCT ON (p.ticker) p.ticker, p.price
           FROM prices p
           JOIN latest l ON p.ticker = l.ticker AND p.date < l.date
+          WHERE p.date <= $2::date
           ORDER BY p.ticker, p.date DESC
         )
         SELECT l.ticker, l.price AS last_price, p.price AS prev_price
         FROM latest l
         LEFT JOIN prev p ON l.ticker = p.ticker`,
-        [tickerList],
+        [tickerList, actualDate],
       );
 
       const priceMap = new Map<
@@ -156,9 +158,16 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
         const p = priceMap.get(row.asset);
         if (p) {
           row.last_price = p.last_price;
-          if (p.prev_price !== null && p.prev_price !== undefined) {
-            row.day_gain_usd =
-              (p.last_price - p.prev_price) * row.net_quantity;
+          if (
+            p.prev_price !== null &&
+            p.prev_price !== undefined &&
+            p.prev_price > 0
+          ) {
+            // Use price-ratio × current value_usd so foreign stocks
+            // get USD-correct day gain without a separate FX-rate fetch.
+            // value_usd already incorporates FX conversion per portfolio_allocation_sql.
+            const priceRatio = p.last_price / p.prev_price;
+            row.day_gain_usd = row.value_usd - row.value_usd / priceRatio;
           }
         }
       }
