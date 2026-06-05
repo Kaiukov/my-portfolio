@@ -16,6 +16,8 @@ export interface AllocationRow {
   allocation_pct: number;
   sector?: string;
   sector_weights?: SectorWeight[];
+  last_price?: number;
+  day_gain_usd?: number;
 }
 
 export interface AllocationResult {
@@ -110,6 +112,60 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
       sector_weights: parsedSectorWeights ?? fallback?.sector_weights,
     };
   });
+
+  // Fetch last prices and previous close for day-change calculation
+  const priceCandidates = allocRows.filter((r) => r.net_quantity > 0);
+  if (priceCandidates.length > 0) {
+    try {
+      const tickerList = priceCandidates.map((r) => r.asset);
+      const priceRows = await query<{
+        ticker: string;
+        last_price: number;
+        prev_price: number | null;
+      }>(
+        `WITH latest AS (
+          SELECT DISTINCT ON (ticker) ticker, price, date
+          FROM prices
+          WHERE ticker = ANY($1::varchar[])
+          ORDER BY ticker, date DESC
+        ),
+        prev AS (
+          SELECT DISTINCT ON (p.ticker) p.ticker, p.price
+          FROM prices p
+          JOIN latest l ON p.ticker = l.ticker AND p.date < l.date
+          ORDER BY p.ticker, p.date DESC
+        )
+        SELECT l.ticker, l.price AS last_price, p.price AS prev_price
+        FROM latest l
+        LEFT JOIN prev p ON l.ticker = p.ticker`,
+        [tickerList],
+      );
+
+      const priceMap = new Map<
+        string,
+        { last_price: number; prev_price: number | null }
+      >();
+      for (const pr of priceRows) {
+        priceMap.set(pr.ticker, {
+          last_price: pr.last_price,
+          prev_price: pr.prev_price,
+        });
+      }
+
+      for (const row of allocRows) {
+        const p = priceMap.get(row.asset);
+        if (p) {
+          row.last_price = p.last_price;
+          if (p.prev_price !== null && p.prev_price !== undefined) {
+            row.day_gain_usd =
+              (p.last_price - p.prev_price) * row.net_quantity;
+          }
+        }
+      }
+    } catch {
+      // Graceful degradation — prices are best-effort enrichment
+    }
+  }
 
   const portfolio_value = allocRows.reduce((sum, r) => sum + r.value_usd, 0);
 

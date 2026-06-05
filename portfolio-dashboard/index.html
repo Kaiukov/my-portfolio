@@ -139,7 +139,6 @@ th:first-child,td:first-child{text-align:left}
       <table id="holdings"><thead><tr>
         <th>Asset</th><th>Kind</th><th>Shares</th><th>Last</th><th>Market value</th><th>Day</th><th>Alloc %</th>
       </tr></thead><tbody></tbody></table></div>
-      <div class="note">Shares / Last / Day are placeholders — current REST API exposes value &amp; allocation only; a per-holding endpoint is prep work (#218 / PR #219).</div>
     </div>
   </div>
 
@@ -273,9 +272,9 @@ el('holdings').querySelector('tbody').innerHTML=arows.map(r=>{
   return '<tr><td data-label="Asset" class="col-name"><b>'+r.asset+'</b></td>'
    +'<td data-label="Kind"><span class="tag" style="background:'+c+'22;color:'+c+'">'+r.asset_kind+'</span></td>'
    +'<td data-label="Shares" class="muted-col mobile-hide">'+(r.net_quantity!=null?Number(r.net_quantity).toLocaleString('en-US',{maximumFractionDigits:4}):'—')+'</td>'
-   +'<td data-label="Last" class="muted-col mobile-hide">—</td>'
+   +'<td data-label="Last" class="muted-col mobile-hide">'+(r.last_price!=null?'$'+Number(r.last_price).toFixed(2):'—')+'</td>'
    +'<td data-label="Market value">'+usd(r.value_usd)+'</td>'
-   +'<td data-label="Day" class="muted-col mobile-hide">—</td>'
+   +'<td data-label="Day" class="muted-col mobile-hide">'+(r.day_gain_usd!=null?usd(r.day_gain_usd):'—')+'</td>'
    +'<td data-label="Alloc %" class="col-alloc">'+r.allocation_pct.toFixed(1)+'%</td></tr>';
 }).join('');
 
