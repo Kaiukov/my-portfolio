@@ -189,3 +189,9 @@ Every calculation bug fix needs:
 - `portfolio-ts/PARITY.md` - command parity and dropped legacy commands
 - `portfolio_db/sql/*` - PostgreSQL schema and financial source of truth; do not modify casually
 - `docs/transaction-spec.md`, `docs/api-response-standardization-plan.md` - output and behavior specs
+
+
+## Server for test 
+
+- ssh to `root@dev` 
+- PROD server is `root@192.168.1.104` deploy only by user permission.
