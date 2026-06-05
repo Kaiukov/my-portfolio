@@ -35,7 +35,7 @@ const snapshot: DashboardSnapshot = {
     as_of_date: "2026-06-03",
   },
   allocation_rows: [
-    { asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 50, value_usd: 9750.0, allocation_pct: 24.375 },
+    { asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 50, value_usd: 9750.0, allocation_pct: 24.375, sector: "Technology" },
   ],
   cash_rows: [
     { cash_key: "usd", currency: "USD", display_bucket: "USD Cash", balance: 2500.75, usd_value: 2500.75 },

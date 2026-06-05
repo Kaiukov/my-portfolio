@@ -2,10 +2,13 @@ import { describe, expect, test, mock, jest } from "bun:test";
 
 const mockQuerySingle = mock();
 const mockQuery = mock();
+const mockGetAssetMetadata: any = mock(async () => []);
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
+  getAssetMetadata: mockGetAssetMetadata,
+  upsertAssetMetadata: mock(async () => {}),
   connect: () => {},
   close: () => {},
 }));
@@ -98,6 +101,107 @@ describe("getAllocation", () => {
       expect(row).toHaveProperty("value_usd");
       expect(row).toHaveProperty("allocation_pct");
     }
+  });
+
+  test("allocated ETF rows include sector_weights from asset metadata", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ asset: "VTI", asset_type: "etf", asset_kind: "equity", value_usd: 50000, allocation_pct: 50 }),
+    ]);
+    mockGetAssetMetadata.mockResolvedValue([
+      {
+        asset: "VTI",
+        asset_kind: "etf",
+        sector: null,
+        industry: null,
+        region: "United States",
+        sector_weights: [
+          { sector: "Technology", weight: 30 },
+          { sector: "Financial Services", weight: 15 },
+        ],
+        source: "yahoo",
+        fetched_at: "2026-06-01T00:00:00Z",
+        is_stale: false,
+      },
+    ]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].asset).toBe("VTI");
+    expect(result.rows[0].sector).toBeUndefined();
+    expect(result.rows[0].sector_weights).toBeDefined();
+    expect(result.rows[0].sector_weights!.length).toBe(2);
+    expect(result.rows[0].sector_weights![0].sector).toBe("Technology");
+    expect(result.rows[0].sector_weights![0].weight).toBe(30);
+  });
+
+  test("sector from metadata is reflected on direct holdings", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ asset: "AAPL", asset_type: "stock", asset_kind: "equity", value_usd: 9750, allocation_pct: 24.375 }),
+    ]);
+    mockGetAssetMetadata.mockResolvedValue([
+      {
+        asset: "AAPL",
+        asset_kind: "stock",
+        sector: "Technology",
+        industry: "Consumer Electronics",
+        region: "United States",
+        sector_weights: null,
+        source: "yahoo",
+        fetched_at: "2026-06-01T00:00:00Z",
+        is_stale: false,
+      },
+    ]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].sector).toBe("Technology");
+    expect(result.rows[0].sector_weights).toBeUndefined();
+  });
+
+  test("handles JSON-string sector_weights from DB", async () => {
+    mockQuery.mockResolvedValue([
+      makeRow({ asset: "SPY", asset_type: "etf", asset_kind: "equity", value_usd: 30000, allocation_pct: 60 }),
+    ]);
+    mockGetAssetMetadata.mockResolvedValue([
+      {
+        asset: "SPY",
+        asset_kind: "etf",
+        sector: null,
+        industry: null,
+        region: null,
+        sector_weights: JSON.stringify([
+          { sector: "Technology", weight: 28 },
+          { sector: "Healthcare", weight: 13 },
+        ]),
+        source: "yahoo",
+        fetched_at: "2026-06-01T00:00:00Z",
+        is_stale: false,
+      },
+    ]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].sector).toBeUndefined();
+    expect(result.rows[0].sector_weights).toBeDefined();
+    expect(result.rows[0].sector_weights!.length).toBe(2);
+  });
+
+  test("no metadata returns allocation rows without sector info", async () => {
+    mockQuery.mockResolvedValue([makeRow()]);
+    mockGetAssetMetadata.mockResolvedValue([]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].sector).toBeUndefined();
+    expect(result.rows[0].sector_weights).toBeUndefined();
   });
 });
 

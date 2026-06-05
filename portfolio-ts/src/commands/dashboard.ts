@@ -27,6 +27,8 @@ export interface DashboardSnapshot {
     net_quantity: number;
     value_usd: number;
     allocation_pct: number;
+    sector?: string;
+    sector_weights?: Array<{ sector: string; weight: number }>;
   }>;
   cash_rows: Array<{
     cash_key: string;
@@ -107,6 +109,8 @@ export async function buildDashboardSnapshotFromContext(
       net_quantity: r.net_quantity,
       value_usd: r.value_usd,
       allocation_pct: r.allocation_pct,
+      sector: r.sector,
+      sector_weights: r.sector_weights,
     }),
   );
 
