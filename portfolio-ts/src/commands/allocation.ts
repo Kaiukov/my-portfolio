@@ -119,6 +119,8 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
   if (priceCandidates.length > 0) {
     try {
       const tickerList = priceCandidates.map((r) => r.asset);
+      const tickerPlaceholders = tickerList.map((_, i) => `$${i + 1}`).join(", ");
+      const dateParamIdx = tickerList.length + 1;
       const priceRows = await query<{
         ticker: string;
         last_price: number;
@@ -127,20 +129,20 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
         `WITH latest AS (
           SELECT DISTINCT ON (ticker) ticker, price, date
           FROM prices
-          WHERE ticker = ANY($1::varchar[]) AND date <= $2::date
+          WHERE ticker = ANY(ARRAY[${tickerPlaceholders}]::varchar[]) AND date <= $${dateParamIdx}::date
           ORDER BY ticker, date DESC
         ),
         prev AS (
           SELECT DISTINCT ON (p.ticker) p.ticker, p.price
           FROM prices p
           JOIN latest l ON p.ticker = l.ticker AND p.date < l.date
-          WHERE p.date <= $2::date
+          WHERE p.date <= $${dateParamIdx}::date
           ORDER BY p.ticker, p.date DESC
         )
         SELECT l.ticker, l.price AS last_price, p.price AS prev_price
         FROM latest l
         LEFT JOIN prev p ON l.ticker = p.ticker`,
-        [tickerList, actualDate],
+        [...tickerList, actualDate],
       );
 
       const priceMap = new Map<

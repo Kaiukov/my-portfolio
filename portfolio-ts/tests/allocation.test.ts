@@ -254,7 +254,7 @@ describe("getAllocation", () => {
       // Price query — verify it receives the date param
       expect(params).toHaveLength(2);
       expect(params[1]).toBe("2026-01-15");
-      expect(sql).toContain("date <= $2::date");
+      expect(sql).toContain("ARRAY[$1]::varchar[]");
       return [{ ticker: "AAPL", last_price: 155, prev_price: 150 }];
     });
 
