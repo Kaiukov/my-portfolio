@@ -23,6 +23,7 @@ import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { getDecomposition } from "../commands/decomposition.js";
 import { getProjection } from "../commands/projection.js";
 import { getWithdrawal } from "../commands/withdrawal.js";
+import { getAssetAnalysis } from "../commands/asset_analysis.js";
 import { strField, intField, floatField } from "./adapter.js";
 
 type JsonObject = Record<string, unknown>;
@@ -231,6 +232,33 @@ export async function mcpRead(
         inflationRate,
       });
       return success("withdrawal", data);
+    }
+
+    if (toolName === "asset_analysis") {
+      const ticker = strField(args, "ticker");
+      const asset = strField(args, "asset");
+      if (!ticker && !asset) {
+        return error("asset_analysis", "VALIDATION_ERROR", "ticker or asset is required");
+      }
+      const period = strField(args, "period");
+      const lookbackDays = intField(args, "lookback_days", "lookbackDays");
+      const benchmark = strField(args, "benchmark");
+      const asOfDate =
+        strField(args, "as_of") ??
+        strField(args, "as_of_date") ??
+        strField(args, "asOf") ??
+        strField(args, "asOfDate");
+      const riskFreeRate = floatField(args, "risk_free_rate", "riskFreeRate");
+      const data = await getAssetAnalysis({
+        ticker,
+        asset,
+        period: period as Parameters<typeof getAssetAnalysis>[0]["period"],
+        lookbackDays,
+        benchmark,
+        asOfDate,
+        riskFreeRate,
+      });
+      return success("asset_analysis", data);
     }
 
     return error("mcp", "NOT_FOUND", `Unsupported MCP read tool: ${toolName}`);

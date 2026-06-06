@@ -7,6 +7,7 @@
 |---|---|
 | 2026-02-13 | Initial draft |
 | 2026-02-13 | Added pagination for `transactions` and `report`; date range filters; eliminated all plain-text / markdown output |
+| 2026-06-06 | Documented `asset_analysis` partial-data issue contract and adapter option parity |
 
 ---
 
@@ -220,6 +221,59 @@ portfolio report --start-date 2024-11-01 --end-date 2024-11-30
   "rows_imported": 142,
   "source": "path/to/file.csv",
   "db": "path/to/portfolio.db"
+}
+```
+
+### `asset_analysis`
+
+`asset_analysis` is a read-only Yahoo Finance adapter command. It follows the standard success/error envelope and keeps partial-data diagnostics inside `data`, not `meta`.
+
+Success payload notes:
+
+- `data.request` echoes the resolved request contract:
+  - `ticker`
+  - `period`
+  - `lookback_days`
+  - `benchmark`
+  - `tracking_error_benchmark`
+  - `as_of_date`
+  - `risk_free_rate`
+  - `annualization_periods`
+- `data.warnings[]` contains structured non-fatal issues (for example, short lookback windows or unavailable benchmark history)
+- `data.errors[]` contains structured partial-provider failures when the analysis can still be returned
+- Adapter-level failures still use the standard error envelope with `command: "asset_analysis"`
+
+Example partial-data shape:
+
+```json
+{
+  "ok": true,
+  "command": "asset_analysis",
+  "data": {
+    "request": {
+      "ticker": "SPY",
+      "period": "6mo",
+      "lookback_days": 183,
+      "benchmark": "QQQ",
+      "tracking_error_benchmark": "QQQ",
+      "as_of_date": "2026-06-05",
+      "risk_free_rate": 0.03,
+      "annualization_periods": 252
+    },
+    "warnings": [
+      {
+        "code": "BENCHMARK_METRICS_UNAVAILABLE",
+        "message": "Benchmark-relative metrics are unavailable because QQQ did not return enough data.",
+        "source": "metrics",
+        "field": "benchmark"
+      }
+    ],
+    "errors": []
+  },
+  "meta": {
+    "generated_at": "2026-06-06T12:00:00Z",
+    "count": null
+  }
 }
 ```
 

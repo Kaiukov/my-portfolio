@@ -19,6 +19,7 @@ import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
 import { getDecomposition } from "../commands/decomposition.js";
 import { getProjection } from "../commands/projection.js";
 import { getWithdrawal } from "../commands/withdrawal.js";
+import { getAssetAnalysis } from "../commands/asset_analysis.js";
 import { ValidationError } from "../validators.js";
 import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
@@ -190,7 +191,38 @@ const ROUTES: Record<string, Handler> = {
     });
     return success("withdrawal", data);
   },
+  "/asset_analysis": async (p) => {
+    const ticker = strParam(p, "ticker");
+    const asset = strParam(p, "asset");
+    if (!ticker && !asset) {
+      throw new ValidationError("ticker or asset query parameter is required (e.g. ?ticker=AAPL)");
+    }
+    const period = strParam(p, "period");
+    const lookbackDays = parseIntParam(p, "lookback_days") ?? parseIntParam(p, "lookbackDays");
+    const benchmark = strParam(p, "benchmark");
+    const asOfDate = strParam(p, "as_of") ?? strParam(p, "as_of_date") ?? strParam(p, "asOf");
+    const riskFreeRate = parseFloatParam(p, "risk_free_rate") ?? parseFloatParam(p, "riskFreeRate");
+    const data = await getAssetAnalysis({
+      ticker,
+      asset,
+      period: period as Parameters<typeof getAssetAnalysis>[0]["period"],
+      lookbackDays,
+      benchmark,
+      asOfDate,
+      riskFreeRate,
+    });
+    return success("asset_analysis", data);
+  },
 };
+
+function routeCommandForPath(path: string, method: string): string {
+  if (path === "/transactions") return method === "GET" ? "transactions" : "add";
+  if (path === "/exchange") return "exchange";
+  if (path === "/split") return "split";
+  if (TRANSACTION_ID_ROUTE.test(path)) return method === "DELETE" ? "delete" : "edit";
+  if (path === "/asset_analysis") return "asset_analysis";
+  return "api";
+}
 
 function strParam(p: URLSearchParams, key: string): string | undefined {
   return p.get(key) ?? undefined;
@@ -453,16 +485,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
       return jsonResponse(success("delete", result, result.deleted_ids.length), 200);
     }
   } catch (err) {
-    const routeCommand =
-      path === "/transactions"
-        ? "add"
-        : path === "/exchange"
-          ? "exchange"
-          : path === "/split"
-            ? "split"
-            : TRANSACTION_ID_ROUTE.test(path)
-              ? (req.method === "DELETE" ? "delete" : "edit")
-              : "api";
+    const routeCommand = routeCommandForPath(path, req.method);
     const mapped = toWriteErrorEnvelope(routeCommand, err);
     return jsonResponse(mapped.body, mapped.status);
   }

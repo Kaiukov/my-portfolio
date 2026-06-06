@@ -47,6 +47,21 @@ Auto-recalculate after write: `add`, `edit`, `delete`, `exchange`. Maintenance c
 --period [1y|6m|3m|ytd]  Period filter
 ```
 
+### asset_analysis
+
+```
+--ticker TEXT        Yahoo Finance ticker to analyze
+--asset TEXT         Alias for --ticker
+--period TEXT        One of 1mo, 3mo, 6mo, ytd, 1y, 2y, 3y, 5y
+--lookback-days INT  Explicit analysis window in calendar days (overrides --period)
+--benchmark TEXT     Benchmark ticker for beta/capture/tracking metrics (default: ^GSPC)
+--as-of-date TEXT    Analysis end date in YYYY-MM-DD
+--risk-free-rate FLOAT  Annual decimal risk-free rate used by Sharpe/Sortino (default: 0.0425)
+```
+
+`asset_analysis` is a Yahoo-backed read path and does not require the ticker to exist in portfolio transactions or holdings. Success payloads include structured `data.warnings[]` and `data.errors[]` for partial-data conditions; adapter `meta` does not duplicate those warnings.
+The echoed `data.request` also includes resolved `annualization_periods` so annualized metrics make their market-calendar assumption explicit.
+
 ### add
 
 ```
