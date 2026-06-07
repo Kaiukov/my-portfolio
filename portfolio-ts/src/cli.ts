@@ -52,6 +52,7 @@ import { ValidationError, NotFoundError } from "./validators.js";
 import { getAssetMetadataRecords } from "./commands/asset_metadata.js";
 import { getProjection } from "./commands/projection.js";
 import { getWithdrawal } from "./commands/withdrawal.js";
+import { getAssetAnalysis } from "./commands/asset_analysis.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -100,6 +101,7 @@ Commands:
   backup pull     Restore latest snapshot from S3-compatible storage
   cron            Manage pg_cron scheduled jobs (install / list / remove)
   withdrawal      Safe withdrawal rate / decumulation analysis (--annual-withdrawal, --withdrawal-rate, --time-horizon-years, --expected-return, --inflation-rate, --as-of-date)
+  asset_analysis  Analyze any Yahoo Finance ticker with risk metrics and technical indicators (--ticker/--asset, --period/--lookback-days, --benchmark, --as-of-date, --risk-free-rate)
   api             Start a local read-only REST API server (--port 8787)
   --help          Show this help message
 
@@ -124,6 +126,11 @@ Examples:
 `.trim();
 
 type FlagValue = string | true;
+
+export function normalizeCommandName(command: string): string {
+  if (command === "asset-analysis") return "asset_analysis";
+  return command;
+}
 
 function parseArgs(argv: string[]): { command: string; flags: Map<string, FlagValue> } {
   const args = argv.slice(2);
@@ -172,8 +179,9 @@ function bool(flags: Map<string, FlagValue>, key: string): boolean {
 
 export async function dispatch(argv: string[]): Promise<void> {
   const { command, flags } = parseArgs(argv);
+  const normalizedCommand = normalizeCommandName(command);
 
-  switch (command) {
+  switch (normalizedCommand) {
     case "help": {
       console.log(HELP_TEXT);
       return;
@@ -482,6 +490,32 @@ export async function dispatch(argv: string[]): Promise<void> {
       const maxAgeDays = int(flags, "max-age-days");
       const result = await getHealth(maxAgeDays);
       console.log(JSON.stringify(success("health", result), null, 2));
+      return;
+    }
+
+    case "asset_analysis": {
+      const ticker = str(flags, "ticker");
+      const asset = str(flags, "asset");
+      if (!ticker && !asset) {
+        console.log(JSON.stringify(error("asset_analysis", "VALIDATION_ERROR", "--ticker or --asset is required"), null, 2));
+        process.exit(1);
+        return;
+      }
+      const period = str(flags, "period");
+      const lookbackDays = int(flags, "lookback-days") ?? int(flags, "lookback_days");
+      const benchmark = str(flags, "benchmark");
+      const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      const riskFreeRate = float(flags, "risk-free-rate") ?? float(flags, "risk_free_rate");
+      const data = await getAssetAnalysis({
+        ticker,
+        asset,
+        period: period as Parameters<typeof getAssetAnalysis>[0]["period"],
+        lookbackDays,
+        benchmark,
+        asOfDate,
+        riskFreeRate,
+      });
+      console.log(JSON.stringify(success("asset_analysis", data), null, 2));
       return;
     }
 
@@ -1174,7 +1208,7 @@ if (import.meta.main) {
   loadEnv();
   dispatch(process.argv)
     .catch((err: unknown) => {
-      const cmd = process.argv[2] ?? "_";
+      const cmd = normalizeCommandName(process.argv[2] ?? "_");
       if (err instanceof ValidationError) {
         console.log(JSON.stringify(error(cmd, "VALIDATION_ERROR", err.message), null, 2));
       } else if (err instanceof NotFoundError) {

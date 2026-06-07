@@ -40,6 +40,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | — | `portfolio-ts withdrawal` | **TS-only command** | Read-only safe withdrawal rate / decumulation analysis (#230). Calls `portfolio_withdrawal_sql(as_of_date, annual_withdrawal, withdrawal_rate, time_horizon_years, expected_return, inflation_rate)` — PostgreSQL owns all calculations. Annual simulation with inflation-adjusted end-of-year withdrawals, bisection for max safe withdrawal, deterministic v1 success_likelihood proxy (NOT Monte-Carlo). Supports `--as-of-date`, `--annual-withdrawal`, `--withdrawal-rate`, `--time-horizon-years`, `--expected-return`, `--inflation-rate`. |
 | `portfolio migrate` | — | **intentionally dropped** | Legacy CSV import for initial data load. Project data is now fully in PostgreSQL. Existing transactions were imported before this migration was completed. New transactions are added via `portfolio-ts add`. |
 | — | `portfolio-ts dashboard publish` | **TS-only command** | Maintenance/file-level command. Assembles a richer `DashboardSnapshot` from existing service-layer getters (summary, status, widget, allocation, cash, performance, freshness) and publishes to Cloudflare KV under key `"dashboard"` in the same `PORTFOLIO_KV` namespace. CLI-only (no REST/MCP surface, matching `cloudflare publish`). |
+| — | `portfolio-ts asset_analysis` | **TS-only command** | Read-only asset analytics tool ported from `scripts/yf-analyse-asset.py`, with math and contract fixes applied during the TypeScript port. Fetches Yahoo Finance data and computes risk metrics (beta, Sharpe, Sortino, CAGR, max drawdown, capture ratios, tracking error) and technical indicators (RSI, MACD, MA50/200, stochastic, Williams %R, Stochastic RSI) for arbitrary Yahoo tickers independent of portfolio DB holdings. Supports `--ticker` or `--asset`, `--period` or `--lookback-days`, `--benchmark`, `--as-of-date`, and `--risk-free-rate`. Benchmark-relative metrics use date-key alignment, StochRSI is emitted on a 0..100 scale, MACD signal uses the correctly aligned latest bar, and partial provider failures are returned as structured `warnings[]` / `errors[]` in `data`. Also exposed via `GET /asset_analysis` and MCP `asset_analysis`. |
 
 ## Validation results (live against PostgreSQL)
 
@@ -101,6 +102,7 @@ matching the JSON envelope contract of the CLI and HTTP API exactly.
 | `rebalance` | `rebalance` | `GET /rebalance` | — | Identical envelope to CLI and API; requires `target` param |
 | `decomposition` | `decomposition` | `GET /decomposition` | Yes | Identical envelope to CLI and API |
 | `withdrawal` | `withdrawal` | `GET /withdrawal` | — | Identical envelope to CLI and API |
+| `asset_analysis` | `asset_analysis` | `GET /asset_analysis` | — | Fetches Yahoo Finance data for arbitrary tickers; supports ticker/asset, period or lookback, benchmark, as_of, and risk_free_rate; returns risk metrics + technicals with structured partial issues |
 
 All MCP read tools reuse the existing service-layer functions from `src/commands/*.ts`.
 No business logic is duplicated in the MCP adapter. Error handling maps through the
@@ -129,5 +131,4 @@ Files preserved in `portfolio_db/sql/`:
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
-
 

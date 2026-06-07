@@ -50,6 +50,7 @@ All commands are pure JSON. No plain text, no tables, no markdown output.
 | `health` | DB reachability, stale data, price coverage diagnostics | No |
 | `verify_prices` | Price coverage diagnostics (read-only) | No |
 | `widget` | Compact portfolio JSON (see `docs/widget-contract.md`) | No |
+| `asset_analysis` | Risk metrics + technical indicators for any Yahoo Finance ticker, independent of portfolio holdings | No |
 
 #### Mutations (auto-recalculate after write)
 
@@ -128,6 +129,7 @@ Each returns the same JSON envelope as the CLI, reusing the same PostgreSQL-owne
 | GET | `/performance` | `performance` | TWR, CAGR, Sharpe, MDD, benchmark comparison |
 | GET | `/mwr` | `mwr` | Money-weighted return (XIRR) |
 | GET | `/verify_prices` | `verify_prices` | Price coverage diagnostics (read-only) |
+| GET | `/asset_analysis` | `asset_analysis` | Yahoo-backed asset analytics for arbitrary tickers |
 
 Note: the read-only `transactions` command currently has no GET endpoint in server.ts — use the CLI for transaction listing. The `/ready` endpoint (GET) is a health-check probe, not a CLI command mapping.
 
@@ -142,6 +144,13 @@ Common parameters mapped from CLI flags:
 | `--from-date` | `?from_date=` | `performance` |
 | `--period` | `?period=` | `performance` |
 | `--max-age-days` | `?max_age_days=` | `health`, `verify_prices` |
+| `--ticker` / `--asset` | `?ticker=` / `?asset=` | `asset_analysis` |
+| `--period` / `--lookback-days` | `?period=` / `?lookback_days=` | `asset_analysis` |
+| `--benchmark` | `?benchmark=` | `asset_analysis` |
+| `--as-of-date` | `?as_of=` | `asset_analysis` |
+| `--risk-free-rate` | `?risk_free_rate=` | `asset_analysis` |
+
+`asset_analysis` intentionally remains outside the portfolio DB read path: it may call Yahoo Finance for the requested symbol and benchmark, and it does not require the ticker to exist in holdings or transactions. Partial provider issues are returned in `data.warnings[]` and `data.errors[]`; the adapter `meta` envelope stays free of duplicated warnings. The echoed `data.request` includes resolved `annualization_periods`.
 
 ### Write Endpoints
 
@@ -200,6 +209,7 @@ All read tools return the same JSON envelope as the CLI and HTTP API (`response.
 | `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
 | `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
 | `widget` | `widget` | `days` | `as_of` / `asOf` | — |
+| `asset_analysis` | `asset_analysis` | — | `ticker` / `asset`, `period`, `lookback_days` / `lookbackDays`, `benchmark`, `as_of` / `asOf`, `risk_free_rate` / `riskFreeRate` | — |
 
 ### Write Tools
 
