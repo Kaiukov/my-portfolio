@@ -1,7 +1,7 @@
 # Issue #226 Performance / Financial Correctness Audit
 
 Fixture: `portfolio-ts/tests/fixtures/audit_portfolio.sql`  
-Independent reference: `scripts/audit/reference.py`  
+Independent reference: `scripts/audit/reference.py` (removed in #264; see git history)  
 Expected values: `scripts/audit/expected.json`  
 Range: `2024-01-02` through `2026-01-05`; benchmark `SPY`; USD-only; risk-free rate `2.0%`; inflation `2.5%`.
 
