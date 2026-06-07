@@ -24,14 +24,9 @@
  *   Numerically: when |r| < 1e-14 the zero-return branch avoids
  *   catastrophic cancellation in (1+r)ⁿ − 1.
  *
- * Inverse (goal mode) — solve for n given target T:
- *   T = P₀·(1+r)ⁿ + C·[(1+r)ⁿ − 1] / r
- *   T·r = P₀·r·(1+r)ⁿ + C·(1+r)ⁿ − C
- *   T·r + C = (1+r)ⁿ·(P₀·r + C)
- *   (1+r)ⁿ = (T·r + C) / (P₀·r + C)
- *   n = ln[(T·r + C) / (P₀·r + C)] / ln(1+r)
- *
- *   r = 0 case:  n = (T − P₀) / C
+ * Inverse (goal mode) — search for the first month where nominal FV meets the
+ * target inflated to that month. The SQL path uses the same month-by-month
+ * recurrence so the TS reference stays aligned with the production function.
  *
  * Asymptotic bound for negative r:
  *   lim_{n→∞} FV(n) = C / |r|
@@ -41,6 +36,9 @@
  * Two engines:
  *   getProjection()  — SQL-backed (portfolio_projection_sql), for API/MCP compatibility
  *   computeProjection() — pure TypeScript, month-by-month with multiple modes
+ *
+ * Goal mode treats `target` as today's dollars and inflates it to the goal
+ * month using `inflationRate` before comparing against nominal FV.
  */
 
 import { querySingle } from "../db.js";
@@ -193,10 +191,6 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function round6(n: number): number {
-  return Math.round(n * 1_000_000) / 1_000_000;
-}
-
 export function annualToMonthly(annualRatePct: number): number {
   const R = annualRatePct / 100;
   return Math.pow(1 + R, 1 / 12) - 1;
@@ -215,35 +209,15 @@ function futureValue(P0: number, monthlyRate: number, contribution: number, mont
   return P0 * growth + contribution * (growth - 1) / monthlyRate;
 }
 
-function monthsForTarget(
-  P0: number,
-  monthlyRate: number,
-  contribution: number,
-  target: number,
-): number {
-  if (target <= P0) return 0;
-
-  if (Math.abs(monthlyRate) < EPSILON) {
-    if (contribution <= 0) return Infinity;
-    return (target - P0) / contribution;
-  }
-
-  const P0r_C = P0 * monthlyRate + contribution;
-  const Tr_C = target * monthlyRate + contribution;
-
-  if (P0r_C <= 0) return Infinity;
-
-  const ratio = Tr_C / P0r_C;
-  if (ratio <= 0) return Infinity;
-
-  return Math.log(ratio) / Math.log(1 + monthlyRate);
-}
-
 function maxAchievable(P0: number, monthlyRate: number, contribution: number): number {
   if (monthlyRate >= 0) return Infinity;
 
   const bound = contribution / Math.abs(monthlyRate);
   return Math.max(P0, bound);
+}
+
+function inflatedGoalTarget(target: number, inflationRate: number, months: number): number {
+  return target * Math.pow(1 + inflationRate, months / 12);
 }
 
 export interface ComputeProjectionInput {
@@ -255,6 +229,7 @@ export interface ComputeProjectionInput {
   mode?: ProjectionMode;
   target?: number;
   maxMonths?: number;
+  inflationRate?: number;
 }
 
 export async function computeProjection(input: ComputeProjectionInput): Promise<ProjectionResult> {
@@ -268,8 +243,9 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
   }
 
   const annualRatePct = input.annualRatePct ?? 7.0;
-  const monthlyRate = round6(annualToMonthly(annualRatePct));
+  const monthlyRate = annualToMonthly(annualRatePct);
   const C = input.contribution ?? 0;
+  const inflationRate = input.inflationRate ?? 0;
 
   const base: ProjectionBase = {
     mode,
@@ -301,32 +277,33 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
       };
     }
 
-    if (!Number.isFinite(achievable) || target <= achievable) {
-      const rawN = monthsForTarget(P0, monthlyRate, C, target);
-      if (!Number.isFinite(rawN) || rawN > maxMonths) {
-        const fvAt = futureValue(P0, monthlyRate, C, maxMonths);
-        return {
-          ...base,
-          mode: "goal",
-          target,
-          feasible: false,
-          months_needed: null,
-          projected_value: round2(fvAt),
-          max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
-        };
-      }
-
-      const n = Math.ceil(rawN);
-      const fvAt = futureValue(P0, monthlyRate, C, n);
+    if (Number.isFinite(achievable) && target > achievable) {
+      const fvAt = futureValue(P0, monthlyRate, C, maxMonths);
       return {
         ...base,
         mode: "goal",
         target,
-        feasible: true,
-        months_needed: n,
+        feasible: false,
+        months_needed: null,
         projected_value: round2(fvAt),
-        max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
+        max_achievable: round2(achievable),
       };
+    }
+
+    for (let n = 1; n <= maxMonths; n += 1) {
+      const fvAt = futureValue(P0, monthlyRate, C, n);
+      const goalAtN = inflatedGoalTarget(target, inflationRate, n);
+      if (fvAt >= goalAtN) {
+        return {
+          ...base,
+          mode: "goal",
+          target,
+          feasible: true,
+          months_needed: n,
+          projected_value: round2(fvAt),
+          max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
+        };
+      }
     }
 
     const fvAt = futureValue(P0, monthlyRate, C, maxMonths);
@@ -337,7 +314,7 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
       feasible: false,
       months_needed: null,
       projected_value: round2(fvAt),
-      max_achievable: round2(achievable),
+      max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
     };
   }
 

@@ -46,6 +46,55 @@ describe("Withdrawal — SQL row mapping", () => {
   });
 });
 
+function simulateWithdrawal(
+  portfolioValue: number,
+  annualWithdrawal: number,
+  expectedReturn: number,
+  inflationRatePct: number,
+  horizonYears: number,
+) {
+  const inflation = inflationRatePct / 100;
+  let value = portfolioValue;
+  let yearsUntilDepletion: number | null = null;
+  let totalWithdrawn = 0;
+  let terminalValueAtDepletion = value;
+
+  for (let year = 1; year <= horizonYears; year += 1) {
+    const withdrawal = annualWithdrawal * Math.pow(1 + inflation, year - 1);
+    const previousValue = value;
+    value = value * (1 + expectedReturn) - withdrawal;
+
+    if (yearsUntilDepletion === null) {
+      totalWithdrawn += withdrawal;
+    }
+
+    if (yearsUntilDepletion === null && value <= 0) {
+      if (value === 0) {
+        yearsUntilDepletion = year;
+      } else if (previousValue > 0) {
+        yearsUntilDepletion = (year - 1) + previousValue / (previousValue - value);
+      } else {
+        yearsUntilDepletion = year;
+      }
+
+      const fraction = Math.max(0, Math.min(1, yearsUntilDepletion - (year - 1)));
+      totalWithdrawn = totalWithdrawn - withdrawal + withdrawal * fraction;
+      terminalValueAtDepletion = 0;
+    }
+  }
+
+  if (yearsUntilDepletion === null) {
+    terminalValueAtDepletion = value;
+  }
+
+  return {
+    yearsUntilDepletion,
+    terminalValue: value,
+    totalWithdrawn,
+    returnGenerated: terminalValueAtDepletion - portfolioValue + totalWithdrawn,
+  };
+}
+
 // ── Hand-calculated recurrence tests (v1 deterministic single-path) ──
 // Recurrence: V_0 = PV, V_t = V_{t-1} * (1+r) - W0 * (1+infl)^(t-1)
 // Withdrawal at END of year, inflation-adjusted.
@@ -64,6 +113,14 @@ describe("Withdrawal — hand-calculated recurrence", () => {
     }
     // Classic 4% rule: ~95% success historically, should survive 30yr at 6% real
     expect(V).toBeGreaterThan(-1); // positive or near-zero terminal
+  });
+
+  test("fractional depletion fixture matches corrected total_withdrawn and return_generated", () => {
+    const result = simulateWithdrawal(100000, 15000, 0.05, 3.0, 10);
+
+    expect(result.yearsUntilDepletion).toBeCloseTo(7.43138026, 5);
+    expect(result.totalWithdrawn).toBeCloseTo(122895.08, 2);
+    expect(result.returnGenerated).toBeCloseTo(22895.08, 2);
   });
 
   test("fast-depletes: 15% withdrawal rate, 5% return, 3% infl, 10yr", () => {
@@ -267,6 +324,46 @@ describe("Withdrawal — CLI integration (mocked DB)", () => {
       expect(output.data.years_until_depletion).toBe(22.3);
       expect(output.data.success_likelihood).toBe(89.2);
       expect(output.data.shortfall_risk).toBe(10.8);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  test("dispatches corrected fractional-depletion snapshot", async () => {
+    setupWithdrawal({
+      annual_withdrawal: 15000,
+      withdrawal_rate_pct: 15.0,
+      time_horizon_years: 10,
+      expected_return: 0.05,
+      inflation_rate: 3.0,
+      years_until_depletion: 7.430682,
+      terminal_value: -12345.67,
+      success_likelihood: 74.30682,
+      max_safe_withdrawal: 20000,
+      max_safe_withdrawal_rate: 20.0,
+      total_withdrawn: 122895.08,
+      return_generated: 22895.08,
+      shortfall_risk: 25.69318,
+    });
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "withdrawal",
+        "--annual-withdrawal", "15000",
+        "--time-horizon-years", "10",
+        "--expected-return", "0.05",
+        "--inflation-rate", "3.0",
+      ]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.command).toBe("withdrawal");
+      expect(output.data.annual_withdrawal).toBe(15000);
+      expect(output.data.years_until_depletion).toBeCloseTo(7.430682, 6);
+      expect(output.data.total_withdrawn).toBeCloseTo(122895.08, 2);
+      expect(output.data.return_generated).toBeCloseTo(22895.08, 2);
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();
