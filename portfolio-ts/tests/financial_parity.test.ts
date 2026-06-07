@@ -2,8 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { getSql } from "../src/db.js";
 import { runTx } from "../src/tx.js";
 import { annualToMonthly, computeProjection } from "../src/commands/projection.js";
+import type { AccumulationProjection, GoalProjection, ProjectionResult } from "../src/commands/projection.js";
 
 const EPSILON = 1e-6;
+
+type TxContext = {
+  unsafe: (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
+};
 
 function n(value: unknown): number {
   const parsed = Number(value);
@@ -11,6 +16,20 @@ function n(value: unknown): number {
     throw new Error(`expected finite number, got ${String(value)}`);
   }
   return parsed;
+}
+
+function asAccumulationProjection(result: ProjectionResult): AccumulationProjection {
+  if (result.mode !== "accumulation") {
+    throw new Error(`expected accumulation projection, got ${result.mode}`);
+  }
+  return result;
+}
+
+function asGoalProjection(result: ProjectionResult): GoalProjection {
+  if (result.mode !== "goal") {
+    throw new Error(`expected goal projection, got ${result.mode}`);
+  }
+  return result;
 }
 
 function solveRequiredReturnRate(
@@ -103,7 +122,7 @@ describe("financial parity", () => {
   const runDb = test.if(dbUrl !== undefined && dbUrl !== "");
 
   runDb("projection SQL and TS match on the corrected accumulation fixture", async () => {
-    await runTx(async ({ unsafe }) => {
+    await runTx(async ({ unsafe }: TxContext) => {
       await unsafe(`
         CREATE OR REPLACE FUNCTION pg_temp.portfolio_status_sql(p_as_of_date DATE)
         RETURNS TABLE (portfolio_value DOUBLE PRECISION)
@@ -123,13 +142,13 @@ describe("financial parity", () => {
       );
 
       const row = rows[0] as Record<string, unknown>;
-      const ts = await computeProjection({
+      const ts = asAccumulationProjection(await computeProjection({
         currentValue: 100000,
         months: 120,
         contribution: 1000,
         annualRatePct: 12.0,
         mode: "accumulation",
-      });
+      }));
 
       expect(n(row.projected_value_nominal)).toBeCloseTo(ts.projected_value, 2);
       expect(n(row.total_contributions)).toBeCloseTo(ts.total_contributions, 2);
@@ -139,7 +158,7 @@ describe("financial parity", () => {
   });
 
   runDb("projection goal mode inflates the target before month search and solver", async () => {
-    await runTx(async ({ unsafe }) => {
+    await runTx(async ({ unsafe }: TxContext) => {
       await unsafe(`
         CREATE OR REPLACE FUNCTION pg_temp.portfolio_status_sql(p_as_of_date DATE)
         RETURNS TABLE (portfolio_value DOUBLE PRECISION)
@@ -159,7 +178,7 @@ describe("financial parity", () => {
       );
 
       const row = rows[0] as Record<string, unknown>;
-      const ts = await computeProjection({
+      const ts = asGoalProjection(await computeProjection({
         currentValue: 100000,
         months: 120,
         contribution: 1000,
@@ -168,10 +187,10 @@ describe("financial parity", () => {
         target: 250000,
         maxMonths: 1200,
         inflationRate: 0.03,
-      });
+      }));
 
       expect(n(row.years_to_goal)).toBeCloseTo((ts.months_needed ?? 0) / 12, 10);
-      expect(n(row.projected_goal_value)).toBeCloseTo(n(ts.projected_value), 2);
+      expect(n(row.projected_goal_value)).toBeCloseTo(ts.projected_value ?? 0, 2);
       const expectedRequiredReturnRate = solveRequiredReturnRate(100000, 1000, 10, 0.03, 250000);
       expect(expectedRequiredReturnRate).not.toBeNull();
       expect(n(row.required_return_rate)).toBeCloseTo(expectedRequiredReturnRate!, 6);
@@ -180,7 +199,7 @@ describe("financial parity", () => {
   });
 
   runDb("withdrawal SQL and TS match on the fractional depletion fixture", async () => {
-    await runTx(async ({ unsafe }) => {
+    await runTx(async ({ unsafe }: TxContext) => {
       await unsafe(`
         CREATE OR REPLACE FUNCTION pg_temp.portfolio_status_sql(p_as_of_date DATE)
         RETURNS TABLE (
@@ -229,7 +248,7 @@ describe("financial parity", () => {
   });
 
   runDb("decomposition SQL and TS match on the signed split fixture", async () => {
-    await runTx(async ({ unsafe }) => {
+    await runTx(async ({ unsafe }: TxContext) => {
       await unsafe(`
         CREATE TEMP TABLE daily_returns (
           date DATE NOT NULL,
