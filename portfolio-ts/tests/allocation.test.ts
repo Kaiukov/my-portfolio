@@ -241,6 +241,101 @@ describe("getAllocation", () => {
     expect(result.rows[1].sector_weights).toBeUndefined();
     expect(result.rows[2].sector).toBe("FX");
   });
+
+  test("price lookup is capped at as_of_date for historical snapshots", async () => {
+    // First call: allocation rows
+    // Second call: price enrichment
+    let queryCallCount = 0;
+    mockQuery.mockImplementation(async (sql: string, params: unknown[]) => {
+      queryCallCount++;
+      if (queryCallCount === 1) {
+        return [makeRow({ asset: "AAPL", net_quantity: 10, value_usd: 1500 })];
+      }
+      // Price query — verify it receives the date param
+      expect(params).toHaveLength(2);
+      expect(params[1]).toBe("2026-01-15");
+      expect(sql).toContain("ARRAY[$1]::varchar[]");
+      return [{ ticker: "AAPL", last_price: 155, prev_price: 150 }];
+    });
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation("2026-01-15");
+
+    expect(result.as_of_date).toBe("2026-01-15");
+    expect(result.rows[0].last_price).toBe(155);
+    // day_gain_usd = 1500 - 1500 / (155/150) = 1500 - 1451.61 = 48.39
+    expect(result.rows[0].day_gain_usd).toBeCloseTo(48.39, 1);
+  });
+
+  test("day_gain_usd is USD-correct via price-ratio × value_usd (works for foreign stocks)", async () => {
+    let queryCallCount = 0;
+    mockQuery.mockImplementation(async (_sql: string, _params: unknown[]) => {
+      queryCallCount++;
+      if (queryCallCount === 1) {
+        return [makeRow({ asset: "VGEU.DE", asset_type: "stock_eur", net_quantity: 50, value_usd: 5000 })];
+      }
+      // EUR-denominated stock: prices in EUR, but value_usd already FX-converted
+      return [{ ticker: "VGEU.DE", last_price: 110, prev_price: 100 }];
+    });
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    // day_gain_usd = 5000 - 5000 / 1.10 = 5000 - 4545.45 = 454.55
+    // The old (buggy) formula would give: (110-100)*50 = 500 EUR (not USD)
+    expect(result.rows[0].day_gain_usd).toBeCloseTo(454.55, 1);
+  });
+
+  test("null prev_price degrades gracefully — day_gain_usd is undefined", async () => {
+    let queryCallCount = 0;
+    mockQuery.mockImplementation(async (_sql: string, _params: unknown[]) => {
+      queryCallCount++;
+      if (queryCallCount === 1) {
+        return [makeRow({ asset: "NEWCO", net_quantity: 100, value_usd: 2500 })];
+      }
+      return [{ ticker: "NEWCO", last_price: 25, prev_price: null }];
+    });
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows[0].last_price).toBe(25);
+    expect(result.rows[0].day_gain_usd).toBeUndefined();
+  });
+
+  test("zero prev_price degrades gracefully — day_gain_usd is undefined", async () => {
+    let queryCallCount = 0;
+    mockQuery.mockImplementation(async (_sql: string, _params: unknown[]) => {
+      queryCallCount++;
+      if (queryCallCount === 1) {
+        return [makeRow({ asset: "ZEROCO", net_quantity: 10, value_usd: 100 })];
+      }
+      return [{ ticker: "ZEROCO", last_price: 10, prev_price: 0 }];
+    });
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows[0].last_price).toBe(10);
+    expect(result.rows[0].day_gain_usd).toBeUndefined();
+  });
+
+  test("missing price data — last_price and day_gain_usd remain undefined", async () => {
+    let queryCallCount = 0;
+    mockQuery.mockImplementation(async (_sql: string, _params: unknown[]) => {
+      queryCallCount++;
+      if (queryCallCount === 1) {
+        return [makeRow({ asset: "NOPRICE", net_quantity: 5, value_usd: 500 })];
+      }
+      return []; // no price data
+    });
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation();
+
+    expect(result.rows[0].last_price).toBeUndefined();
+    expect(result.rows[0].day_gain_usd).toBeUndefined();
+  });
 });
 
 describe("getAllocation — CLI integration", () => {

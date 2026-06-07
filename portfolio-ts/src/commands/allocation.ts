@@ -16,6 +16,8 @@ export interface AllocationRow {
   allocation_pct: number;
   sector?: string;
   sector_weights?: SectorWeight[];
+  last_price?: number;
+  day_gain_usd?: number;
 }
 
 export interface AllocationResult {
@@ -110,6 +112,71 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
       sector_weights: parsedSectorWeights ?? fallback?.sector_weights,
     };
   });
+
+  // Fetch last prices and previous close for day-change calculation.
+  // Prices are capped at actualDate so historical snapshots stay aligned.
+  const priceCandidates = allocRows.filter((r) => r.net_quantity > 0);
+  if (priceCandidates.length > 0) {
+    try {
+      const tickerList = priceCandidates.map((r) => r.asset);
+      const tickerPlaceholders = tickerList.map((_, i) => `$${i + 1}`).join(", ");
+      const dateParamIdx = tickerList.length + 1;
+      const priceRows = await query<{
+        ticker: string;
+        last_price: number;
+        prev_price: number | null;
+      }>(
+        `WITH latest AS (
+          SELECT DISTINCT ON (ticker) ticker, price, date
+          FROM prices
+          WHERE ticker = ANY(ARRAY[${tickerPlaceholders}]::varchar[]) AND date <= $${dateParamIdx}::date
+          ORDER BY ticker, date DESC
+        ),
+        prev AS (
+          SELECT DISTINCT ON (p.ticker) p.ticker, p.price
+          FROM prices p
+          JOIN latest l ON p.ticker = l.ticker AND p.date < l.date
+          WHERE p.date <= $${dateParamIdx}::date
+          ORDER BY p.ticker, p.date DESC
+        )
+        SELECT l.ticker, l.price AS last_price, p.price AS prev_price
+        FROM latest l
+        LEFT JOIN prev p ON l.ticker = p.ticker`,
+        [...tickerList, actualDate],
+      );
+
+      const priceMap = new Map<
+        string,
+        { last_price: number; prev_price: number | null }
+      >();
+      for (const pr of priceRows) {
+        priceMap.set(pr.ticker, {
+          last_price: pr.last_price,
+          prev_price: pr.prev_price,
+        });
+      }
+
+      for (const row of allocRows) {
+        const p = priceMap.get(row.asset);
+        if (p) {
+          row.last_price = p.last_price;
+          if (
+            p.prev_price !== null &&
+            p.prev_price !== undefined &&
+            p.prev_price > 0
+          ) {
+            // Use price-ratio × current value_usd so foreign stocks
+            // get USD-correct day gain without a separate FX-rate fetch.
+            // value_usd already incorporates FX conversion per portfolio_allocation_sql.
+            const priceRatio = p.last_price / p.prev_price;
+            row.day_gain_usd = row.value_usd - row.value_usd / priceRatio;
+          }
+        }
+      }
+    } catch {
+      // Graceful degradation — prices are best-effort enrichment
+    }
+  }
 
   const portfolio_value = allocRows.reduce((sum, r) => sum + r.value_usd, 0);
 
