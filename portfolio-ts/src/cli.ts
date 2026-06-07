@@ -179,8 +179,9 @@ function bool(flags: Map<string, FlagValue>, key: string): boolean {
 
 export async function dispatch(argv: string[]): Promise<void> {
   const { command, flags } = parseArgs(argv);
+  const normalizedCommand = normalizeCommandName(command);
 
-  switch (command) {
+  switch (normalizedCommand) {
     case "help": {
       console.log(HELP_TEXT);
       return;
@@ -492,8 +493,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       return;
     }
 
-    case "asset_analysis":
-    case "asset-analysis": {
+    case "asset_analysis": {
       const ticker = str(flags, "ticker");
       const asset = str(flags, "asset");
       if (!ticker && !asset) {

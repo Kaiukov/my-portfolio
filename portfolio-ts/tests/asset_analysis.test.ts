@@ -662,6 +662,66 @@ describe("asset analysis adapter parity", () => {
     expect("warnings" in output.meta).toBe(false);
   });
 
+  test("asset-analysis and asset_analysis dispatch through the same normalized CLI path", async () => {
+    const { dispatch } = await import("../src/cli.js");
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = ((value: string) => {
+      logs.push(value);
+    }) as typeof console.log;
+
+    await dispatch([
+      "bun",
+      "src/cli.ts",
+      "asset-analysis",
+      "--ticker",
+      "SPY",
+      "--benchmark",
+      "QQQ",
+      "--as-of-date",
+      "2026-06-05",
+      "--risk-free-rate",
+      "0.03",
+    ]);
+    await dispatch([
+      "bun",
+      "src/cli.ts",
+      "asset_analysis",
+      "--ticker",
+      "SPY",
+      "--benchmark",
+      "QQQ",
+      "--as-of-date",
+      "2026-06-05",
+      "--risk-free-rate",
+      "0.03",
+    ]);
+
+    console.log = originalLog;
+
+    expect(mockGetAssetAnalysis).toHaveBeenCalledTimes(2);
+    expect(mockGetAssetAnalysis).toHaveBeenNthCalledWith(1, {
+      ticker: "SPY",
+      asset: undefined,
+      period: undefined,
+      lookbackDays: undefined,
+      benchmark: "QQQ",
+      asOfDate: "2026-06-05",
+      riskFreeRate: 0.03,
+    });
+    expect(mockGetAssetAnalysis).toHaveBeenNthCalledWith(2, {
+      ticker: "SPY",
+      asset: undefined,
+      period: undefined,
+      lookbackDays: undefined,
+      benchmark: "QQQ",
+      asOfDate: "2026-06-05",
+      riskFreeRate: 0.03,
+    });
+    expect(JSON.parse(logs[0]).command).toBe("asset_analysis");
+    expect(JSON.parse(logs[1]).command).toBe("asset_analysis");
+  });
+
   test("api success passes issue options and keeps warnings out of meta", async () => {
     const { handleRequest } = await import("../src/api/server.js");
     const response = await handleRequest(
