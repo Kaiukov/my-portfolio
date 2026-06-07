@@ -151,7 +151,7 @@ th:first-child,td:first-child{text-align:left}
       <div class="legend" id="alloclegend"></div>
     </div>
     <div class="card">
-      <h3>Sector Allocation</h3>
+      <h3>Equity Sectors <span class="sub" style="font-weight:400">(stocks &amp; ETFs)</span></h3>
       <div class="splitbar" id="sectorbar" style="height:12px"></div>
       <div class="legend" id="sectorlegend"></div>
 
@@ -306,13 +306,18 @@ function secCol(k){
   secColCache[k]=c;
   return c;
 }
-const pvTot=DATA.summary.portfolio_value_usd;
+// Equity-only sector breakdown: asset-class buckets (cash/fx/crypto and the
+// Bonds/Gold/Cash/FX/Crypto sector labels) already live in "allocation by kind",
+// so exclude them here and show only the equity (stock + ETF) sector mix.
+const NON_EQUITY_KINDS=new Set(['cash','fx','crypto']);
+const NON_EQUITY_SECTORS=new Set(['Bonds','Crypto','Gold','Cash','FX']);
 const bySector={};
 function addSectorValue(sector, value){
-  if(!sector || !Number.isFinite(value) || value <= 0) return;
+  if(!sector || NON_EQUITY_SECTORS.has(sector) || !Number.isFinite(value) || value <= 0) return;
   bySector[sector]=(bySector[sector]||0)+value;
 }
 DATA.allocation_rows.forEach(r=>{
+  if(NON_EQUITY_KINDS.has(r.asset_kind)) return;
   const val=Math.max(0,r.value_usd);
   if(!val) return;
   if(r.sector_weights && r.sector_weights.length){
@@ -337,7 +342,23 @@ DATA.allocation_rows.forEach(r=>{
     addSectorValue('Other',val);
   }
 });
-const sectors=Object.entries(bySector).map(([k,v])=>[k,v,v/pvTot*100]).filter(s=>s[2]>=0.05).sort((a,b)=>b[1]-a[1]);
+// Normalize to the equity total so the bar sums to 100% of equities (not the
+// whole portfolio), then collapse the long tail: anything below MIN_PCT or
+// beyond the top TOP_N sectors folds into "Other".
+const eqTot=Object.values(bySector).reduce((a,v)=>a+v,0);
+let sectors=[];
+if(eqTot>0){
+  const MIN_PCT=3, TOP_N=8;
+  let otherVal=0;
+  const keep=[];
+  Object.entries(bySector).forEach(([k,v])=>{
+    if(k==='Other' || v/eqTot*100<MIN_PCT){otherVal+=v;}else{keep.push([k,v]);}
+  });
+  keep.sort((a,b)=>b[1]-a[1]);
+  while(keep.length>TOP_N){otherVal+=keep.pop()[1];}
+  sectors=keep.map(([k,v])=>[k,v,v/eqTot*100]);
+  if(otherVal>0) sectors.push(['Other',otherVal,otherVal/eqTot*100]);
+}
 el('sectorbar').innerHTML=sectors.map(([k,,p])=>'<span style="width:'+p+'%;background:'+secCol(k)+'"></span>').join('');
 el('sectorlegend').innerHTML=sectors.map(([k,v,p])=>{
   const c=secCol(k);
