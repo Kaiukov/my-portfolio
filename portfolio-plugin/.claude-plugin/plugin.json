@@ -1,0 +1,5 @@
+{
+  "name": "portfolio",
+  "description": "My Portfolio CLI — track portfolio value, transactions, performance, and Cloudflare dashboard deployment. Use when the user asks about portfolio tracking, transactions, portfolio value, allocation, performance, dashboard, or Cloudflare publishing.",
+  "version": "0.1.0"
+}
