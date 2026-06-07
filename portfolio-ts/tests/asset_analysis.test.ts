@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import {
   analyzeAsset,
   calculateMacd,
+  calculateMaxDrawdown,
+  calculateMovingAverages,
+  calculateStochastic,
+  calculateUlcerIndex,
   calculateStochRsi,
   createDefaultYahooClient,
   createYahooAssetAnalysisProvider,
@@ -349,6 +353,15 @@ describe("asset analysis metrics", () => {
     expect(metrics.tracking_error).toBeCloseTo(0, 6);
   });
 
+  test("keeps drawdown and ulcer calculations finite when the peak is zero", () => {
+    const prices = [0, 0, 10];
+    const drawdown = calculateMaxDrawdown(prices);
+
+    expect(drawdown.maxDd).toBe(0);
+    expect(drawdown.maxDdDateIdx).toBeNull();
+    expect(calculateUlcerIndex(prices)).toBe(0);
+  });
+
   test("stochrsi stays on a 0..100 scale", () => {
     const closes = Array.from({ length: 120 }, (_, index) => 100 + Math.sin(index / 3) * 12 + Math.cos(index / 5) * 4);
     const result = calculateStochRsi(closes);
@@ -373,6 +386,46 @@ describe("asset analysis metrics", () => {
     expect(actual.macd).toBeCloseTo(macdLine[lastIndex], 8);
     expect(actual.macdSignal).toBeCloseTo(signalLine[lastIndex], 8);
     expect(actual.macdHistogram).toBeCloseTo(macdLine[lastIndex] - signalLine[lastIndex], 8);
+  });
+
+  test("recovers stochastic smoothing after a single NaN bar", () => {
+    const closes = Array.from({ length: 30 }, (_, index) => 100 + index);
+    closes[15] = Number.NaN;
+    const highs = closes.map((close) => (Number.isFinite(close) ? close + 1 : Number.NaN));
+    const lows = closes.map((close) => (Number.isFinite(close) ? close - 1 : Number.NaN));
+
+    const result = calculateStochastic(highs, lows, closes);
+
+    expect(result.stochK).not.toBeNull();
+    expect(result.stochD).not.toBeNull();
+    expect(Number.isFinite(result.stochK!)).toBe(true);
+    expect(Number.isFinite(result.stochD!)).toBe(true);
+  });
+
+  test("guards invalid smoothing spans", () => {
+    const closes = Array.from({ length: 20 }, (_, index) => 100 + index);
+    const highs = closes.map((close) => close + 1);
+    const lows = closes.map((close) => close - 1);
+
+    const macd = calculateMacd(closes, 0, 6, 3);
+    const stochastic = calculateStochastic(highs, lows, closes, 14, 0, 3);
+
+    expect(macd.macd).toBeNull();
+    expect(macd.macdSignal).toBeNull();
+    expect(macd.macdHistogram).toBeNull();
+    expect(stochastic.stochK).toBeNull();
+  });
+
+  test("exposes 50-day averages before 200-day averages are available", () => {
+    const closes = Array.from({ length: 100 }, (_, index) => index + 1);
+    const result = calculateMovingAverages(closes);
+
+    expect(result.ma50).toBeCloseTo(75.5, 10);
+    expect(result.ma200).toBeNull();
+    expect(result.priceVsMa50).toBeCloseTo(((100 - 75.5) / 75.5) * 100, 10);
+    expect(result.priceVsMa200).toBeNull();
+    expect(result.ma50VsMa200).toBeNull();
+    expect(result.maTrend).toBe("Insufficient data");
   });
 
   test("uses elapsed calendar time for sparse-date CAGR output", () => {
@@ -524,6 +577,30 @@ describe("asset analysis command", () => {
     const result = await analyzeAsset({ ticker: "btc-usd" }, provider);
     expect(result.ticker).toBe("BTC-USD");
     expect(result.request.annualization_periods).toBe(252);
+  });
+
+  test("analyzeAsset surfaces reduced alignment counts as warnings", async () => {
+    const assetBars = makeBars("2026-01-01", Array.from({ length: 20 }, (_, index) => 100 + index));
+    const shiftedBenchmarkBars = makeBars("2026-01-11", Array.from({ length: 20 }, (_, index) => 100 + index));
+    const provider: AssetAnalysisProvider = {
+      fetchAnalysisInput: mock(async () => ({
+        ...makeProviderResult(),
+        priceBars: assetBars,
+        historyBars: assetBars,
+        benchmarkBars: shiftedBenchmarkBars,
+        trackingBenchmarkBars: shiftedBenchmarkBars,
+      })),
+    };
+
+    const result = await analyzeAsset({ ticker: "SPY", benchmark: "QQQ", asOfDate: "2026-06-05", riskFreeRate: 0.03 }, provider);
+
+    const benchmarkWarning = result.warnings.find((item: AnalysisIssue) => item.code === "BENCHMARK_ALIGNMENT_REDUCED");
+    const trackingWarning = result.warnings.find((item: AnalysisIssue) => item.code === "TRACKING_ALIGNMENT_REDUCED");
+
+    expect(benchmarkWarning).not.toBeUndefined();
+    expect(benchmarkWarning?.message).toContain("of 19 return observations");
+    expect(trackingWarning).not.toBeUndefined();
+    expect(trackingWarning?.message).toContain("of 19 return observations");
   });
 
   test("analyzeAsset resolves crypto annualization periods from asset kind", async () => {

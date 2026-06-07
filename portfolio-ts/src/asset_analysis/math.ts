@@ -97,6 +97,7 @@ function covariance(xs: number[], ys: number[]): number {
 
 function ema(values: number[], span: number): number[] {
   const result = new Array<number>(values.length).fill(NaN);
+  if (!Number.isFinite(span) || span <= 0) return result;
   const alpha = 2 / (span + 1);
   let seeded = false;
   let previous = 0;
@@ -118,13 +119,19 @@ function ema(values: number[], span: number): number[] {
 
 function sma(values: number[], window: number): number[] {
   const result = new Array<number>(values.length).fill(NaN);
+  if (!Number.isFinite(window) || window <= 0 || !Number.isInteger(window)) return result;
   if (values.length < window) return result;
-  let rolling = 0;
-  for (let index = 0; index < window; index++) rolling += values[index];
-  result[window - 1] = rolling / window;
-  for (let index = window; index < values.length; index++) {
-    rolling += values[index] - values[index - window];
-    result[index] = rolling / window;
+  for (let index = window - 1; index < values.length; index++) {
+    let sum = 0;
+    let count = 0;
+    for (let offset = index - window + 1; offset <= index; offset++) {
+      const value = values[offset];
+      if (!Number.isFinite(value)) continue;
+      sum += value;
+      count += 1;
+    }
+    if (count === 0) continue;
+    result[index] = sum / count;
   }
   return result;
 }
@@ -242,7 +249,7 @@ export function calculateDownsideDeviation(
   const dailyRiskFree = Math.pow(1 + riskFreeRate, 1 / annualizationPeriods) - 1;
   const downside = valid.map((value) => value - dailyRiskFree).filter((value) => value < 0);
   if (downside.length === 0) return 0;
-  return Math.sqrt(downside.reduce((sum, value) => sum + value ** 2, 0) / downside.length) *
+  return Math.sqrt(downside.reduce((sum, value) => sum + value ** 2, 0) / valid.length) *
     Math.sqrt(annualizationPeriods);
 }
 
@@ -278,6 +285,7 @@ export function calculateMaxDrawdown(prices: number[]): {
   for (let index = 0; index < prices.length; index++) {
     const price = prices[index];
     if (price > peak) peak = price;
+    if (Math.abs(peak) < EPSILON) continue;
     const drawdown = (price - peak) / peak;
     if (drawdown < maxDrawdown) {
       maxDrawdown = drawdown;
@@ -288,17 +296,19 @@ export function calculateMaxDrawdown(prices: number[]): {
   return { maxDd: maxDrawdown, maxDdDateIdx: maxDrawdownIndex };
 }
 
+// Utility retained for direct unit coverage; metric code uses calculateCagrFromBars.
 export function calculateCagr(
   prices: number[],
   years: number,
+  annualizationPeriods = TRADING_DAYS,
 ): number | null {
   if (prices.length < 2) return null;
-  const window = Math.min(Math.floor(TRADING_DAYS * years), prices.length - 1);
+  const window = Math.min(Math.floor(annualizationPeriods * years), prices.length - 1);
   if (window < 1) return null;
   const start = prices[prices.length - 1 - window];
   const end = prices[prices.length - 1];
   if (start <= 0) return null;
-  const actualYears = window / TRADING_DAYS;
+  const actualYears = window / annualizationPeriods;
   if (Math.abs(actualYears) < EPSILON) return null;
   return Math.pow(end / start, 1 / actualYears) - 1;
 }
@@ -335,6 +345,7 @@ export function calculateUlcerIndex(prices: number[]): number | null {
   let sumSquares = 0;
   for (const price of prices) {
     if (price > peak) peak = price;
+    if (Math.abs(peak) < EPSILON) continue;
     const drawdownPercent = ((price - peak) / peak) * 100;
     sumSquares += drawdownPercent ** 2;
   }
@@ -405,7 +416,7 @@ export function calculateMovingAverages(closes: number[]): {
   ma50VsMa200: number | null;
   maTrend: string | null;
 } {
-  if (closes.length < 200) {
+  if (closes.length < 50) {
     return {
       ma50: null,
       ma200: null,
@@ -418,10 +429,12 @@ export function calculateMovingAverages(closes: number[]): {
 
   const currentPrice = closes[closes.length - 1];
   const ma50 = mean(closes.slice(-50));
-  const ma200 = mean(closes.slice(-200));
-  const priceVsMa50 = ma50 !== 0 ? ((currentPrice - ma50) / ma50) * 100 : null;
-  const priceVsMa200 = ma200 !== 0 ? ((currentPrice - ma200) / ma200) * 100 : null;
-  const ma50VsMa200 = ma200 !== 0 ? ((ma50 - ma200) / ma200) * 100 : null;
+  const ma200 = closes.length >= 200 ? mean(closes.slice(-200)) : null;
+  const priceVsMa50 = ma50 !== null && Math.abs(ma50) > EPSILON ? ((currentPrice - ma50) / ma50) * 100 : null;
+  const priceVsMa200 = ma200 !== null && Math.abs(ma200) > EPSILON ? ((currentPrice - ma200) / ma200) * 100 : null;
+  const ma50VsMa200 = ma50 !== null && ma200 !== null && Math.abs(ma200) > EPSILON
+    ? ((ma50 - ma200) / ma200) * 100
+    : null;
 
   return {
     ma50,
@@ -429,7 +442,9 @@ export function calculateMovingAverages(closes: number[]): {
     priceVsMa50,
     priceVsMa200,
     ma50VsMa200,
-    maTrend: ma50 > ma200 ? "Golden Cross (Bullish)" : "Death Cross (Bearish)",
+    maTrend: ma50 !== null && ma200 !== null
+      ? (ma50 > ma200 ? "Golden Cross (Bullish)" : "Death Cross (Bearish)")
+      : "Insufficient data",
   };
 }
 

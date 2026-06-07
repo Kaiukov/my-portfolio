@@ -29,6 +29,25 @@ import {
 } from "./math.js";
 import type { AssetType } from "./types.js";
 
+type AlignedSeriesSummary = {
+  assetReturnCount: number;
+  alignedCount: number;
+  retainedRatio: number;
+};
+
+function summarizeAlignment(
+  assetBars: PriceBar[],
+  aligned: { assetReturns: number[]; benchmarkReturns: number[]; dates: string[] },
+): AlignedSeriesSummary {
+  const assetReturnCount = Math.max(0, assetBars.length - 1);
+  const alignedCount = aligned.assetReturns.length;
+  return {
+    assetReturnCount,
+    alignedCount,
+    retainedRatio: assetReturnCount > 0 ? alignedCount / assetReturnCount : 0,
+  };
+}
+
 export function computeAllMetrics(
   priceBars: PriceBar[],
   historyBars: PriceBar[],
@@ -37,7 +56,14 @@ export function computeAllMetrics(
   trackingBenchmarkTicker: string,
   assetType: AssetType,
   riskFreeRate: number,
-): { metrics: RiskMetrics; technicals: TechnicalIndicators } {
+): {
+  metrics: RiskMetrics;
+  technicals: TechnicalIndicators;
+  alignment: {
+    benchmark: AlignedSeriesSummary;
+    tracking: AlignedSeriesSummary;
+  };
+} {
   const closes = priceBars.map((bar) => bar.close);
   const highs = priceBars.map((bar) => bar.high);
   const lows = priceBars.map((bar) => bar.low);
@@ -143,7 +169,14 @@ export function computeAllMetrics(
     stochrsi_signal: stochRsi.stochrsiSignal,
   };
 
-  return { metrics, technicals };
+  return {
+    metrics,
+    technicals,
+    alignment: {
+      benchmark: summarizeAlignment(priceBars, benchmarkAligned),
+      tracking: summarizeAlignment(priceBars, trackingAligned),
+    },
+  };
 }
 
 export function computePremiumDiscount(

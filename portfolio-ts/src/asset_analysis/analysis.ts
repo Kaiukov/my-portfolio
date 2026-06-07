@@ -18,6 +18,7 @@ import type {
 const DEFAULT_RISK_FREE_RATE = 0.0425;
 const MAX_LOOKBACK_DAYS = 3650;
 const FIVE_YEAR_DAYS = 365 * 5 + 14;
+const MIN_ALIGNMENT_RETAINED_RATIO = 0.6;
 
 const PERIOD_LOOKBACK_DAYS: Record<Exclude<AssetAnalysisPeriod, "ytd">, number> = {
   "1mo": 31,
@@ -181,11 +182,30 @@ export async function analyzeAsset(
       ),
     );
   }
+
+  const { metrics, technicals, alignment } = computeAllMetrics(
+    fetched.priceBars,
+    fetched.historyBars,
+    fetched.benchmarkBars,
+    fetched.trackingBenchmarkBars,
+    request.tracking_error_benchmark,
+    fetched.info.type,
+    request.risk_free_rate,
+  );
+
   if (fetched.benchmarkBars.length < 2) {
     warnings.push(
       buildIssue(
         "BENCHMARK_METRICS_UNAVAILABLE",
         `Benchmark-relative metrics are unavailable because ${request.benchmark} did not return enough data.`,
+        "benchmark",
+      ),
+    );
+  } else if (alignment.benchmark.retainedRatio < MIN_ALIGNMENT_RETAINED_RATIO) {
+    warnings.push(
+      buildIssue(
+        "BENCHMARK_ALIGNMENT_REDUCED",
+        `${request.benchmark} alignment retained ${alignment.benchmark.alignedCount} of ${alignment.benchmark.assetReturnCount} return observations (${(alignment.benchmark.retainedRatio * 100).toFixed(1)}%); benchmark-relative metrics may be less representative.`,
         "benchmark",
       ),
     );
@@ -198,17 +218,15 @@ export async function analyzeAsset(
         "tracking_error_benchmark",
       ),
     );
+  } else if (alignment.tracking.retainedRatio < MIN_ALIGNMENT_RETAINED_RATIO) {
+    warnings.push(
+      buildIssue(
+        "TRACKING_ALIGNMENT_REDUCED",
+        `${request.tracking_error_benchmark} alignment retained ${alignment.tracking.alignedCount} of ${alignment.tracking.assetReturnCount} return observations (${(alignment.tracking.retainedRatio * 100).toFixed(1)}%); tracking error may be less representative.`,
+        "tracking_error_benchmark",
+      ),
+    );
   }
-
-  const { metrics, technicals } = computeAllMetrics(
-    fetched.priceBars,
-    fetched.historyBars,
-    fetched.benchmarkBars,
-    fetched.trackingBenchmarkBars,
-    request.tracking_error_benchmark,
-    fetched.info.type,
-    request.risk_free_rate,
-  );
 
   const currentPrice = fetched.info.current_price ?? fetched.priceBars[fetched.priceBars.length - 1]?.close ?? null;
   if (currentPrice !== null) {
