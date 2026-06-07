@@ -5,9 +5,9 @@ export interface DecompositionData {
   total_growth_usd: number;
   total_growth_pct: number;
   from_contributions_usd: number;
-  from_contributions_pct: number;
+  from_contributions_pct: number | null;
   from_returns_usd: number;
-  from_returns_pct: number;
+  from_returns_pct: number | null;
   initial_value: number;
   current_value: number;
   net_deposits: number;
@@ -19,6 +19,12 @@ export interface DecompositionData {
 function num(val: unknown): number {
   const n = Number(val);
   return Number.isFinite(n) ? n : 0;
+}
+
+function nullableNum(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
 }
 
 function str(val: unknown): string {
@@ -42,9 +48,9 @@ export async function getDecomposition(
       total_growth_usd: 0,
       total_growth_pct: 0,
       from_contributions_usd: 0,
-      from_contributions_pct: 0,
+      from_contributions_pct: null,
       from_returns_usd: 0,
-      from_returns_pct: 0,
+      from_returns_pct: null,
       initial_value: 0,
       current_value: 0,
       net_deposits: 0,
@@ -59,9 +65,9 @@ export async function getDecomposition(
     total_growth_usd: num(row["total_growth_usd"]),
     total_growth_pct: num(row["total_growth_pct"]),
     from_contributions_usd: num(row["from_contributions_usd"]),
-    from_contributions_pct: num(row["from_contributions_pct"]),
+    from_contributions_pct: nullableNum(row["from_contributions_pct"]),
     from_returns_usd: num(row["from_returns_usd"]),
-    from_returns_pct: num(row["from_returns_pct"]),
+    from_returns_pct: nullableNum(row["from_returns_pct"]),
     initial_value: num(row["initial_value"]),
     current_value: num(row["current_value"]),
     net_deposits: num(row["net_deposits"]),

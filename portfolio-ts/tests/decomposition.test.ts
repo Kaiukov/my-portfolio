@@ -62,6 +62,31 @@ describe("getDecomposition", () => {
     expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
   });
 
+  test("signed split fixture preserves negative return share", async () => {
+    mockQuerySingle.mockResolvedValue(makeDecompRow({
+      total_growth_usd: 40,
+      total_growth_pct: 40,
+      from_contributions_usd: 50,
+      from_contributions_pct: 125,
+      from_returns_usd: -10,
+      from_returns_pct: -25,
+      initial_value: 100,
+      current_value: 140,
+      net_deposits: 50,
+      total_gain: -10,
+      total_income: 0,
+      total_fees_and_taxes: 0,
+    }));
+
+    const { getDecomposition } = await import("../src/commands/decomposition.js");
+    const result = await getDecomposition("2026-01-15");
+
+    expect(result.total_growth_usd).toBe(40);
+    expect(result.from_contributions_pct).toBe(125);
+    expect(result.from_returns_pct).toBe(-25);
+    expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
+  });
+
   test("returns default values when SQL returns no row", async () => {
     mockQuerySingle.mockResolvedValue(null);
 
@@ -71,9 +96,9 @@ describe("getDecomposition", () => {
     expect(result.total_growth_usd).toBe(0);
     expect(result.total_growth_pct).toBe(0);
     expect(result.from_contributions_usd).toBe(0);
-    expect(result.from_contributions_pct).toBe(0);
+    expect(result.from_contributions_pct).toBeNull();
     expect(result.from_returns_usd).toBe(0);
-    expect(result.from_returns_pct).toBe(0);
+    expect(result.from_returns_pct).toBeNull();
     expect(result.initial_value).toBe(0);
     expect(result.current_value).toBe(0);
     expect(result.net_deposits).toBe(0);
@@ -127,9 +152,9 @@ describe("getDecomposition", () => {
     expect(result.total_growth_usd).toBe(0);
     expect(result.total_growth_pct).toBe(0);
     expect(result.from_contributions_usd).toBe(0);
-    expect(result.from_contributions_pct).toBe(0);
+    expect(result.from_contributions_pct).toBeNull();
     expect(result.from_returns_usd).toBe(0);
-    expect(result.from_returns_pct).toBe(0);
+    expect(result.from_returns_pct).toBeNull();
     expect(result.initial_value).toBe(0);
     expect(result.current_value).toBe(0);
   });
@@ -140,8 +165,8 @@ describe("getDecomposition", () => {
       total_growth_pct: 0,
       from_contributions_usd: 10000,
       from_returns_usd: -10000,
-      from_contributions_pct: 0,
-      from_returns_pct: 0,
+      from_contributions_pct: null,
+      from_returns_pct: null,
       net_deposits: 10000,
       total_gain: -8000,
       total_income: 1000,
@@ -153,8 +178,8 @@ describe("getDecomposition", () => {
 
     expect(result.total_growth_usd).toBe(0);
     expect(result.total_growth_pct).toBe(0);
-    expect(result.from_contributions_pct).toBe(0);
-    expect(result.from_returns_pct).toBe(0);
+    expect(result.from_contributions_pct).toBeNull();
+    expect(result.from_returns_pct).toBeNull();
     expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
   });
 
@@ -198,8 +223,8 @@ describe("getDecomposition", () => {
       total_growth_pct: 0,
       from_contributions_usd: 20000,
       from_returns_usd: -25000,
-      from_contributions_pct: 0,
-      from_returns_pct: 0,
+      from_contributions_pct: -400,
+      from_returns_pct: 500,
       net_deposits: 20000,
       total_gain: -23000,
       total_income: 1000,
@@ -211,8 +236,8 @@ describe("getDecomposition", () => {
 
     expect(result.total_growth_usd).toBe(-5000);
     expect(result.total_growth_pct).toBe(0);
-    expect(result.from_contributions_pct).toBe(0);
-    expect(result.from_returns_pct).toBe(0);
+    expect(result.from_contributions_pct).toBe(-400);
+    expect(result.from_returns_pct).toBe(500);
     expect(result.from_contributions_usd + result.from_returns_usd).toBe(result.total_growth_usd);
   });
 });
@@ -272,6 +297,42 @@ describe("getDecomposition — CLI integration", () => {
     expect(logSpy).toHaveBeenCalled();
     const output = logSpy.mock.calls[0][0];
     expect(output).toContain("decomposition");
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test("dispatches corrected signed-split snapshot", async () => {
+    mockQuerySingle.mockResolvedValue(makeDecompRow({
+      total_growth_usd: 40,
+      total_growth_pct: 40,
+      from_contributions_usd: 50,
+      from_contributions_pct: 125,
+      from_returns_usd: -10,
+      from_returns_pct: -25,
+      initial_value: 100,
+      current_value: 140,
+      net_deposits: 50,
+      total_gain: -10,
+      total_income: 0,
+      total_fees_and_taxes: 0,
+    }));
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await mod.dispatch(["bun", "src/cli.ts", "decomposition"]);
+
+    expect(logSpy).toHaveBeenCalled();
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("decomposition");
+    expect(output.data.total_growth_usd).toBe(40);
+    expect(output.data.from_contributions_pct).toBe(125);
+    expect(output.data.from_returns_pct).toBe(-25);
+    expect(output.meta.count).toBe(null);
+    expect(output.meta.generated_at).toBeDefined();
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

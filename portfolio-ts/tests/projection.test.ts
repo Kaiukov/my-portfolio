@@ -68,6 +68,22 @@ describe("Projection — annuity math", () => {
     // 100000 + 1000*120 = 220000
   });
 
+  test("12% annual uses effective monthly compounding (fixture from #270)", async () => {
+    const { computeProjection } = await import("../src/commands/projection.js");
+
+    const result = asAccum(await computeProjection({
+      currentValue: 100000,
+      months: 120,
+      contribution: 1000,
+      annualRatePct: 12.0,
+      mode: "accumulation",
+    }));
+
+    expect(result.projected_value).toBeCloseTo(532514.86, 2);
+    expect(result.total_contributions).toBe(120000);
+    expect(result.gain_from_returns).toBeCloseTo(312514.86, 2);
+  });
+
   test("FV increases with positive rate above flat-line", async () => {
     const { computeProjection } = await import("../src/commands/projection.js");
 
@@ -529,6 +545,45 @@ describe("Projection — CLI integration", () => {
       expect(output.data.current_value).toBe(100000);
       expect(output.data.projected_value_nominal).toBe(250000);
       expect(output.data.projected_value_real).toBe(185000);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  test("dispatches corrected projection snapshot for 12% annual fixture", async () => {
+    setupProjection({
+      current_value: 100000,
+      annual_return_rate: 0.12,
+      monthly_contribution: 1000,
+      inflation_rate: 0,
+      target_value: null,
+      years_to_goal: null,
+      projected_goal_value: null,
+      projection_years: 10,
+      projected_value_nominal: 532514.86,
+      projected_value_real: 532514.86,
+      total_contributions: 120000,
+      return_portion: 312514.86,
+      required_return_rate: null,
+    });
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "projection",
+        "--monthly-contribution", "1000",
+        "--annual-return-rate", "0.12",
+        "--projection-years", "10",
+      ]);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.ok).toBe(true);
+      expect(output.command).toBe("projection");
+      expect(output.data.current_value).toBe(100000);
+      expect(output.data.projected_value_nominal).toBeCloseTo(532514.86, 2);
+      expect(output.data.total_contributions).toBe(120000);
+      expect(output.data.return_portion).toBeCloseTo(312514.86, 2);
     } finally {
       logSpy.mockRestore();
       exitSpy.mockRestore();

@@ -2590,10 +2590,8 @@ $$ LANGUAGE plpgsql STABLE;
 --                            This guarantees: total_growth_usd = from_contributions_usd + from_returns_usd
 --
 -- Guards:
---   total_growth_usd <= 0  -> both pct set to 0 (USD split still meaningful)
---   initial_value = 0      -> both pct set to 0
---   from_contributions_pct capped at 100 via LEAST
---   from_returns_pct = 100 - from_contributions_pct (complement)
+--   total_growth_usd = 0 -> percentage split is NULL to avoid a misleading 0/0
+--   signed split is preserved for negative growth as well
 DROP FUNCTION IF EXISTS portfolio_decomposition_sql(DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION portfolio_decomposition_sql(
@@ -2659,14 +2657,14 @@ AS $$
              ELSE 0.0
         END                                                                                                            AS total_growth_pct,
         p.net_deposits                                                                                                 AS from_contributions_usd,
-        CASE WHEN (p.current_value - p.initial_value) > 0.0 AND p.initial_value > 0.0
-             THEN LEAST(p.net_deposits / (p.current_value - p.initial_value) * 100.0, 100.0)
-             ELSE 0.0
+        CASE WHEN (p.current_value - p.initial_value) <> 0.0
+             THEN p.net_deposits / (p.current_value - p.initial_value) * 100.0
+             ELSE NULL::DOUBLE PRECISION
         END                                                                                                            AS from_contributions_pct,
         p.market_return                                                                                                AS from_returns_usd,
-        CASE WHEN (p.current_value - p.initial_value) > 0.0 AND p.initial_value > 0.0
-             THEN 100.0 - LEAST(p.net_deposits / (p.current_value - p.initial_value) * 100.0, 100.0)
-             ELSE 0.0
+        CASE WHEN (p.current_value - p.initial_value) <> 0.0
+             THEN p.market_return / (p.current_value - p.initial_value) * 100.0
+             ELSE NULL::DOUBLE PRECISION
         END                                                                                                            AS from_returns_pct,
         p.initial_value,
         p.current_value,
@@ -2701,14 +2699,16 @@ $$;
 --     Goal fields NULL. required_return_rate NULL.
 --
 --   Goal mode (p_target_value provided):
---     Solve smallest integer n (months) where FV(n) >= target.
+--     Solve smallest integer n (months) where FV(n) >= target inflated to the
+--     goal month via p_inflation_rate.
 --     Uses iterative month-by-month approach (cap: 100 years = 1200 months).
 --     Uses the same FV recurrence/formula for positive, zero, and negative rates.
 --     years_to_goal = n / 12.0 (fractional months ceiling).
 --     projected_goal_value = FV(n) (>= target).
 --     Projection fields NULL.
 --     required_return_rate: bisection on annual r ∈ [-0.20, 2.00]
---       such that FV(p_projection_years*12) = p_target_value.
+--       such that FV(p_projection_years*12) = p_target_value inflated to the
+--       projection horizon via p_inflation_rate.
 --       Tolerance: 1e-8. Returns NULL if no solution.
 --
 --   Guard: negative or zero current_value → NULL row.
@@ -2758,11 +2758,15 @@ DECLARE
     v_lo               DOUBLE PRECISION;
     v_hi               DOUBLE PRECISION;
     v_mid              DOUBLE PRECISION;
+    v_mid_m            DOUBLE PRECISION;
     v_fv_mid           DOUBLE PRECISION;
     v_iter             INTEGER;
     v_max_iter         INTEGER := 200;
     v_tol              DOUBLE PRECISION := 1e-8;
     v_targ_months      INTEGER;
+    v_goal_target      DOUBLE PRECISION;
+    v_fraction         DOUBLE PRECISION;
+    v_term_report      DOUBLE PRECISION;
 BEGIN
     -- 1. Get current_value from portfolio_status_sql
     SELECT ps.portfolio_value INTO v_cv
@@ -2783,7 +2787,7 @@ BEGIN
     END IF;
 
     v_c := p_monthly_contribution;
-    v_m := v_r / 12.0;
+    v_m := POWER(1.0 + v_r, 1.0 / 12.0) - 1.0;
     v_projection_years := GREATEST(p_projection_years, 0);
 
     -- 3. Projection mode (no target)
@@ -2837,12 +2841,13 @@ BEGIN
     v_fv := v_cv;
 
     FOR v_i IN 1..v_m_max LOOP
+        v_goal_target := p_target_value * POWER(1.0 + p_inflation_rate, v_i::DOUBLE PRECISION / 12.0);
         IF v_m = 0.0 THEN
             v_fv := v_cv + v_c * v_i;
         ELSE
             v_fv := v_cv * (1.0 + v_m)^v_i + v_c * ((1.0 + v_m)^v_i - 1.0) / v_m;
         END IF;
-        IF v_fv >= p_target_value THEN
+        IF v_fv >= v_goal_target THEN
             v_found := TRUE;
             v_months := v_i;  -- persist found month
             EXIT;
@@ -2870,31 +2875,38 @@ BEGIN
 
     -- 5. Compute required_return_rate (bisection on r)
     v_targ_months := v_projection_years * 12;
+    v_goal_target := p_target_value * POWER(1.0 + p_inflation_rate, v_projection_years::DOUBLE PRECISION);
     v_lo := -0.20;
     v_hi := 2.00;  -- 200% annual
     v_mid := v_r;
     v_iter := 0;
 
     -- Check if target is achievable at hi rate
-    v_fv_mid := v_cv * (1.0 + v_hi / 12.0)^v_targ_months
-              + v_c * ((1.0 + v_hi / 12.0)^v_targ_months - 1.0) / (v_hi / 12.0);
-    IF v_fv_mid < p_target_value THEN
+    v_mid_m := POWER(1.0 + v_hi, 1.0 / 12.0) - 1.0;
+    IF v_mid_m = 0.0 THEN
+        v_fv_mid := v_cv + v_c * v_targ_months;
+    ELSE
+        v_fv_mid := v_cv * (1.0 + v_mid_m)^v_targ_months
+                  + v_c * ((1.0 + v_mid_m)^v_targ_months - 1.0) / v_mid_m;
+    END IF;
+    IF v_fv_mid < v_goal_target THEN
         v_mid := NULL; -- not achievable within bracket
     ELSE
         WHILE v_iter < v_max_iter LOOP
             v_mid := (v_lo + v_hi) / 2.0;
-            IF v_mid / 12.0 = 0.0 THEN
+            v_mid_m := POWER(1.0 + v_mid, 1.0 / 12.0) - 1.0;
+            IF v_mid_m = 0.0 THEN
                 v_fv_mid := v_cv + v_c * v_targ_months;
             ELSE
-                v_fv_mid := v_cv * (1.0 + v_mid / 12.0)^v_targ_months
-                          + v_c * ((1.0 + v_mid / 12.0)^v_targ_months - 1.0) / (v_mid / 12.0);
+                v_fv_mid := v_cv * (1.0 + v_mid_m)^v_targ_months
+                          + v_c * ((1.0 + v_mid_m)^v_targ_months - 1.0) / v_mid_m;
             END IF;
 
-            IF ABS(v_fv_mid - p_target_value) < v_tol OR (v_hi - v_lo) < v_tol THEN
+            IF ABS(v_fv_mid - v_goal_target) < v_tol OR (v_hi - v_lo) < v_tol THEN
                 EXIT;
             END IF;
 
-            IF v_fv_mid < p_target_value THEN
+            IF v_fv_mid < v_goal_target THEN
                 v_lo := v_mid;
             ELSE
                 v_hi := v_mid;
@@ -2961,7 +2973,7 @@ $$;
 --   within the horizon.
 --
 -- total_withdrawn = Σ_{t=1..min(horizon, depletion)} W0*(1+infl)^(t-1) (nominal)
--- return_generated = terminal_value - portfolio_value + total_withdrawn
+-- return_generated = terminal_value_at_depletion - portfolio_value + total_withdrawn
 DROP FUNCTION IF EXISTS portfolio_withdrawal_sql(DATE, DOUBLE PRECISION, DOUBLE PRECISION, INTEGER, DOUBLE PRECISION, DOUBLE PRECISION) CASCADE;
 CREATE OR REPLACE FUNCTION portfolio_withdrawal_sql(
     p_as_of_date          DATE DEFAULT CURRENT_DATE,
@@ -3003,6 +3015,8 @@ DECLARE
     v_V_prev  DOUBLE PRECISION;
     v_dep     DOUBLE PRECISION;  -- years_until_depletion, NULL if never
     v_term    DOUBLE PRECISION;
+    v_term_report DOUBLE PRECISION;
+    v_fraction DOUBLE PRECISION;
     v_tw      DOUBLE PRECISION;   -- total_withdrawn
     v_succ    DOUBLE PRECISION;   -- success_likelihood
 
@@ -3089,14 +3103,26 @@ BEGIN
                         v_dep := v_t::DOUBLE PRECISION;
                     END IF;
                 END IF;
+                v_fraction := v_dep - (v_t - 1)::DOUBLE PRECISION;
+                IF v_fraction < 0.0 THEN
+                    v_fraction := 0.0;
+                ELSIF v_fraction > 1.0 THEN
+                    v_fraction := 1.0;
+                END IF;
+                v_tw := v_tw - v_withdraw + (v_withdraw * v_fraction);
             END IF;
         END LOOP;
         v_term := v_V;
     END IF;
 
+    v_term_report := CASE
+        WHEN v_dep IS NOT NULL AND v_dep < v_horizon::DOUBLE PRECISION THEN 0.0
+        ELSE v_term
+    END;
+
     -- 7. return_generated
-    -- return_generated = terminal_value - portfolio_value + total_withdrawn
-    -- (growth from market returns)
+    -- return_generated uses the depletion point when depletion occurs before the
+    -- horizon; otherwise it uses the simulated terminal value.
 
     -- 8. success_likelihood (v1 deterministic proxy)
     IF v_term >= 0.0 THEN
@@ -3180,7 +3206,7 @@ BEGIN
             ELSE 0.0
         END,
         v_tw,
-        v_term - v_pv + v_tw,
+        v_term_report - v_pv + v_tw,
         100.0 - v_succ;
 END;
 $$;
