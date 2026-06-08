@@ -5,7 +5,6 @@ SPYM = 0.80
 SCHD = 0.10
 XLU = 0.05
 SGOV_base = 0.05  # applies only when cash+SGOV is below target band (25-30%); otherwise 0
-SGOV_unspent = "only when risk filters fail and cash_plus_sgov is below 45%"
 
 [guardrails]
 min_risk_deployment_aggressive = 0.80
