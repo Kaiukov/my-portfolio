@@ -389,6 +389,41 @@ MAYBE_SKIP("integration: diversification_depth_sql", () => {
     }
   });
 
+  test("bogus USD price rows do not pollute correlation pairs", async () => {
+    const sql = new SQL(DB_URL!, { max: 1 });
+    try {
+      await sql.begin(async (tx: any) => {
+        await tx.unsafe(ddl.transactions);
+        await tx.unsafe(ddl.prices);
+
+        const f = fixturePerfectCorr();
+        await tx.unsafe(f.tx);
+        await tx.unsafe(f.prices);
+
+        await tx.unsafe(
+          `INSERT INTO prices (ticker, date, price)
+           VALUES
+             ('USD', '2026-01-01', 14.60),
+             ('USD', '2026-01-02', 15.00),
+             ('USD', '2026-01-03', 16.00),
+             ('USD', '2026-01-04', 17.00)`,
+        );
+
+        const [row] = await tx.unsafe(
+          `SELECT * FROM portfolio_diversification_depth_sql($1)`,
+          [f.asOf],
+        ) as any[];
+
+        expect(Number(row.total_holdings)).toBeGreaterThanOrEqual(2);
+
+        expect(Number(row.max_pairwise_correlation)).toBeCloseTo(1.0, 4);
+        expect(Number(row.avg_pairwise_correlation)).toBeCloseTo(1.0, 4);
+      });
+    } finally {
+      await sql.end();
+    }
+  });
+
   test("lookback_days restricts the window", async () => {
     const sql = new SQL(DB_URL!, { max: 1 });
     try {
