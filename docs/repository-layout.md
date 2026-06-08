@@ -6,9 +6,9 @@
 |------|---------|
 | `portfolio-ts/` | Active TypeScript/Bun application and CLI (runtime). Source in `src/`, tests in `tests/`, config via `.env`. |
 | `portfolio_db/sql/` | Financial source of truth — PostgreSQL schema, functions, procedures, views, triggers. **Do not edit casually.** |
-| `portfolio-plugin/` | **Canonical** Claude Code plugin in `.claude-plugin/` format. Contains agent skills for setup, deploy, add-transaction, status, dashboard, and develop (navigation guide). |
+| `portfolio-plugin/` | **Canonical** Claude Code plugin in `.claude-plugin/` format. Contains agent skills for setup, deploy, add-transaction, status, dashboard, develop (navigation guide), and smartdca (Smart DCA strategy). |
 | `portfolio-dashboard/` | Single-file dashboard served by a Cloudflare Worker. |
-| `docs/` | Documentation — wiki, transaction spec, platform adapters, API response plan, migration notes, and this layout doc. |
+| `docs/` | Documentation — wiki, transaction spec, platform adapters, API response plan, migration notes, [SmartDCA strategy](smartdca-strategy.md), and this layout doc. |
 | `AGENTS.md` | Top-level agent instructions: architecture, invariants, command classification. |
 | `CLAUDE.md` | Agent instructions loaded by Claude Code. |
 | `scripts/` | Helper scripts for deployment, monitoring, CI. |
