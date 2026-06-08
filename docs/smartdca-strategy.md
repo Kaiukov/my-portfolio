@@ -11,7 +11,8 @@ Every month, the strategy:
 3. **Derives a regime**: 0–1 PEAK = AGGRESSIVE, 2 PEAK = CAUTION, 3–4 PEAK = PROTECTION.
 4. **Evaluates each risk asset** (SPYM, XLU, SCHD) against technical filters on execution day.
 5. **Produces a buy map** in dollars that sums to the monthly fixed budget.
-6. **Routes unspent dollars**: to SGOV when cash reserves are below 45%, or defers them for the next SPYM-focused round otherwise.
+ 6. **Applies SPYM catch-up surcharge**: while `cash + SGOV > 30%`, an extra $1000 goes 100% into SPYM (temporary catch-up).
+ 7. **Routes unspent dollars**: defers for the next SPYM-focused round. Never auto-converts failed amounts into SGOV.
 
 ## Regime Rules
 
@@ -40,17 +41,29 @@ Each risk asset must pass its filter to receive the base allocation:
 
 | Asset | Filter |
 |-------|--------|
-| SPYM | RSI(14) < 65 OR Price < SMA90 |
-| XLU | RSI(14) < 58 OR Price < SMA90 |
-| SCHD | RSI(14) < 58 OR Price < SMA90 |
+| SPYM | RSI(14) < 70 OR Price < SMA90 |
+| XLU | RSI(14) < 65 OR Price < SMA90 |
+| SCHD | RSI(14) < 65 OR Price < SMA90 |
 
-Failed amounts are routed to SGOV (if below the cash ceiling) or deferred.
+Failed amounts are deferred for the next SPYM round. Never auto-converted into SGOV.
 
 ## Cash Management
 
 - **Ceiling**: When cash + SGOV exceeds 45% of portfolio value, new contributions prioritize SPYM.
 - **Target band**: 25–30% cash + SGOV.
-- **Unspent routing**: Below ceiling → SGOV. At/above ceiling → deferred for SPYM.
+- **SPYM catch-up surcharge**: When `cash + SGOV > 30%`, an extra $1000 is deployed 100% into SPYM on top of the base budget. Auto-disables when ≤30%.
+- **SGOV base** applies only below the target band (25-30%). At/above target, SGOV_base contribution is 0.
+- **Unspent routing**: Deferred for the next SPYM round. Never routed to SGOV.
+- **Cash+SGOV includes**: USD cash (USD/USDT/USDC) + SGOV + FX-cash (GBP/EUR). BTC, other crypto, and VGIT are excluded from this bucket.
+
+## Non-Model Positions (Out-of-Strategy)
+
+Some holdings are intentionally outside SmartDCA governance:
+
+1. **BTC — sanctioned standing sleeve.** Fixed $100/month, price-independent. SmartDCA rules (regime, filters, surcharge, SGOV routing) do not apply. Not a blind spot — a deliberate separate order.
+2. **Other crypto (ETH, etc.)** — out-of-model speculative pocket. Excluded from risk-sleeve targets and the cash bucket. Soft cap only; no hard sell.
+3. **FX-cash (GBP/EUR)** — idle non-USD cash. Counts toward the cash+SGOV ceiling. Convert to USD opportunistically at an acceptable rate into the SPYM funnel; do not let it accumulate.
+4. **VGIT** — bond sleeve (treasury bond), not SGOV cash-equivalent. Classified separately so cash+SGOV stays a clean cash measure.
 
 ## Benchmark
 

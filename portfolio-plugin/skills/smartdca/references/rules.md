@@ -11,6 +11,7 @@ Use `references/config.md` as the single source of truth for:
 
 Do not restate the numeric values here. Read them from `config.md`.
 Compute dollar allocations by multiplying each asset percentage by `monthly_fixed_budget`.
+The SPYM catch-up surcharge (`catch_up_surcharge` in config.md) adds extra $1000 to SPYM on top of the base budget when active.
 
 ## Market parameters
 
@@ -53,10 +54,9 @@ Count each true condition as 1 PEAK.
 
 Check these only on execution day:
 
-- SPYM: `RSI(14) < 65 OR Price < SMA90`
-- XLU/SCHD: `RSI(14) < 58 OR Price < SMA90`
-- If a filter fails and `cash + SGOV` is below the ceiling from `config.md`, route the full failed amount to SGOV.
-- If a filter fails and `cash + SGOV` is at or above the ceiling from `config.md`, do not add to SGOV; keep the failed amount for the next SPYM-focused execution round.
+- SPYM: `RSI(14) < 70 OR Price < SMA90`
+- XLU/SCHD: `RSI(14) < 65 OR Price < SMA90`
+- If a filter fails, **defer** the amount for the next SPYM-focused round. Never auto-convert a failed amount into SGOV.
 
 Each asset is evaluated separately. Do not apply one asset's technical result to another asset.
 If a risk asset passes the filter, keep its base allocation from `config.md`.
@@ -67,6 +67,30 @@ If a risk asset passes the filter, keep its base allocation from `config.md`.
 - Do not increase SGOV in AGGRESSIVE regime while `cash + SGOV` is above the ceiling, except for explicit user override.
 - If technical filters block a risk sleeve, defer that amount rather than permanently converting it into SGOV.
 - Re-check the deferred amount on the next execution window.
+- **Cash+SGOV includes:** USD cash (USD/USDT/USDC) + SGOV + FX-cash (GBP/EUR). See `## Non-model positions` below for detailed bucket classification. BTC, other crypto, and VGIT are excluded from the cash+SGOV calculation.
+
+## Catch-up SPYM surcharge
+
+- While excess cash is being deployed, on top of the base monthly SmartDCA buy, buy an extra fixed $1000 of SPYM funded from idle cash.
+- Surcharge is active when `cash + SGOV > 30%` of portfolio. Auto-disables when `cash + SGOV <= 30%`.
+- Surcharge route is 100% SPYM while active. In AGGRESSIVE regime with surcharge active, SGOV is **not** increased.
+- This is a temporary catch-up mechanism, not the permanent monthly budget.
+- SGOV_base (5%) applies only when `cash + SGOV` is below the target band (25-30%). When at/above target, SGOV_base contribution is 0.
+- Unspent/deferred dollars are held for the next SPYM round, not parked in SGOV.
+
+## Non-model positions (out-of-strategy)
+
+Some portfolio holdings are intentionally outside the SmartDCA model. They are NOT governed by monthly allocation, regime, technical filters, or the SPYM surcharge.
+
+1. **BTC — sanctioned standing out-of-model sleeve.** Fixed $100/month, price-independent. SmartDCA rules do **not** apply. Keep the standing order intact — never liquidate or cap via SmartDCA.
+
+2. **Other crypto (ETH, etc.)** — out-of-model speculative pocket. Excluded from risk-sleeve targets (SPYM/SCHD/XLU) and from the cash bucket. Soft cap analogous to `space_x_max_portfolio_pct` from config.md; no hard sell rule — sizing is the user's call.
+
+3. **FX-cash (GBP/EUR)** — idle non-USD cash not fed by SmartDCA. It **counts toward the cash+SGOV** ceiling and target (honest over-cash accounting). Rule: convert to USD opportunistically at an acceptable FX rate so it enters the SPYM funnel; do not let it accumulate as permanent idle cash.
+
+4. **VGIT** — treasury-BOND holding, NOT a SGOV cash-equivalent. Classify as a bond sleeve distinct from SGOV cash. `cash + SGOV` remains a clean cash measure; VGIT is excluded from that bucket.
+
+> **Cross-reference:** When computing `cash + SGOV` for the ceiling/target, anti-peak rules, and surcharge triggers, include USD cash (USD/USDT/USDC) + SGOV + FX-cash (GBP/EUR). Exclude BTC, other crypto, and VGIT.
 
 ## Anti-peak rules
 
