@@ -129,7 +129,6 @@ export async function fetchPrices(
   endDate: string,
 ): Promise<PriceRow[]> {
   if (ticker.startsWith("CASH")) {
-    // CASH assets always have price 1.0 — fill every day in range
     const rows: PriceRow[] = [];
     const cur = new Date(startDate);
     const end = new Date(endDate);
@@ -138,6 +137,10 @@ export async function fetchPrices(
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
     return rows;
+  }
+
+  if (!isYahooFetchable(ticker) && !/^[A-Z]{3}USD=X$/.test(ticker)) {
+    return [];
   }
 
   const yahooTicker = toYahooTicker(ticker);

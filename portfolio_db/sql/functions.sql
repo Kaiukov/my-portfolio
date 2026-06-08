@@ -1186,7 +1186,8 @@ AS $$
     priced_assets AS (
         SELECT a.asset, a.wgt
         FROM alloc a
-        WHERE EXISTS (
+        WHERE NOT is_cash_like_sql(a.asset)
+          AND EXISTS (
             SELECT 1 FROM prices p
             WHERE p.ticker = a.asset
               AND p.date BETWEEN p_as_of_date - p_lookback_days AND p_as_of_date
