@@ -1,0 +1,11 @@
+{
+  "name": "my-portfolio",
+  "owner": { "name": "Oleksandr Kaiukov" },
+  "plugins": [
+    {
+      "name": "portfolio",
+      "source": "./portfolio-plugin",
+      "description": "My Portfolio CLI — track portfolio value, transactions, performance, and Cloudflare dashboard deployment. Use when the user asks about portfolio tracking, transactions, portfolio value, allocation, performance, dashboard, or Cloudflare publishing."
+    }
+  ]
+}
