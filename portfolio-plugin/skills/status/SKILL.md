@@ -64,6 +64,10 @@ portfolio refresh
 portfolio refresh --dry-run
 ```
 
+## Analytics & Analysis
+
+For deeper portfolio analytics (cash drag, projection, rebalance, decomposition, currency exposure, diversification, income, realized gains, withdrawal, asset metadata) and per-ticker risk/technical analysis, see the [portfolio-analyse](../analyse/SKILL.md) skill.
+
 ## Scheduling
 
 ```bash

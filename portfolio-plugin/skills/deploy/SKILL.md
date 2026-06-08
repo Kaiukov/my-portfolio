@@ -65,6 +65,10 @@ Reads the deployed widget URL:
 portfolio cloudflare url
 ```
 
+## Database Backup
+
+For DB `pg_dump` backup, S3/R2 push, and restore, see the [portfolio-backup](../backup/SKILL.md) skill.
+
 ## Dashboard Worker
 
 The `portfolio-dashboard/` Worker serves a richer SPA dashboard (separate from the widget). Deploy directly with wrangler:
