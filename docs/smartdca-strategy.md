@@ -54,6 +54,16 @@ Failed amounts are deferred for the next SPYM round. Never auto-converted into S
 - **SPYM catch-up surcharge**: When `cash + SGOV > 30%`, an extra $1000 is deployed 100% into SPYM on top of the base budget. Auto-disables when ≤30%.
 - **SGOV base** applies only below the target band (25-30%). At/above target, SGOV_base contribution is 0.
 - **Unspent routing**: Deferred for the next SPYM round. Never routed to SGOV.
+- **Cash+SGOV includes**: USD cash (USD/USDT/USDC) + SGOV + FX-cash (GBP/EUR). BTC, other crypto, and VGIT are excluded from this bucket.
+
+## Non-Model Positions (Out-of-Strategy)
+
+Some holdings are intentionally outside SmartDCA governance:
+
+1. **BTC — sanctioned standing sleeve.** Fixed $100/month, price-independent. SmartDCA rules (regime, filters, surcharge, SGOV routing) do not apply. Not a blind spot — a deliberate separate order.
+2. **Other crypto (ETH, etc.)** — out-of-model speculative pocket. Excluded from risk-sleeve targets and the cash bucket. Soft cap only; no hard sell.
+3. **FX-cash (GBP/EUR)** — idle non-USD cash. Counts toward the cash+SGOV ceiling. Convert to USD opportunistically at an acceptable rate into the SPYM funnel; do not let it accumulate.
+4. **VGIT** — bond sleeve (treasury bond), not SGOV cash-equivalent. Classified separately so cash+SGOV stays a clean cash measure.
 
 ## Benchmark
 

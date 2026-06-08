@@ -67,6 +67,7 @@ If a risk asset passes the filter, keep its base allocation from `config.md`.
 - Do not increase SGOV in AGGRESSIVE regime while `cash + SGOV` is above the ceiling, except for explicit user override.
 - If technical filters block a risk sleeve, defer that amount rather than permanently converting it into SGOV.
 - Re-check the deferred amount on the next execution window.
+- **Cash+SGOV includes:** USD cash (USD/USDT/USDC) + SGOV + FX-cash (GBP/EUR). See `## Non-model positions` below for detailed bucket classification. BTC, other crypto, and VGIT are excluded from the cash+SGOV calculation.
 
 ## Catch-up SPYM surcharge
 
@@ -76,6 +77,20 @@ If a risk asset passes the filter, keep its base allocation from `config.md`.
 - This is a temporary catch-up mechanism, not the permanent monthly budget.
 - SGOV_base (5%) applies only when `cash + SGOV` is below the target band (25-30%). When at/above target, SGOV_base contribution is 0.
 - Unspent/deferred dollars are held for the next SPYM round, not parked in SGOV.
+
+## Non-model positions (out-of-strategy)
+
+Some portfolio holdings are intentionally outside the SmartDCA model. They are NOT governed by monthly allocation, regime, technical filters, or the SPYM surcharge.
+
+1. **BTC — sanctioned standing out-of-model sleeve.** Fixed $100/month, price-independent. SmartDCA rules do **not** apply. Keep the standing order intact — never liquidate or cap via SmartDCA.
+
+2. **Other crypto (ETH, etc.)** — out-of-model speculative pocket. Excluded from risk-sleeve targets (SPYM/SCHD/XLU) and from the cash bucket. Soft cap analogous to `space_x_max_portfolio_pct` from config.md; no hard sell rule — sizing is the user's call.
+
+3. **FX-cash (GBP/EUR)** — idle non-USD cash not fed by SmartDCA. It **counts toward the cash+SGOV** ceiling and target (honest over-cash accounting). Rule: convert to USD opportunistically at an acceptable FX rate so it enters the SPYM funnel; do not let it accumulate as permanent idle cash.
+
+4. **VGIT** — treasury-BOND holding, NOT a SGOV cash-equivalent. Classify as a bond sleeve distinct from SGOV cash. `cash + SGOV` remains a clean cash measure; VGIT is excluded from that bucket.
+
+> **Cross-reference:** When computing `cash + SGOV` for the ceiling/target, anti-peak rules, and surcharge triggers, include USD cash (USD/USDT/USDC) + SGOV + FX-cash (GBP/EUR). Exclude BTC, other crypto, and VGIT.
 
 ## Anti-peak rules
 
