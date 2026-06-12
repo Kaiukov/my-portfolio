@@ -76,11 +76,17 @@ Download from [openai/tunnel-client releases](https://github.com/openai/tunnel-c
 
 ```bash
 export CONTROL_PLANE_API_KEY="sk-..."
+cd portfolio-ts
+bun run mcp
+
+# in another terminal, point tunnel-client at the local MCP server
+# (replace the command with your own deployment path if needed)
+
 tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile local-stdio \
   --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
-  --mcp-command "python /path/to/server.py"
+  --mcp-command "bun run mcp"
 
 tunnel-client doctor --profile local-stdio --explain
 tunnel-client run --profile local-stdio
@@ -154,6 +160,6 @@ If the tunnel doesn't appear, verify:
 
 - **MCP Tunnel solves the private-server problem** — you can run MCP servers on a private network (like the portfolio server at 192.168.1.104) and connect them to ChatGPT/Codex without opening firewall ports.
 - **No inbound ports needed** — only outbound HTTPS from the tunnel-client host to `api.openai.com:443`.
-- **The portfolio MCP layer** (`portfolio-ts/src/mcp/`) could be exposed via a tunnel to make portfolio tools available in ChatGPT conversations.
+- **The portfolio MCP layer** (`portfolio-ts/src/mcp/`) is exposed via `portfolio-ts/src/mcp/server.ts` / `bun run mcp`, so it can be attached to `tunnel-client` and made available in ChatGPT conversations.
 - **Multi-org support** — a single tunnel can serve both personal and enterprise workspaces.
 - **Harpoon** — allows controlled outbound HTTP from MCP servers for data enrichment while keeping the connection pattern secure.
