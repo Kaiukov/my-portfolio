@@ -8,8 +8,9 @@ The MCP adapter is a full read+write peer adapter alongside the CLI and HTTP API
 
 | File | Exports | Purpose |
 |---|---|---|
-| `read.ts` | `mcpRead(toolName, args)` | Read tools (12 tools) |
-| `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (4 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
+| `read.ts` | `mcpRead(toolName, args)` | Read tools (23 tools) |
+| `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (5 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
+| `server.ts` | `createPortfolioMcpServer()` / `runPortfolioMcpServer()` | Stdio MCP entrypoint for OpenAI tunnel-client |
 | `index.ts` | Re-exports `mcpRead`, `mcpWrite`, `McpWriteContext` | Package entry point |
 
 ## JSON Envelope
@@ -55,6 +56,7 @@ Dispatched via `mcpWrite(toolName, args, ctx)`. Each tool mirrors its CLI/API co
 | `edit_transaction` | `edit` | `id` / `transactionId` / `transaction_id` / `transId` | `date`, `asset`, `action`, `quantity`, `price`, `currency`, `fees`, `feeCurrency` / `fee_currency`, `exchange`, `dataSource` / `data_source`, `account`, `dry_run` / `dryRun` / `dry-run` |
 | `delete_transaction` | `delete` | `id` / `transactionId` / `transaction_id` / `transId` | `dry_run` / `dryRun` / `dry-run`, `confirm` |
 | `exchange_currency` | `exchange` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `quantity`, `rate` | — |
+| `split` | `split` | `date`, `asset`, `ratio` | `confirm` |
 
 ### Arg Aliases
 
@@ -64,6 +66,22 @@ MCP tools accept multiple key aliases per arg:
 - `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
 - `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
 - `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
+
+## OpenAI Secure MCP Tunnel
+
+The MCP server entrypoint is `portfolio-ts/src/mcp/server.ts` (or `bun run mcp`).
+It is a stdio MCP server compatible with OpenAI `tunnel-client`.
+
+Quick start:
+
+```bash
+cd portfolio-ts
+bun run mcp
+# in another terminal, point tunnel-client at the same command
+# tunnel-client init --sample sample_mcp_stdio_local --profile portfolio --mcp-command "bun run mcp"
+```
+
+See the release link shared in the issue for the current tunnel-client build stream.
 
 ## Write Context
 

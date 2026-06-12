@@ -4,7 +4,7 @@ import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "
 
 type JsonObject = Record<string, unknown>;
 
-type McpWriteContext = {
+export type McpWriteContext = {
   write?: Partial<WriteHandlers>;
 };
 

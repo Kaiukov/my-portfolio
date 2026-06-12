@@ -879,6 +879,16 @@ describe("handleRequest", () => {
     expect(body.ready).toBe(false);
     expect(body.error).toBe("connection refused");
   });
+
+  test("OPTIONS /status returns CORS headers when enabled", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/status", { method: "OPTIONS" });
+    const res = await handleRequest(req, { corsOrigin: "https://dashboard.example.com" });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://dashboard.example.com");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("OPTIONS");
+  });
 });
 
 describe("createApiServer", () => {
