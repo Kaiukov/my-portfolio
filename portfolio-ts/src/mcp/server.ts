@@ -97,6 +97,10 @@ export async function runPortfolioMcpServer(): Promise<void> {
   const server = createPortfolioMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  await new Promise<void>((resolve) => {
+    process.once("SIGINT", resolve);
+    process.once("SIGTERM", resolve);
+  });
 }
 
 if (import.meta.main) {
