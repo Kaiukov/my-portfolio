@@ -880,6 +880,21 @@ describe("handleRequest", () => {
     expect(body.error).toBe("connection refused");
   });
 
+  test("GET /mcp returns an SSE stream for Cloudflare/OpenAI server URL mode", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/mcp", {
+      method: "GET",
+      headers: {
+        Accept: "text/event-stream",
+      },
+    });
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/event-stream");
+    expect(res.headers.get("Cache-Control")).toContain("no-cache");
+  });
+
   test("OPTIONS /status returns CORS headers when enabled", async () => {
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/status", { method: "OPTIONS" });

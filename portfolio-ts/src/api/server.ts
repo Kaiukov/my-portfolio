@@ -1,4 +1,6 @@
 import { success, error, type SuccessEnvelope } from "../response.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { createPortfolioMcpServer } from "../mcp/server.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -39,6 +41,7 @@ export interface ReadyRouteResult {
 }
 
 const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
+const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -221,6 +224,7 @@ function routeCommandForPath(path: string, method: string): string {
   if (path === "/exchange") return "exchange";
   if (path === "/split") return "split";
   if (TRANSACTION_ID_ROUTE.test(path)) return method === "DELETE" ? "delete" : "edit";
+  if (MCP_HTTP_PATHS.has(path)) return "mcp";
   if (path === "/asset_analysis") return "asset_analysis";
   return "api";
 }
@@ -304,6 +308,7 @@ function allowedMethodsForPath(path: string): string[] | null {
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
   if (path === "/exchange") return ["POST"];
   if (path === "/split") return ["POST"];
+  if (MCP_HTTP_PATHS.has(path)) return ["GET", "POST", "DELETE"];
   if (ROUTES[path]) return ["GET"];
   return null;
 }
@@ -313,7 +318,8 @@ function buildCorsHeaders(corsOrigin?: string): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": corsOrigin,
     "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Last-Event-ID, Mcp-Session-Id, Mcp-Protocol-Version",
+    "Access-Control-Expose-Headers": "Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -345,6 +351,35 @@ async function parseJsonBody(req: Request): Promise<JsonObject> {
   }
 
   return parsed as JsonObject;
+}
+
+async function handleMcpHttpRequest(req: Request): Promise<Response> {
+  try {
+    const server = createPortfolioMcpServer();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    await server.connect(transport);
+    return await transport.handleRequest(req);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message,
+        },
+        id: null,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }
 }
 
 export async function handleRequest(req: Request, ctx: RequestContext = {}): Promise<Response> {
@@ -385,6 +420,10 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
       return respond(readyResult.body, readyResult.status);
     }
     return respond({ ready: true }, 200);
+  }
+
+  if (MCP_HTTP_PATHS.has(path)) {
+    return handleMcpHttpRequest(req);
   }
 
   try {
