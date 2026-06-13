@@ -12,7 +12,7 @@ no financial logic in the Worker.
 | File | Purpose | Committed? |
 |---|---|---|
 | `index.html` | Single-file SPA. Fetches `/api/dashboard` and renders. **No embedded data.** | yes |
-| `worker.js` | Serves `index.html` on `/`, `/dashboard`; serves KV snapshot on `/api/dashboard`; `/health`, `/version`. | yes |
+| `worker.js` | Serves `index.html` on `/`, `/dashboard`; serves KV snapshot on `/api/dashboard`; `/health`, `/version`; MCP at `/mcp`. | yes |
 | `wrangler.jsonc.example` | Config template — copy to `wrangler.jsonc`, fill account + KV ids. | yes |
 | `wrangler.jsonc` | Real config with account/KV ids. | **gitignored** |
 
@@ -22,6 +22,7 @@ no financial logic in the Worker.
 - `GET /api/dashboard` → snapshot JSON from KV key `dashboard` (404 until first publish)
 - `GET /health` → `{ ok: true }`
 - `GET /version` → `{ app, pattern }`
+- `GET/POST /mcp` → read-only MCP endpoint for ChatGPT/Connectors
 
 ## Live links (dev / prod split)
 
@@ -30,14 +31,14 @@ Two Workers, one shared KV namespace, distinct keys (mirrors the widget conventi
 
 | Env | URL | KV key | Published by |
 |---|---|---|---|
-| **dev** | https://portfolio-dashboard.kayukov2010.workers.dev | `dev:dashboard` | dev service (CT 103) |
+| **dev** | https://portfolio-dashboard-dev.kayukov2010.workers.dev | `dev:dashboard` | dev service (CT 103) |
 | **prod** | https://portfolio-dashboard-prod.kayukov2010.workers.dev | `dashboard` | prod service (CT 104) |
 
 ## Deploy (orchestrator-only)
 
 ```bash
 cd portfolio-dashboard
-# dev worker (bare name, dev:dashboard key):
+# dev worker (portfolio-dashboard-dev, dev:dashboard key):
 wrangler deploy --config wrangler.dev.jsonc
 # prod worker (-prod name, dashboard key):
 wrangler deploy --config wrangler.prod.jsonc

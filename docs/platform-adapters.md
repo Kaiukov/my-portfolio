@@ -659,5 +659,6 @@ Per issue #98, the suggested implementation order. Completed items are marked.
 | `portfolio-ts/src/api/server.ts` | HTTP API adapter (read + write routes) |
 | `portfolio-ts/src/mcp/adapter.ts` | MCP write adapter (`mcpWrite`) + arg helpers |
 | `portfolio-ts/src/mcp/read.ts` | MCP read adapter (`mcpRead`) — full CLI/API parity |
+| `portfolio-ts/src/mcp/server.ts` | MCP stdio entrypoint for tunnel-client |
 | `portfolio-ts/src/adapters/shared.ts` | Shared `WriteHandlers` + `toWriteErrorEnvelope` (used by API + MCP) |
 | `.agents/skills/my-portfolio-cli/SKILL.md` | Skill file for CLI change workflows |

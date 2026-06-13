@@ -1,4 +1,6 @@
 import { success, error, type SuccessEnvelope } from "../response.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { createPortfolioMcpServer } from "../mcp/server.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -26,6 +28,7 @@ import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "
 type RequestContext = {
   ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
   write?: Partial<WriteHandlers>;
+  corsOrigin?: string;
 };
 
 type Handler = (searchParams: URLSearchParams) => Promise<SuccessEnvelope>;
@@ -38,6 +41,7 @@ export interface ReadyRouteResult {
 }
 
 const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
+const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -220,6 +224,7 @@ function routeCommandForPath(path: string, method: string): string {
   if (path === "/exchange") return "exchange";
   if (path === "/split") return "split";
   if (TRANSACTION_ID_ROUTE.test(path)) return method === "DELETE" ? "delete" : "edit";
+  if (MCP_HTTP_PATHS.has(path)) return "mcp";
   if (path === "/asset_analysis") return "asset_analysis";
   return "api";
 }
@@ -303,14 +308,30 @@ function allowedMethodsForPath(path: string): string[] | null {
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
   if (path === "/exchange") return ["POST"];
   if (path === "/split") return ["POST"];
+  if (MCP_HTTP_PATHS.has(path)) return ["GET", "POST", "DELETE"];
   if (ROUTES[path]) return ["GET"];
   return null;
 }
 
-function jsonResponse(body: unknown, status: number): Response {
+function buildCorsHeaders(corsOrigin?: string): Record<string, string> {
+  if (!corsOrigin) return {};
+  return {
+    "Access-Control-Allow-Origin": corsOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Last-Event-ID, Mcp-Session-Id, Mcp-Protocol-Version",
+    "Access-Control-Expose-Headers": "Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+}
+
+function jsonResponse(body: unknown, status: number, corsOrigin?: string): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...buildCorsHeaders(corsOrigin),
+    },
   });
 }
 
@@ -332,21 +353,62 @@ async function parseJsonBody(req: Request): Promise<JsonObject> {
   return parsed as JsonObject;
 }
 
+async function handleMcpHttpRequest(req: Request): Promise<Response> {
+  try {
+    const server = createPortfolioMcpServer();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    await server.connect(transport);
+    return await transport.handleRequest(req);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message,
+        },
+        id: null,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }
+}
+
 export async function handleRequest(req: Request, ctx: RequestContext = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
+  const corsOrigin = ctx.corsOrigin;
+  const respond = (body: unknown, status: number): Response => jsonResponse(body, status, corsOrigin);
   const allowedMethods = allowedMethodsForPath(path);
   const write = resolveWriteHandlers(ctx.write);
 
   if (!allowedMethods) {
-    return jsonResponse(
-      error("api", "NOT_FOUND", `Route ${path} not found`),
-      404,
-    );
+    return respond(error("api", "NOT_FOUND", `Route ${path} not found`), 404);
+  }
+
+  if (req.method === "OPTIONS") {
+    if (!corsOrigin) {
+      return respond(
+        error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed for ${path}. Allowed: ${allowedMethods.join(", ")}`),
+        405,
+      );
+    }
+    return new Response(null, {
+      status: 204,
+      headers: buildCorsHeaders(corsOrigin),
+    });
   }
 
   if (!allowedMethods.includes(req.method)) {
-    return jsonResponse(
+    return respond(
       error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed for ${path}. Allowed: ${allowedMethods.join(", ")}`),
       405,
     );
@@ -355,16 +417,20 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
   if (path === "/ready") {
     if (ctx.ready) {
       const readyResult = await ctx.ready();
-      return jsonResponse(readyResult.body, readyResult.status);
+      return respond(readyResult.body, readyResult.status);
     }
-    return jsonResponse({ ready: true }, 200);
+    return respond({ ready: true }, 200);
+  }
+
+  if (MCP_HTTP_PATHS.has(path)) {
+    return handleMcpHttpRequest(req);
   }
 
   try {
     if (req.method === "GET") {
       const handler = ROUTES[path];
       const envelope = await handler(url.searchParams);
-      return jsonResponse(envelope, 200);
+      return respond(envelope, 200);
     }
 
     if (path === "/transactions" && req.method === "POST") {
@@ -393,7 +459,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         account: strField(body, "account"),
       });
 
-      return jsonResponse(success("add", result), 200);
+      return respond(success("add", result), 200);
     }
 
     if (path === "/exchange" && req.method === "POST") {
@@ -411,7 +477,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
       }
 
       const result = await write.exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
-      return jsonResponse(success("exchange", result), 200);
+      return respond(success("exchange", result), 200);
     }
 
     if (path === "/split" && req.method === "POST") {
@@ -436,12 +502,12 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         exchange: strField(body, "exchange"),
         account: strField(body, "account"),
       });
-      return jsonResponse(success("split", result), 200);
+      return respond(success("split", result), 200);
     }
 
     const transMatch = TRANSACTION_ID_ROUTE.exec(path);
     if (!transMatch) {
-      return jsonResponse(error("api", "NOT_FOUND", `Route ${path} not found`), 404);
+      return respond(error("api", "NOT_FOUND", `Route ${path} not found`), 404);
     }
 
     const transId = parseInt(transMatch[1], 10);
@@ -465,42 +531,47 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
       const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
       if (isDryRun) {
         const result = await write.editDryRun(transId, changes);
-        return jsonResponse(success("edit", result), 200);
+        return respond(success("edit", result), 200);
       }
 
       // PUT and PATCH both route through editTransaction to preserve a single mutation path.
       const result = await write.editTransaction(transId, changes);
-      return jsonResponse(success("edit", result), 200);
+      return respond(success("edit", result), 200);
     }
 
     if (req.method === "DELETE") {
       const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
       if (isDryRun) {
         const result = await write.deletePreview(transId);
-        return jsonResponse(success("delete", result, result.would_delete.length), 200);
+        return respond(success("delete", result, result.would_delete.length), 200);
       }
 
       const confirm = boolFlag(url.searchParams, body, "confirm");
       const result = await write.deleteTransaction(transId, confirm);
-      return jsonResponse(success("delete", result, result.deleted_ids.length), 200);
+      return respond(success("delete", result, result.deleted_ids.length), 200);
     }
   } catch (err) {
     const routeCommand = routeCommandForPath(path, req.method);
     const mapped = toWriteErrorEnvelope(routeCommand, err);
-    return jsonResponse(mapped.body, mapped.status);
+    return respond(mapped.body, mapped.status);
   }
 
-  return jsonResponse(
+  return respond(
     error("api", "METHOD_NOT_ALLOWED", `Method ${req.method} not allowed for ${path}`),
     405,
   );
 }
 
-export function createApiServer(opts?: { port?: number; ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult }) {
+export function createApiServer(opts?: {
+  port?: number;
+  ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
+  corsOrigin?: string;
+}) {
   const port = opts?.port ?? 8787;
+  const corsOrigin = opts?.corsOrigin ?? process.env.PORTFOLIO_API_CORS_ORIGIN;
   const server = Bun.serve({
     port,
-    fetch: (req) => handleRequest(req, { ready: opts?.ready }),
+    fetch: (req) => handleRequest(req, { ready: opts?.ready, corsOrigin }),
   });
   return server;
 }

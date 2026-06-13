@@ -76,7 +76,8 @@ Results: 16 pass, 0 fail, 0 skip
 ## MCP adapter parity
 
 The MCP adapter (`portfolio-ts/src/mcp/`) now exposes both read and write tools,
-matching the JSON envelope contract of the CLI and HTTP API exactly.
+plus a stdio server entrypoint for tunnel-client, matching the JSON envelope
+contract of the CLI and HTTP API exactly.
 
 | MCP read tool | CLI equivalent | API route | Freshness meta | Parity |
 |---|---|---|---|---|

@@ -12,6 +12,9 @@ const mockFetchPrices = mock(async (ticker: string, _startDate: string, _endDate
 mock.module("../src/db.js", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
+  getAssetMetadata: mock(async () => []),
+  upsertAssetMetadata: mock(async () => {}),
+  getSql: () => ({}),
   connect: () => {},
   close: () => {},
 }));

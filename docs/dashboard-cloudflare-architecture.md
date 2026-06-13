@@ -304,19 +304,11 @@ No new KV namespace needed. The dashboard writes to key `"dashboard"` in the sam
 
 **Not needed for Pattern 1 (KV snapshot).** The SPA and the KV data are served from the same Cloudflare origin — no cross-origin requests.
 
-If Pattern 2/3 (tunnel) is chosen later, CORS must be added to `src/api/server.ts:155-159` (`jsonResponse` function). Currently no CORS headers are set. Example addition:
+If Pattern 2/3 (tunnel) is chosen later, the API now supports opt-in CORS via `PORTFOLIO_API_CORS_ORIGIN` (wired through `src/api/server.ts`). Example addition:
 
 ```typescript
-// server.ts:155-159 — add CORS headers
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "https://dashboard.example.com",
-    },
-  });
-}
+// server.ts — enable CORS for a tunnel-backed frontend
+const server = createApiServer({ corsOrigin: "https://dashboard.example.com" });
 ```
 
 ### 4.8 Frontend SPA build pipeline — NEW

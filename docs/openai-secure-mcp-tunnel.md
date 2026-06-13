@@ -76,11 +76,17 @@ Download from [openai/tunnel-client releases](https://github.com/openai/tunnel-c
 
 ```bash
 export CONTROL_PLANE_API_KEY="sk-..."
+cd portfolio-ts
+bun run mcp
+
+# in another terminal, point tunnel-client at the local MCP server
+# (replace the command with your own deployment path if needed)
+
 tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile local-stdio \
   --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
-  --mcp-command "python /path/to/server.py"
+  --mcp-command "bun run mcp"
 
 tunnel-client doctor --profile local-stdio --explain
 tunnel-client run --profile local-stdio
@@ -154,6 +160,126 @@ If the tunnel doesn't appear, verify:
 
 - **MCP Tunnel solves the private-server problem** — you can run MCP servers on a private network (like the portfolio server at 192.168.1.104) and connect them to ChatGPT/Codex without opening firewall ports.
 - **No inbound ports needed** — only outbound HTTPS from the tunnel-client host to `api.openai.com:443`.
-- **The portfolio MCP layer** (`portfolio-ts/src/mcp/`) could be exposed via a tunnel to make portfolio tools available in ChatGPT conversations.
+- **The portfolio MCP layer** (`portfolio-ts/src/mcp/`) is exposed via `portfolio-ts/src/mcp/server.ts` / `bun run mcp`, so it can be attached to `tunnel-client` and made available in ChatGPT conversations.
 - **Multi-org support** — a single tunnel can serve both personal and enterprise workspaces.
 - **Harpoon** — allows controlled outbound HTTP from MCP servers for data enrichment while keeping the connection pattern secure.
+
+---
+
+## End-to-End Runbook: Portfolio MCP + Secure Tunnel
+
+This runbook covers the full setup from local development to a live ChatGPT connector. Steps marked **"operator-only"** require live credentials, tunnel creation, or deployment — do not perform these in CI or automated environments.
+
+### 1. Install and build
+
+```bash
+cd portfolio-ts
+bun install                # installs deps including @modelcontextprotocol/sdk + zod
+bun run typecheck          # verify zero TypeScript errors
+bun test                   # verify all tests pass (DB-gated tests may skip)
+```
+
+### 2. Start the MCP server
+
+Two transport modes are supported:
+
+#### A. Stdio mode (for tunnel-client `--mcp-command`)
+
+```bash
+cd portfolio-ts
+PORTFOLIO_DB_URL="postgresql://..." bun run mcp
+```
+
+The server starts on stdin/stdout and waits for JSON-RPC requests from the
+parent process (tunnel-client). This is the recommended mode for single-host
+deployments.
+
+#### B. HTTP mode (for tunnel-client `--mcp-server-url`)
+
+```bash
+cd portfolio-ts
+PORTFOLIO_DB_URL="postgresql://..." PORTFOLIO_API_CORS_ORIGIN="*" bun run start api --port 8787
+```
+
+The API server exposes `/mcp` (streamable HTTP / SSE) and `/sse` (SSE-only)
+endpoints. Use this mode when `tunnel-client` runs on a different host or
+container.
+
+### 3. Configure tunnel-client (operator-only)
+
+> ⚠️ **Operator-only step.** Do not run in CI. Requires:
+> - A tunnel created at <https://platform.openai.com/settings/organization/tunnels>
+> - A runtime API key with **Tunnels Read + Use** permissions
+> - The `tunnel-client` binary from [GitHub releases](https://github.com/openai/tunnel-client/releases/latest)
+
+A committed, secret-free template is available at
+`portfolio-ts/tunnel-client.example.json`. Copy it and replace all `PLACEHOLDER`
+values with real credentials.
+
+#### Stdio profile setup
+
+```bash
+# Using the template as reference:
+tunnel-client init \
+  --profile portfolio-mcp-stdio \
+  --tunnel-id tunnel_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --mcp-command "bun run mcp"
+
+# Validate the profile and connectivity
+tunnel-client doctor --profile portfolio-mcp-stdio --explain
+
+# Start the tunnel (keeps running, long-polls for work)
+tunnel-client run --profile portfolio-mcp-stdio
+```
+
+#### HTTP profile setup
+
+```bash
+tunnel-client init \
+  --profile portfolio-mcp-http \
+  --tunnel-id tunnel_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --mcp-server-url http://localhost:8787/mcp
+
+tunnel-client doctor --profile portfolio-mcp-http --explain
+tunnel-client run --profile portfolio-mcp-http
+```
+
+### 4. Create ChatGPT Connector (operator-only)
+
+> ⚠️ **Operator-only step.** Requires access to ChatGPT connector settings.
+
+1. Open **ChatGPT connector settings** → **Create custom connector**.
+2. Under **Connection**, choose **Tunnel**.
+3. Select the tunnel created in step 3.
+4. The connector discovers 28 tools (23 read + 5 write) automatically from the
+   MCP `tools/list` response.
+5. Test a read tool (e.g. `status`) and verify the canonical JSON envelope is
+   returned: `{"ok": true, "command": "status", "data": {...}, "meta": {...}}`.
+
+### 5. Verify health
+
+```bash
+# When running in HTTP mode, check readiness
+curl http://localhost:8787/ready
+
+# Check tunnel-client health (admin UI, loopback only by default)
+curl http://localhost:8080/healthz    # tunnel-client's own health
+curl http://localhost:8080/readyz     # tunnel-to-MCP connectivity probe
+```
+
+### 6. Transport mode reference
+
+| Mode | Command | MCP Endpoint | Use case |
+|------|---------|-------------|----------|
+| Stdio | `bun run mcp` | stdin/stdout | Same host, single process |
+| HTTP | `bun run start api --port 8787` | `http://localhost:8787/mcp` | Separate host, container |
+| SSE | `bun run start api --port 8787` | `http://localhost:8787/sse` | Legacy SSE clients |
+
+### 7. Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| Tunnel not appearing in ChatGPT | Verify tunnel is associated with the ChatGPT **workspace** (not just Platform org) |
+| `tunnel-client doctor` fails | Verify runtime API key has **Tunnels Read + Use** permissions |
+| MCP tools return empty | Check `PORTFOLIO_DB_URL` is set and the DB is reachable |
+| `needs_recalc` in meta | Run `portfolio recalculate` or `portfolio sync` to refresh stale prices |

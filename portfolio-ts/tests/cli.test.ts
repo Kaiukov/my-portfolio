@@ -3,6 +3,9 @@ import { describe, expect, test, mock, jest } from "bun:test";
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mock(),
+  getAssetMetadata: mock(async () => []),
+  upsertAssetMetadata: mock(async () => {}),
+  getSql: () => ({}),
   connect: () => {},
   close: async () => {},
 }));
