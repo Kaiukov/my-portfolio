@@ -1,0 +1,32 @@
+{
+  "_comment": "tunnel-client configuration template for portfolio MCP. Copy to ~/.tunnel-client/profiles/<name>.json or pass flags manually. Replace PLACEHOLDER values with real credentials — never commit real keys.",
+  "profiles": {
+    "portfolio-mcp-stdio": {
+      "_description": "Stdio mode — tunnel-client spawns `bun run mcp` as a child process.",
+      "tunnel_id": "tunnel_PLACEHOLDER_REPLACE_ME",
+      "org_id": "org_PLACEHOLDER_REPLACE_ME",
+      "workspace_ids": ["ws_PLACEHOLDER_REPLACE_ME"],
+      "mode": "stdio",
+      "mcp_command": "bun run mcp",
+      "mcp_working_dir": "/path/to/portfolio-ts",
+      "env": {
+        "PORTFOLIO_DB_URL": "postgresql://user:pass@localhost:5432/portfolio"
+      }
+    },
+    "portfolio-mcp-http": {
+      "_description": "HTTP mode — tunnel-client connects to a running portfolio API server at /mcp.",
+      "tunnel_id": "tunnel_PLACEHOLDER_REPLACE_ME",
+      "org_id": "org_PLACEHOLDER_REPLACE_ME",
+      "workspace_ids": ["ws_PLACEHOLDER_REPLACE_ME"],
+      "mode": "http",
+      "mcp_server_url": "http://localhost:8787/mcp",
+      "headers": {}
+    }
+  },
+  "harpoon_config": {
+    "_enabled": false,
+    "_description": "Optional harpoon allowlist for outbound HTTP callouts from MCP server. Only enable and configure if your MCP server needs controlled outbound access.",
+    "allowlist": [],
+    "denylist": []
+  }
+}

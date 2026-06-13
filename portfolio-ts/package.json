@@ -7,7 +7,7 @@
     "portfolio": "src/cli.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun x tsc --noEmit",
     "test": "bun test",
     "start": "bun src/cli.ts",
     "mcp": "bun src/mcp/server.ts"
@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1057.0",
-    "yahoo-finance2": "^3.14.3"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "yahoo-finance2": "^3.14.3",
+    "zod": "^3.25.0"
   }
 }

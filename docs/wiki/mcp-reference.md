@@ -25,24 +25,51 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 
 Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/adapters/shared.ts`).
 
+## Tool Counts
+
+- **23 read tools** — full parity with CLI and REST API
+- **5 write tools** — full parity with CLI and REST API
+- **28 total tools** exposed via `tools/list`
+
+## Transport Modes
+
+| Mode | Entrypoint | Transport | Use case |
+|------|-----------|-----------|----------|
+| Stdio | `bun run mcp` (`src/mcp/server.ts`) | stdin/stdout JSON-RPC | tunnel-client child process |
+| Streamable HTTP | `GET/POST/DELETE /mcp` on API server (`src/api/server.ts`) | HTTP + optional SSE upgrade | tunnel-client remote, containers |
+| SSE (legacy) | `GET /sse` on API server | Server-Sent Events | Legacy SSE-only clients |
+
+The streamable HTTP transport is served by the same `Bun.serve` instance as the REST API — no separate process required. See `src/api/server.ts` for the `/mcp` and `/sse` route handlers.
+
 ## Read Tools
 
 Dispatched via `mcpRead(toolName, args)`. Each tool mirrors its CLI/API counterpart exactly.
 
-| Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
-|---|---|---|---|---|
-| `status` | `status` | — | `as_of` / `asOf` | Yes |
-| `summary` | `summary` | — | `as_of` / `asOf` | Yes |
-| `cash` | `cash` | — | `as_of` / `asOf` | Yes |
-| `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
-| `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
-| `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period` | Yes |
-| `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
-| `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
-| `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
-| `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
-| `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
-| `widget` | `widget` | `days` | `as_of` / `asOf` | — |
+| # | Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
+|---|-----------|---------------|---------------|---------------|---------------|
+| 1 | `status` | `status` | — | `as_of` / `asOf` | Yes |
+| 2 | `summary` | `summary` | — | `as_of` / `asOf` | Yes |
+| 3 | `cash` | `cash` | — | `as_of` / `asOf` | Yes |
+| 4 | `cash_drag` | `cash_drag` | — | `as_of` / `asOf`, `from_date` / `fromDate`, `benchmark_return_rate` / `benchmarkReturnRate`, `cash_return_rate` / `cashReturnRate` | Yes |
+| 5 | `currency_exposure` | `currency_exposure` | — | `as_of` / `asOf` | Yes |
+| 6 | `income` | `income` | — | `as_of` / `asOf`, `from_date` / `fromDate`, `asset` | — |
+| 7 | `realized_gains` | `realized_gains` | — | `from_date` / `fromDate`, `to_date` / `toDate`, `asset`, `by_year` / `byYear` | — |
+| 8 | `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
+| 9 | `rebalance` | `rebalance` | `target` | `as_of` / `asOf` | — |
+| 10 | `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
+| 11 | `diversification` | `diversification` | — | `as_of` / `asOf`, `lookback_days` / `lookbackDays`, `min_correlation` / `minCorrelation` | Yes |
+| 12 | `decomposition` | `decomposition` | — | `as_of` / `asOf` | Yes |
+| 13 | `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period`, `inflation_rate` / `inflationRate` | Yes |
+| 14 | `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
+| 15 | `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| 16 | `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| 17 | `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
+| 18 | `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
+| 19 | `widget` | `widget` | `days` | `as_of` / `asOf` | — |
+| 20 | `asset_metadata` | `asset_metadata` | — | `asset`, `refresh` | — |
+| 21 | `projection` | `projection` | — | `as_of` / `asOf`, `monthly_contribution` / `monthlyContribution`, `annual_return_rate` / `annualReturnRate`, `target_value` / `targetValue`, `projection_years` / `projectionYears`, `inflation_rate` / `inflationRate` | — |
+| 22 | `withdrawal` | `withdrawal` | — | `as_of` / `asOf`, `annual_withdrawal` / `annualWithdrawal`, `withdrawal_rate` / `withdrawalRate`, `time_horizon_years` / `timeHorizonYears`, `expected_return` / `expectedReturn`, `inflation_rate` / `inflationRate` | — |
+| 23 | `asset_analysis` | `asset_analysis` | `ticker` or `asset` | `period`, `lookback_days` / `lookbackDays`, `benchmark`, `as_of` / `as_of_date` / `asOf` / `asOfDate`, `risk_free_rate` / `riskFreeRate` | — |
 
 Tools with "Freshness meta" inject `needs_recalc`/`recalc_warning`/`stale`/`prices_as_of`/`price_age_days` into the response `meta` envelope (see [CLI Reference](cli-reference.md#freshness-meta-fields)).
 
@@ -91,6 +118,26 @@ See the release link shared in the issue for the current tunnel-client build str
 
 - `edit_transaction` and `delete_transaction` support dry-run via `dry_run: true` (or `dryRun`, `dry-run`).
 - `delete_transaction` requires `confirm: true` unless dry-run.
+
+## Dashboard MCP Endpoint (Cloudflare Worker)
+
+The portfolio dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) exposes a separate **9-tool read-only MCP endpoint** backed by Cloudflare KV. This is a deliberately simplified subset — it does **not** aim for full parity with the 28-tool portfolio MCP server.
+
+| # | Dashboard MCP tool | Source |
+|---|-------------------|--------|
+| 1 | `status` | KV snapshot |
+| 2 | `summary` | KV snapshot |
+| 3 | `allocation` | KV snapshot |
+| 4 | `cash` | KV snapshot |
+| 5 | `concentration` | KV snapshot |
+| 6 | `performance` | KV snapshot |
+| 7 | `mwr` | KV snapshot |
+| 8 | `widget` | KV snapshot |
+| 9 | `projection` | KV snapshot |
+
+The dashboard MCP endpoint is stateless and read-only. It serves latest-snapshot data for quick AI queries without needing a live PostgreSQL connection. Write and maintenance operations (`add`, `edit`, `delete`, `exchange`, `split`, `recalculate`, `repair_prices`, `sync`) are **only** available through the full portfolio MCP server.
+
+> **v2 roadmap:** Dashboard live-write and real-time sync are deferred.
 
 ## Error Handling
 
