@@ -9,6 +9,7 @@ mock.module("../src/db.js", () => ({
   querySingle: mockQuerySingle,
   getAssetMetadata: mockGetAssetMetadata,
   upsertAssetMetadata: mock(async () => {}),
+  getSql: () => ({}),
   connect: () => {},
   close: () => {},
 }));

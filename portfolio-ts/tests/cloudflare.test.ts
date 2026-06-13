@@ -1512,6 +1512,7 @@ describe("publishToKv — mocked services + spawn + config", () => {
       querySingle: mockQuerySingle,
       getAssetMetadata: mock(async () => []),
       upsertAssetMetadata: mock(async () => {}),
+      getSql: () => ({}),
       connect: () => {},
       close: () => {},
     }));
@@ -1585,6 +1586,7 @@ describe("publishToKv — mocked services + spawn + config", () => {
       querySingle: mockQuerySingle,
       getAssetMetadata: mock(async () => []),
       upsertAssetMetadata: mock(async () => {}),
+      getSql: () => ({}),
       connect: () => {},
       close: () => {},
     }));
@@ -1687,6 +1689,7 @@ describe("publishToKv — mocked services + spawn + config", () => {
       querySingle: mockQuerySingle,
       getAssetMetadata: mock(async () => []),
       upsertAssetMetadata: mock(async () => {}),
+      getSql: () => ({}),
       connect: () => {},
       close: () => {},
     }));
