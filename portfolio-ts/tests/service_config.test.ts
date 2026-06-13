@@ -3,6 +3,8 @@ import { describe, expect, test, mock } from "bun:test";
 mock.module("../src/db.js", () => ({
   query: mock(() => Promise.resolve([])),
   querySingle: mock(() => Promise.resolve(null)),
+  getAssetMetadata: mock(async () => []),
+  upsertAssetMetadata: mock(async () => {}),
   connect: () => {},
   close: () => {},
   getSql: () => ({

@@ -1510,6 +1510,8 @@ describe("publishToKv — mocked services + spawn + config", () => {
     mock.module("../src/db.js", () => ({
       query: mockQuery,
       querySingle: mockQuerySingle,
+      getAssetMetadata: mock(async () => []),
+      upsertAssetMetadata: mock(async () => {}),
       connect: () => {},
       close: () => {},
     }));
@@ -1581,6 +1583,8 @@ describe("publishToKv — mocked services + spawn + config", () => {
     mock.module("../src/db.js", () => ({
       query: mockQuery,
       querySingle: mockQuerySingle,
+      getAssetMetadata: mock(async () => []),
+      upsertAssetMetadata: mock(async () => {}),
       connect: () => {},
       close: () => {},
     }));
@@ -1681,6 +1685,8 @@ describe("publishToKv — mocked services + spawn + config", () => {
     mock.module("../src/db.js", () => ({
       query: mockQuery,
       querySingle: mockQuerySingle,
+      getAssetMetadata: mock(async () => []),
+      upsertAssetMetadata: mock(async () => {}),
       connect: () => {},
       close: () => {},
     }));
