@@ -888,10 +888,36 @@ describe("handleRequest", () => {
 
   test("GET /mcp returns an SSE stream for Cloudflare/OpenAI server URL mode", async () => {
     const { handleRequest } = await import("../src/api/server.js");
+
+    // Step 1: Initialize session with POST
+    const initReq = new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "test", version: "0" },
+        },
+      }),
+    });
+    const initRes = await handleRequest(initReq);
+    expect(initRes.status).toBe(200);
+    const sessionId = initRes.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    // Step 2: Use session ID for SSE stream with GET
     const req = new Request("http://localhost/mcp", {
       method: "GET",
       headers: {
         Accept: "text/event-stream",
+        "mcp-session-id": sessionId || "",
       },
     });
     const res = await handleRequest(req);

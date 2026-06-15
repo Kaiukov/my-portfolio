@@ -43,6 +43,9 @@ export interface ReadyRouteResult {
 const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
 const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
 
+// One persistent MCP server + transport per ChatGPT/Apps-SDK session, keyed by Mcp-Session-Id.
+const mcpTransports = new Map<string, WebStandardStreamableHTTPServerTransport>();
+
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
     const maxAgeDays = parseIntParam(p, "max_age_days");
@@ -353,32 +356,54 @@ async function parseJsonBody(req: Request): Promise<JsonObject> {
   return parsed as JsonObject;
 }
 
+function mcpJsonRpcError(status: number, code: number, message: string): Response {
+  return new Response(
+    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }),
+    { status, headers: { "Content-Type": "application/json" } },
+  );
+}
+
 async function handleMcpHttpRequest(req: Request): Promise<Response> {
   try {
-    const server = createPortfolioMcpServer();
+    const sessionId = req.headers.get("mcp-session-id") ?? undefined;
+
+    // Existing session: reuse its persistent transport.
+    if (sessionId) {
+      const existing = mcpTransports.get(sessionId);
+      if (existing) {
+        return await existing.handleRequest(req);
+      }
+      return mcpJsonRpcError(404, -32000, "Bad Request: unknown session ID");
+    }
+
+    // No session id. Only a POST (an `initialize` request) may open a new session.
+    if (req.method !== "POST") {
+      return mcpJsonRpcError(400, -32000, "Bad Request: missing session ID");
+    }
+
+    // New session: stateful transport + persistent server, stored on init.
     const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
+      sessionIdGenerator: () => crypto.randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (sid: string) => {
+        mcpTransports.set(sid, transport);
+      },
+      onsessionclosed: (sid: string) => {
+        mcpTransports.delete(sid);
+      },
     });
+    transport.onclose = () => {
+      if (transport.sessionId) {
+        mcpTransports.delete(transport.sessionId);
+      }
+    };
+
+    const server = createPortfolioMcpServer();
     await server.connect(transport);
     return await transport.handleRequest(req);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return new Response(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: {
-          code: -32603,
-          message,
-        },
-        id: null,
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return mcpJsonRpcError(500, -32603, message);
   }
 }
 
