@@ -262,4 +262,180 @@ describe("read parity", () => {
       expect(result1.command).toBe(result2.command);
     });
   });
+
+  describe("API route parity with dispatchRead", () => {
+    it("GET /status delegates to dispatchRead and returns same envelope", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/status"](searchParams);
+      const dispatchResult = await dispatchRead("status", {});
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /allocation delegates to dispatchRead and returns same envelope", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/allocation"](searchParams);
+      const dispatchResult = await dispatchRead("allocation", {});
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /concentration with default top_n=5 delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/concentration"](searchParams);
+      const dispatchResult = await dispatchRead("concentration", { top_n: "5" });
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /concentration with custom top_n delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams("top_n=10");
+      const apiResult = await ROUTES["/concentration"](searchParams);
+      const dispatchResult = await dispatchRead("concentration", { top_n: "10" });
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /diversification with default lookback_days=252 delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/diversification"](searchParams);
+      const dispatchResult = await dispatchRead("diversification", {});
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /performance delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/performance"](searchParams);
+      const dispatchResult = await dispatchRead("performance", {});
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /asset_analysis delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams("ticker=AAPL");
+      const apiResult = await ROUTES["/asset_analysis"](searchParams);
+      const dispatchResult = await dispatchRead("asset_analysis", { ticker: "AAPL" });
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      // Both should return the same structure (ticker, info, metrics, etc.)
+      if (apiResult.ok && dispatchResult.ok) {
+        const apiData = apiResult.data as Record<string, unknown>;
+        const dispatchData = dispatchResult.data as Record<string, unknown>;
+        expect(apiData).toHaveProperty("ticker");
+        expect(apiData).toHaveProperty("info");
+        expect(apiData).toHaveProperty("metrics");
+        expect(dispatchData).toHaveProperty("ticker");
+        expect(dispatchData).toHaveProperty("info");
+        expect(dispatchData).toHaveProperty("metrics");
+        expect(apiData.ticker).toBe(dispatchData.ticker);
+      }
+    });
+
+    it("GET /transactions delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/transactions"](searchParams);
+      const dispatchResult = await dispatchRead("transactions", {});
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("GET /report delegates to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/report"](searchParams);
+      const dispatchResult = await dispatchRead("report", {});
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+      if (apiResult.ok && dispatchResult.ok) {
+        expect(apiResult.data).toEqual(dispatchResult.data);
+      }
+    });
+
+    it("API validation errors match dispatchRead validation errors", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      // rebalance requires target
+      const searchParams = new URLSearchParams();
+      const apiResult = await ROUTES["/rebalance"](searchParams);
+      const dispatchResult = await dispatchRead("rebalance", {});
+
+      expect(apiResult.ok).toBe(false);
+      expect(dispatchResult.ok).toBe(false);
+      if (!apiResult.ok && !dispatchResult.ok) {
+        expect(apiResult.error.code).toBe(dispatchResult.error.code);
+        expect(apiResult.error.message).toContain(dispatchResult.error.message);
+      }
+    });
+
+    it("API route parameters are correctly passed to dispatchRead", async () => {
+      const { dispatchRead } = await import("../src/adapters/read_shared.js");
+      const { ROUTES } = await import("../src/api/server.js");
+
+      // Test with as_of parameter
+      const searchParams = new URLSearchParams("as_of=2026-01-01");
+      const apiResult = await ROUTES["/status"](searchParams);
+      const dispatchResult = await dispatchRead("status", { as_of: "2026-01-01" });
+
+      expect(apiResult.ok).toBe(dispatchResult.ok);
+      expect(apiResult.command).toBe(dispatchResult.command);
+    });
+  });
 });

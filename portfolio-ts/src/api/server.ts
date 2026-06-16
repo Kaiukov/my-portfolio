@@ -1,28 +1,8 @@
-import { success, error, type SuccessEnvelope } from "../response.js";
+import { success, error, type SuccessEnvelope, type Envelope } from "../response.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createPortfolioMcpServer } from "../mcp/server.js";
 import { mcpSessionRegistry } from "./mcp_session_registry.js";
-import { getStatus } from "../commands/status.js";
-import { getSummary } from "../commands/summary.js";
-import { getAllocation } from "../commands/allocation.js";
-import { getCash } from "../commands/cash.js";
-import { getCashDrag } from "../commands/cash_drag.js";
-import { getCurrencyExposure } from "../commands/currency_exposure.js";
-import { getRebalance } from "../commands/rebalance.js";
-import { getIncome } from "../commands/income.js";
-import { getRealizedGains } from "../commands/realized_gains.js";
-import { getPerformance } from "../commands/performance.js";
-import { getMwr } from "../commands/mwr.js";
-import { getHealth } from "../commands/health.js";
-import { verifyPrices } from "../commands/verify_prices.js";
-import { getDiversification } from "../commands/diversification.js";
-import { getConcentration } from "../commands/concentration.js";
-import { getPriceFreshness } from "../commands/freshness.js";
-import { getAssetMetadataRecords } from "../commands/asset_metadata.js";
-import { getDecomposition } from "../commands/decomposition.js";
-import { getProjection } from "../commands/projection.js";
-import { getWithdrawal } from "../commands/withdrawal.js";
-import { getAssetAnalysis } from "../commands/asset_analysis.js";
+import { dispatchRead } from "../adapters/read_shared.js";
 import { ValidationError } from "../validators.js";
 import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
 
@@ -32,7 +12,7 @@ type RequestContext = {
   corsOrigin?: string;
 };
 
-type Handler = (searchParams: URLSearchParams) => Promise<SuccessEnvelope>;
+type Handler = (searchParams: URLSearchParams) => Promise<Envelope>;
 
 type JsonObject = Record<string, unknown>;
 
@@ -44,208 +24,54 @@ export interface ReadyRouteResult {
 const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
 const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
 
-const ROUTES: Record<string, Handler> = {
-  "/health": async (p) => {
-    const maxAgeDays = parseIntParam(p, "max_age_days");
-    const data = await getHealth(maxAgeDays);
-    return success("health", data);
-  },
-  "/status": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getStatus(asOf);
-    return success("status", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/summary": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getSummary(asOf);
-    return success("summary", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/allocation": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getAllocation(asOf);
-    return success("allocation", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/rebalance": async (p) => {
-    const targetStr = strParam(p, "target");
-    if (!targetStr) {
-      throw new ValidationError("target query parameter is required (e.g. ?target=VTI=50,VXUS=20,BND=30)");
-    }
-    const asOf = strParam(p, "as_of");
-    const data = await getRebalance(targetStr, asOf);
-    return success("rebalance", data, data.rows.length);
-  },
+function argsFromSearchParams(p: URLSearchParams): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  for (const [key, value] of p.entries()) {
+    args[key] = value;
+  }
+  return args;
+}
+
+export const ROUTES: Record<string, Handler> = {
+  "/health": async (p) => dispatchRead("health", argsFromSearchParams(p)),
+  "/status": async (p) => dispatchRead("status", argsFromSearchParams(p)),
+  "/summary": async (p) => dispatchRead("summary", argsFromSearchParams(p)),
+  "/allocation": async (p) => dispatchRead("allocation", argsFromSearchParams(p)),
+  "/rebalance": async (p) => dispatchRead("rebalance", argsFromSearchParams(p)),
   "/concentration": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const topN = parseIntParam(p, "top_n") ?? 5;
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getConcentration(asOf, topN);
-    return success("concentration", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/diversification": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const lookbackDays = parseIntParam(p, "lookback_days") ?? 252;
-    const minCorrelation = parseFloatParam(p, "min_correlation") ?? 0.0;
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getDiversification(asOf, lookbackDays, minCorrelation);
-    return success("diversification", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/decomposition": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getDecomposition(asOf);
-    return success("decomposition", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/cash": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getCash(asOf);
-    return success("cash", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/cash_drag": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const fromDate = strParam(p, "from_date");
-    const benchmarkReturnRate = parseFloatParam(p, "benchmark_return_rate");
-    const cashReturnRate = parseFloatParam(p, "cash_return_rate");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getCashDrag({ asOfDate: asOf, fromDate, benchmarkReturnRate, cashReturnRate });
-    return success("cash_drag", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/currency_exposure": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getCurrencyExposure(asOf);
-    return success("currency_exposure", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/income": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const fromDate = strParam(p, "from_date");
-    const asset = strParam(p, "asset");
-    const data = await getIncome(asOf, fromDate, asset);
-    return success("income", data, data.rows.length);
-  },
-  "/realized_gains": async (p) => {
-    const fromDate = strParam(p, "from_date");
-    const toDate = strParam(p, "to_date");
-    const asset = strParam(p, "asset");
-    const byYear = parseBoolValue(p.get("by_year")) ?? false;
-    const data = await getRealizedGains({ fromDate, toDate, asset, byYear });
-    return success("realized_gains", data, data.rows.length);
-  },
-  "/performance": async (p) => {
-    const asOfDate = strParam(p, "as_of");
-    const benchmark = strParam(p, "benchmark");
-    const fromDate = strParam(p, "from_date");
-    const period = strParam(p, "period");
-    const inflationRate = strParam(p, "inflation_rate");
-    const freshnessMeta = await getPriceFreshness(asOfDate);
-    const { data, benchmark: resolvedBenchmark } = await getPerformance({ asOfDate, benchmark, fromDate, period, inflationRate });
-    const meta = { ...(freshnessMeta as unknown as Record<string, unknown>), benchmark: resolvedBenchmark };
-    return success("performance", data, null, undefined, meta);
-  },
-  "/mwr": async (p) => {
-    const asOf = strParam(p, "as_of");
-    const freshnessMeta = await getPriceFreshness(asOf);
-    const data = await getMwr(asOf);
-    return success("mwr", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
-  },
-  "/verify_prices": async (p) => {
-    const maxAgeDays = parseIntParam(p, "max_age_days");
-    const data = await verifyPrices(maxAgeDays);
-    return success("verify_prices", data);
-  },
-  "/asset_metadata": async (p) => {
-    const asset = strParam(p, "asset");
-    const refresh = parseBoolValue(p.get("refresh")) ?? false;
-    const data = await getAssetMetadataRecords({ asset, refresh });
-    return success("asset_metadata", data, data.assets.length);
-  },
-  "/projection": async (p) => {
-    const asOfDate = strParam(p, "as_of");
-    const monthlyContribution = parseFloatParam(p, "monthly_contribution");
-    const annualReturnRate = parseFloatParam(p, "annual_return_rate");
-    const targetValue = parseFloatParam(p, "target_value");
-    const projectionYears = parseIntParam(p, "projection_years");
-    const inflationRate = parseFloatParam(p, "inflation_rate");
-    const data = await getProjection({
-      asOfDate,
-      monthlyContribution,
-      annualReturnRate,
-      targetValue,
-      projectionYears,
-      inflationRate,
-    });
-    return success("projection", data);
-  },
-  "/withdrawal": async (p) => {
-    const asOfDate = strParam(p, "as_of");
-    const annualWithdrawal = parseFloatParam(p, "annual_withdrawal");
-    const withdrawalRate = parseFloatParam(p, "withdrawal_rate");
-    const timeHorizonYears = parseIntParam(p, "time_horizon_years");
-    const expectedReturn = parseFloatParam(p, "expected_return");
-    const inflationRate = parseFloatParam(p, "inflation_rate");
-    const data = await getWithdrawal({
-      asOfDate,
-      annualWithdrawal,
-      withdrawalRate,
-      timeHorizonYears,
-      expectedReturn,
-      inflationRate,
-    });
-    return success("withdrawal", data);
-  },
-  "/asset_analysis": async (p) => {
-    const ticker = strParam(p, "ticker");
-    const asset = strParam(p, "asset");
-    if (!ticker && !asset) {
-      throw new ValidationError("ticker or asset query parameter is required (e.g. ?ticker=AAPL)");
+    const args = argsFromSearchParams(p);
+    // concentration default: top_n=5 (not set by dispatchRead)
+    if (args["top_n"] === undefined && args["topN"] === undefined) {
+      args["top_n"] = "5";
     }
-    const period = strParam(p, "period");
-    const lookbackDays = parseIntParam(p, "lookback_days") ?? parseIntParam(p, "lookbackDays");
-    const benchmark = strParam(p, "benchmark");
-    const asOfDate = strParam(p, "as_of") ?? strParam(p, "as_of_date") ?? strParam(p, "asOf");
-    const riskFreeRate = parseFloatParam(p, "risk_free_rate") ?? parseFloatParam(p, "riskFreeRate");
-    const data = await getAssetAnalysis({
-      ticker,
-      asset,
-      period: period as Parameters<typeof getAssetAnalysis>[0]["period"],
-      lookbackDays,
-      benchmark,
-      asOfDate,
-      riskFreeRate,
-    });
-    return success("asset_analysis", data);
+    return dispatchRead("concentration", args);
   },
+  "/diversification": async (p) => dispatchRead("diversification", argsFromSearchParams(p)),
+  "/decomposition": async (p) => dispatchRead("decomposition", argsFromSearchParams(p)),
+  "/cash": async (p) => dispatchRead("cash", argsFromSearchParams(p)),
+  "/cash_drag": async (p) => dispatchRead("cash_drag", argsFromSearchParams(p)),
+  "/currency_exposure": async (p) => dispatchRead("currency_exposure", argsFromSearchParams(p)),
+  "/income": async (p) => dispatchRead("income", argsFromSearchParams(p)),
+  "/realized_gains": async (p) => dispatchRead("realized_gains", argsFromSearchParams(p)),
+  "/performance": async (p) => dispatchRead("performance", argsFromSearchParams(p)),
+  "/mwr": async (p) => dispatchRead("mwr", argsFromSearchParams(p)),
+  "/verify_prices": async (p) => dispatchRead("verify_prices", argsFromSearchParams(p)),
+  "/asset_metadata": async (p) => dispatchRead("asset_metadata", argsFromSearchParams(p)),
+  "/projection": async (p) => dispatchRead("projection", argsFromSearchParams(p)),
+  "/withdrawal": async (p) => dispatchRead("withdrawal", argsFromSearchParams(p)),
+  "/asset_analysis": async (p) => dispatchRead("asset_analysis", argsFromSearchParams(p)),
+  "/transactions": async (p) => dispatchRead("transactions", argsFromSearchParams(p)),
+  "/report": async (p) => dispatchRead("report", argsFromSearchParams(p)),
 };
 
 function routeCommandForPath(path: string, method: string): string {
   if (path === "/transactions") return method === "GET" ? "transactions" : "add";
+  if (path === "/report") return "report";
   if (path === "/exchange") return "exchange";
   if (path === "/split") return "split";
   if (TRANSACTION_ID_ROUTE.test(path)) return method === "DELETE" ? "delete" : "edit";
   if (MCP_HTTP_PATHS.has(path)) return "mcp";
-  if (path === "/asset_analysis") return "asset_analysis";
   return "api";
-}
-
-function strParam(p: URLSearchParams, key: string): string | undefined {
-  return p.get(key) ?? undefined;
-}
-
-function parseIntParam(p: URLSearchParams, key: string): number | undefined {
-  const raw = p.get(key);
-  if (raw === null) return undefined;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function parseFloatParam(p: URLSearchParams, key: string): number | undefined {
-  const raw = p.get(key);
-  if (raw === null) return undefined;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : undefined;
 }
 
 function strField(body: JsonObject, key: string): string | undefined {
@@ -305,7 +131,7 @@ function allowedMethodsForPath(path: string): string[] | null {
   if (path === "/ready") return ["GET"];
   if (path === "/withdrawal") return ["GET"];
   if (path === "/projection") return ["GET"];
-  if (path === "/transactions") return ["POST"];
+  if (path === "/transactions") return ["GET", "POST"];
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
   if (path === "/exchange") return ["POST"];
   if (path === "/split") return ["POST"];
@@ -463,7 +289,15 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
     if (req.method === "GET") {
       const handler = ROUTES[path];
       const envelope = await handler(url.searchParams);
-      return respond(envelope, 200);
+      const status = envelope.ok ? 200 : (!envelope.ok && envelope.error?.code === "INTERNAL_ERROR") ? 500 : 400;
+      return respond(envelope, status);
+    }
+
+    if (path === "/transactions" && req.method === "GET") {
+      const handler = ROUTES[path];
+      const envelope = await handler(url.searchParams);
+      const status = envelope.ok ? 200 : (!envelope.ok && envelope.error?.code === "INTERNAL_ERROR") ? 500 : 400;
+      return respond(envelope, status);
     }
 
     if (path === "/transactions" && req.method === "POST") {
