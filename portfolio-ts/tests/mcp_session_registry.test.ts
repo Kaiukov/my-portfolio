@@ -37,7 +37,7 @@ describe("McpSessionRegistry", () => {
     registry.set("session-1", transport as any);
 
     expect(registry.size).toBe(1);
-    expect(registry.get("session-1")).toBe(transport);
+    expect(registry.get("session-1")).toBe(transport as any);
   });
 
   test("get marks entry as most-recently-used", async () => {
@@ -61,10 +61,10 @@ describe("McpSessionRegistry", () => {
     registry.set("session-4", t4 as any);
 
     expect(registry.size).toBe(3);
-    expect(registry.get("session-1")).toBe(t1); // Was accessed, still there
+    expect(registry.get("session-1")).toBe(t1 as any); // Was accessed, still there
     expect(registry.get("session-2")).toBeUndefined(); // Was evicted (oldest)
-    expect(registry.get("session-3")).toBe(t3); // Still there
-    expect(registry.get("session-4")).toBe(t4); // Newly inserted
+    expect(registry.get("session-3")).toBe(t3 as any); // Still there
+    expect(registry.get("session-4")).toBe(t4 as any); // Newly inserted
   });
 
   test("evicts least-recently-used when at capacity", () => {
@@ -84,9 +84,9 @@ describe("McpSessionRegistry", () => {
 
     expect(registry.size).toBe(3);
     expect(registry.get("session-1")).toBeUndefined(); // Evicted
-    expect(registry.get("session-2")).toBe(t2); // Still there
-    expect(registry.get("session-3")).toBe(t3); // Still there
-    expect(registry.get("session-4")).toBe(t4); // Newly inserted
+    expect(registry.get("session-2")).toBe(t2 as any); // Still there
+    expect(registry.get("session-3")).toBe(t3 as any); // Still there
+    expect(registry.get("session-4")).toBe(t4 as any); // Newly inserted
 
     // Check that evicted transport was closed
     expect(t1.closeCalls).toBe(1);
@@ -120,7 +120,7 @@ describe("McpSessionRegistry", () => {
     registry.set("session-1", transport2 as any);
 
     expect(registry.size).toBe(1);
-    expect(registry.get("session-1")).toBe(transport2);
+    expect(registry.get("session-1")).toBe(transport2 as any);
   });
 
   test("idle timer removes session after timeout", async () => {
@@ -131,7 +131,7 @@ describe("McpSessionRegistry", () => {
     fastRegistry.set("session-1", transport as any);
 
     expect(fastRegistry.size).toBe(1);
-    expect(fastRegistry.get("session-1")).toBe(transport);
+    expect(fastRegistry.get("session-1")).toBe(transport as any);
 
     // Wait for idle timer to fire
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -152,14 +152,14 @@ describe("McpSessionRegistry", () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Access the session to reset timer
-    expect(fastRegistry.get("session-1")).toBe(transport);
+    expect(fastRegistry.get("session-1")).toBe(transport as any);
 
     // Wait another 80ms (total 130ms, should still be alive due to reset)
     await new Promise(resolve => setTimeout(resolve, 80));
 
     // Session should still be alive
     expect(fastRegistry.size).toBe(1);
-    expect(fastRegistry.get("session-1")).toBe(transport);
+    expect(fastRegistry.get("session-1")).toBe(transport as any);
     expect(transport.closeCalls).toBe(0);
   });
 
@@ -221,7 +221,7 @@ describe("McpSessionRegistry", () => {
     defaultRegistry.set("session-1", transport as any);
 
     expect(defaultRegistry.size).toBe(1);
-    expect(defaultRegistry.get("session-1")).toBe(transport);
+    expect(defaultRegistry.get("session-1")).toBe(transport as any);
   });
 
   test("close handles errors gracefully", () => {
@@ -264,8 +264,8 @@ describe("McpSessionRegistry", () => {
 
     expect(registry.size).toBe(3);
     expect(registry.get("session-3")).toBeUndefined(); // Evicted (oldest)
-    expect(registry.get("session-1")).toBe(t1); // Most recent, still there
-    expect(registry.get("session-2")).toBe(t2); // Still there
-    expect(registry.get("session-4")).toBe(t4); // Newly inserted
+    expect(registry.get("session-1")).toBe(t1 as any); // Most recent, still there
+    expect(registry.get("session-2")).toBe(t2 as any); // Still there
+    expect(registry.get("session-4")).toBe(t4 as any); // Newly inserted
   });
 });
