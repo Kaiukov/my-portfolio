@@ -500,7 +500,7 @@ describe("Withdrawal — DB-gated integration", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.data).toBeDefined();
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     const pv = Number(data.portfolio_value);
@@ -534,7 +534,7 @@ describe("Withdrawal — DB-gated integration", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.data).toBeDefined();
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     const maxSafe = Number(data.max_safe_withdrawal);
@@ -558,7 +558,7 @@ describe("Withdrawal — DB-gated integration", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.data).toBeDefined();
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     const pv = Number(data.portfolio_value);
@@ -576,7 +576,7 @@ describe("Withdrawal — DB-gated integration", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.data).toBeDefined();
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     expect(data.terminal_value).toBe(data.portfolio_value);
