@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { loadEnv } from "./env.js";
 import { success, error, buildPagination } from "./response.js";
+import { dispatchRead } from "./adapters/read_shared.js";
 import { APP_VERSION } from "./version.js";
-import { getStatus } from "./commands/status.js";
 import { getTransactions } from "./commands/transactions.js";
 import { addTransaction } from "./commands/add.js";
 import { editTransaction, editDryRun } from "./commands/edit.js";
@@ -14,21 +14,6 @@ import { verifyPrices } from "./commands/verify_prices.js";
 import { repairPrices, repairPricesDryRun, runDailyMaintenanceCheck } from "./commands/repair_prices.js";
 import { fetchPrices } from "./providers/yahoo.js";
 import { getReport } from "./commands/report.js";
-import { getCash } from "./commands/cash.js";
-import { getCashDrag } from "./commands/cash_drag.js";
-import { getAllocation } from "./commands/allocation.js";
-import { getSummary } from "./commands/summary.js";
-import { getConcentration } from "./commands/concentration.js";
-import { getDiversification } from "./commands/diversification.js";
-import { getPerformance } from "./commands/performance.js";
-import { getMwr } from "./commands/mwr.js";
-import { getHealth } from "./commands/health.js";
-import { getWidget } from "./commands/widget.js";
-import { getCurrencyExposure } from "./commands/currency_exposure.js";
-import { getRebalance } from "./commands/rebalance.js";
-import { getIncome } from "./commands/income.js";
-import { getRealizedGains } from "./commands/realized_gains.js";
-import { getDecomposition } from "./commands/decomposition.js";
 import { initDb } from "./commands/init.js";
 import { backupDb } from "./commands/backup.js";
 import {
@@ -50,10 +35,6 @@ import { publishDashboardToKv } from "./cloudflare/dashboard_publish.js";
 import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
 import { createApiServer } from "./api/server.js";
 import { ValidationError, NotFoundError } from "./validators.js";
-import { getAssetMetadataRecords } from "./commands/asset_metadata.js";
-import { getProjection } from "./commands/projection.js";
-import { getWithdrawal } from "./commands/withdrawal.js";
-import { getAssetAnalysis } from "./commands/asset_analysis.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -198,14 +179,16 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "status": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const data = await getStatus(asOfDate);
-      console.log(JSON.stringify(success("status", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("status", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "transactions": {
+      const args: Record<string, unknown> = {};
       const limit = (() => {
         const v = int(flags, "limit");
         if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
@@ -214,6 +197,7 @@ export async function dispatch(argv: string[]): Promise<void> {
         }
         return v ?? 50;
       })();
+      args["limit"] = limit;
       const offset = (() => {
         const v = int(flags, "offset");
         if (v !== undefined && (!Number.isFinite(v) || v < 0)) {
@@ -222,11 +206,13 @@ export async function dispatch(argv: string[]): Promise<void> {
         }
         return v ?? 0;
       })();
+      args["offset"] = offset;
       const startDate = str(flags, "start-date") ?? str(flags, "start_date");
+      if (startDate !== undefined) args["start_date"] = startDate;
       const endDate = str(flags, "end-date") ?? str(flags, "end_date");
-      const { data, total } = await getTransactions(limit, offset, startDate, endDate);
-      const pagination = buildPagination(limit, offset, total);
-      console.log(JSON.stringify(success("transactions", data, data.length, pagination), null, 2));
+      if (endDate !== undefined) args["end_date"] = endDate;
+      const env = await dispatchRead("transactions", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
@@ -398,19 +384,27 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "verify_prices": {
+      const args: Record<string, unknown> = {};
       const maxAgeDays = int(flags, "max-age-days");
-      const result = await verifyPrices(maxAgeDays);
-      console.log(JSON.stringify(success("verify_prices", result), null, 2));
+      if (maxAgeDays !== undefined) args["max_age_days"] = maxAgeDays;
+      const env = await dispatchRead("verify_prices", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "asset-metadata":
     case "asset_metadata": {
+      const args: Record<string, unknown> = {};
       const ticker = str(flags, "asset");
+      if (ticker !== undefined) args["asset"] = ticker;
       const refresh = bool(flags, "refresh");
-      const result = await getAssetMetadataRecords({ asset: ticker, refresh });
-      const count = result.assets.length;
-      console.log(JSON.stringify(success("asset-metadata", result, count), null, 2));
+      if (refresh) args["refresh"] = true;
+      const env = await dispatchRead("asset_metadata", args);
+      // Preserve original command name for CLI
+      if (env.ok) {
+        env.command = "asset-metadata";
+      }
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
@@ -472,6 +466,7 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "report": {
+      const args: Record<string, unknown> = {};
       const limit = (() => {
         const v = int(flags, "limit");
         if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
@@ -480,6 +475,7 @@ export async function dispatch(argv: string[]): Promise<void> {
         }
         return v ?? 50;
       })();
+      args["limit"] = limit;
       const offset = (() => {
         const v = int(flags, "offset");
         if (v !== undefined && (!Number.isFinite(v) || v < 0)) {
@@ -488,106 +484,115 @@ export async function dispatch(argv: string[]): Promise<void> {
         }
         return v ?? 0;
       })();
+      args["offset"] = offset;
       const startDate = str(flags, "start-date") ?? str(flags, "start_date");
+      if (startDate !== undefined) args["start_date"] = startDate;
       const endDate = str(flags, "end-date") ?? str(flags, "end_date");
-      const { data, total } = await getReport(limit, offset, startDate, endDate);
-      const pagination = buildPagination(limit, offset, total);
-      console.log(JSON.stringify(success("report", data, data.length, pagination), null, 2));
+      if (endDate !== undefined) args["end_date"] = endDate;
+      const env = await dispatchRead("report", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "health": {
+      const args: Record<string, unknown> = {};
       const maxAgeDays = int(flags, "max-age-days");
-      const result = await getHealth(maxAgeDays);
-      console.log(JSON.stringify(success("health", result), null, 2));
+      if (maxAgeDays !== undefined) args["max_age_days"] = maxAgeDays;
+      const env = await dispatchRead("health", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "asset_analysis": {
+      const args: Record<string, unknown> = {};
       const ticker = str(flags, "ticker");
+      if (ticker !== undefined) args["ticker"] = ticker;
       const asset = str(flags, "asset");
+      if (asset !== undefined) args["asset"] = asset;
       if (!ticker && !asset) {
         console.log(JSON.stringify(error("asset_analysis", "VALIDATION_ERROR", "--ticker or --asset is required"), null, 2));
         process.exit(1);
         return;
       }
       const period = str(flags, "period");
+      if (period !== undefined) args["period"] = period;
       const lookbackDays = int(flags, "lookback-days") ?? int(flags, "lookback_days");
+      if (lookbackDays !== undefined) args["lookback_days"] = lookbackDays;
       const benchmark = str(flags, "benchmark");
+      if (benchmark !== undefined) args["benchmark"] = benchmark;
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const riskFreeRate = float(flags, "risk-free-rate") ?? float(flags, "risk_free_rate");
-      const data = await getAssetAnalysis({
-        ticker,
-        asset,
-        period: period as Parameters<typeof getAssetAnalysis>[0]["period"],
-        lookbackDays,
-        benchmark,
-        asOfDate,
-        riskFreeRate,
-      });
-      console.log(JSON.stringify(success("asset_analysis", data), null, 2));
+      if (riskFreeRate !== undefined) args["risk_free_rate"] = riskFreeRate;
+      const env = await dispatchRead("asset_analysis", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "withdrawal": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const annualWithdrawal = float(flags, "annual-withdrawal") ?? float(flags, "annual_withdrawal");
+      if (annualWithdrawal !== undefined) args["annual_withdrawal"] = annualWithdrawal;
       const withdrawalRate = float(flags, "withdrawal-rate") ?? float(flags, "withdrawal_rate");
+      if (withdrawalRate !== undefined) args["withdrawal_rate"] = withdrawalRate;
       const timeHorizonYears = int(flags, "time-horizon-years") ?? int(flags, "time_horizon_years");
+      if (timeHorizonYears !== undefined) args["time_horizon_years"] = timeHorizonYears;
       const expectedReturn = float(flags, "expected-return") ?? float(flags, "expected_return");
+      if (expectedReturn !== undefined) args["expected_return"] = expectedReturn;
       const inflationRate = float(flags, "inflation-rate") ?? float(flags, "inflation_rate");
-
-      const data = await getWithdrawal({
-        asOfDate,
-        annualWithdrawal,
-        withdrawalRate,
-        timeHorizonYears,
-        expectedReturn,
-        inflationRate,
-      });
-
-      console.log(JSON.stringify(success("withdrawal", data), null, 2));
+      if (inflationRate !== undefined) args["inflation_rate"] = inflationRate;
+      const env = await dispatchRead("withdrawal", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "projection": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const monthlyContribution = float(flags, "monthly-contribution") ?? float(flags, "monthly_contribution");
+      if (monthlyContribution !== undefined) args["monthly_contribution"] = monthlyContribution;
       const annualReturnRate = float(flags, "annual-return-rate") ?? float(flags, "annual_return_rate");
+      if (annualReturnRate !== undefined) args["annual_return_rate"] = annualReturnRate;
       const targetValue = float(flags, "target-value") ?? float(flags, "target_value");
+      if (targetValue !== undefined) args["target_value"] = targetValue;
       const projectionYears = int(flags, "projection-years") ?? int(flags, "projection_years");
+      if (projectionYears !== undefined) args["projection_years"] = projectionYears;
       const inflationRate = float(flags, "inflation-rate") ?? float(flags, "inflation_rate");
-
-      const data = await getProjection({
-        asOfDate,
-        monthlyContribution,
-        annualReturnRate,
-        targetValue,
-        projectionYears,
-        inflationRate,
-      });
-
-      console.log(JSON.stringify(success("projection", data), null, 2));
+      if (inflationRate !== undefined) args["inflation_rate"] = inflationRate;
+      const env = await dispatchRead("projection", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "income": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      if (fromDate !== undefined) args["from_date"] = fromDate;
       const asset = str(flags, "asset");
-      const result = await getIncome(asOfDate, fromDate, asset);
-      console.log(JSON.stringify(success("income", result, result.rows.length), null, 2));
+      if (asset !== undefined) args["asset"] = asset;
+      const env = await dispatchRead("income", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "realized-gains":
     case "gains": {
+      const args: Record<string, unknown> = {};
       const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      if (fromDate !== undefined) args["from_date"] = fromDate;
       const toDate = str(flags, "to-date") ?? str(flags, "to_date");
+      if (toDate !== undefined) args["to_date"] = toDate;
       const asset = str(flags, "asset");
+      if (asset !== undefined) args["asset"] = asset;
       const byYear = bool(flags, "by-year") || bool(flags, "by_year");
-      const result = await getRealizedGains({ fromDate, toDate, asset, byYear });
-      console.log(JSON.stringify(success("realized_gains", result, result.rows.length), null, 2));
+      if (byYear) args["by_year"] = true;
+      const env = await dispatchRead("realized_gains", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
@@ -752,29 +757,35 @@ export async function dispatch(argv: string[]): Promise<void> {
     }
 
     case "cash": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getCash(asOfDate);
-      console.log(JSON.stringify(success("cash", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("cash", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "cash_drag": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      if (fromDate !== undefined) args["from_date"] = fromDate;
       const benchmarkReturnRate = float(flags, "benchmark-return-rate") ?? float(flags, "benchmark_return_rate");
+      if (benchmarkReturnRate !== undefined) args["benchmark_return_rate"] = benchmarkReturnRate;
       const cashReturnRate = float(flags, "cash-return-rate") ?? float(flags, "cash_return_rate");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getCashDrag({ asOfDate, fromDate, benchmarkReturnRate, cashReturnRate });
-      console.log(JSON.stringify(success("cash_drag", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (cashReturnRate !== undefined) args["cash_return_rate"] = cashReturnRate;
+      const env = await dispatchRead("cash_drag", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "allocation": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getAllocation(asOfDate);
-      console.log(JSON.stringify(success("allocation", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("allocation", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
@@ -785,77 +796,93 @@ export async function dispatch(argv: string[]): Promise<void> {
         process.exit(1);
         return;
       }
+      const args: Record<string, unknown> = { target: targetStr };
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const result = await getRebalance(targetStr, asOfDate);
-      console.log(JSON.stringify(success("rebalance", result, result.rows.length), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("rebalance", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "summary": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getSummary(asOfDate);
-      console.log(JSON.stringify(success("summary", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("summary", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "concentration": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getConcentration(asOfDate, topN);
-      console.log(JSON.stringify(success("concentration", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      args["top_n"] = topN;
+      const env = await dispatchRead("concentration", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "decomposition": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getDecomposition(asOfDate);
-      console.log(JSON.stringify(success("decomposition", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("decomposition", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "diversification": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const lookbackDays = int(flags, "lookback-days") ?? int(flags, "lookback_days") ?? 252;
+      args["lookback_days"] = lookbackDays;
       const minCorrelation = float(flags, "min-correlation") ?? float(flags, "min_correlation") ?? 0.0;
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getDiversification(asOfDate, lookbackDays, minCorrelation);
-      console.log(JSON.stringify(success("diversification", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      args["min_correlation"] = minCorrelation;
+      const env = await dispatchRead("diversification", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "currency_exposure": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getCurrencyExposure(asOfDate);
-      console.log(JSON.stringify(success("currency_exposure", result, result.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("currency_exposure", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "performance": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
       const benchmark = str(flags, "benchmark");
+      if (benchmark !== undefined) args["benchmark"] = benchmark;
       const fromDate = str(flags, "from-date") ?? str(flags, "from_date");
+      if (fromDate !== undefined) args["from_date"] = fromDate;
       const period = str(flags, "period");
+      if (period !== undefined) args["period"] = period;
       const inflationRate = str(flags, "inflation-rate") ?? str(flags, "inflation_rate");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const { data, benchmark: resolvedBenchmark } = await getPerformance({ asOfDate, benchmark, fromDate, period, inflationRate });
-      const meta = { ...(freshnessMeta as unknown as Record<string, unknown>), benchmark: resolvedBenchmark };
-      console.log(JSON.stringify(success("performance", data, null, undefined, meta), null, 2));
+      if (inflationRate !== undefined) args["inflation_rate"] = inflationRate;
+      const env = await dispatchRead("performance", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "mwr": {
+      const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const freshnessMeta = await getPriceFreshness(asOfDate);
-      const result = await getMwr(asOfDate);
-      console.log(JSON.stringify(success("mwr", result, null, undefined, freshnessMeta as unknown as Record<string, unknown>), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("mwr", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 
     case "widget": {
+      const args: Record<string, unknown> = {};
       const days = (() => {
         const v = int(flags, "days");
         if (v !== undefined && (!Number.isFinite(v) || v <= 0)) {
@@ -865,9 +892,11 @@ export async function dispatch(argv: string[]): Promise<void> {
         }
         return v ?? 30;
       })();
+      args["days"] = days;
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
-      const result = await getWidget(days, asOfDate);
-      console.log(JSON.stringify(success("widget", result, result.series.length), null, 2));
+      if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      const env = await dispatchRead("widget", args);
+      console.log(JSON.stringify(env, null, 2));
       return;
     }
 

@@ -800,7 +800,7 @@ describe("handleRequest", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.ok).toBe(false);
-    expect(body.command).toBe("api");
+    expect(body.command).toBe("summary");
     expect(body.error.code).toBe("INTERNAL_ERROR");
     expect(body.error.message).toBe("Connection refused");
   });
