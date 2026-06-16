@@ -1,6 +1,7 @@
 import { success, error, type SuccessEnvelope } from "../response.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createPortfolioMcpServer } from "../mcp/server.js";
+import { mcpSessionRegistry } from "./mcp_session_registry.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -42,9 +43,6 @@ export interface ReadyRouteResult {
 
 const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
 const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
-
-// One persistent MCP server + transport per ChatGPT/Apps-SDK session, keyed by Mcp-Session-Id.
-const mcpTransports = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
 const ROUTES: Record<string, Handler> = {
   "/health": async (p) => {
@@ -364,12 +362,22 @@ function mcpJsonRpcError(status: number, code: number, message: string): Respons
 }
 
 async function handleMcpHttpRequest(req: Request): Promise<Response> {
+  // Optional bearer auth check
+  const mcpToken = process.env.PORTFOLIO_MCP_TOKEN;
+  if (mcpToken) {
+    const authHeader = req.headers.get("authorization");
+    const expectedAuth = `Bearer ${mcpToken}`;
+    if (authHeader !== expectedAuth) {
+      return mcpJsonRpcError(401, -32000, "Unauthorized");
+    }
+  }
+
   try {
     const sessionId = req.headers.get("mcp-session-id") ?? undefined;
 
     // Existing session: reuse its persistent transport.
     if (sessionId) {
-      const existing = mcpTransports.get(sessionId);
+      const existing = mcpSessionRegistry.get(sessionId);
       if (existing) {
         return await existing.handleRequest(req);
       }
@@ -386,15 +394,15 @@ async function handleMcpHttpRequest(req: Request): Promise<Response> {
       sessionIdGenerator: () => crypto.randomUUID(),
       enableJsonResponse: true,
       onsessioninitialized: (sid: string) => {
-        mcpTransports.set(sid, transport);
+        mcpSessionRegistry.set(sid, transport);
       },
       onsessionclosed: (sid: string) => {
-        mcpTransports.delete(sid);
+        mcpSessionRegistry.delete(sid);
       },
     });
     transport.onclose = () => {
       if (transport.sessionId) {
-        mcpTransports.delete(transport.sessionId);
+        mcpSessionRegistry.delete(transport.sessionId);
       }
     };
 
