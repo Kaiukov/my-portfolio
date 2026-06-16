@@ -2586,9 +2586,15 @@ $$ LANGUAGE plpgsql STABLE;
 --   total_fees_and_taxes = (fees_end - fees_start) + (taxes_end - taxes_start)
 --   total_growth_usd    = current_value - initial_value
 --   from_contributions_usd = net_deposits
---   from_returns_usd       = market_return = delta of portfolio_status_sql.total_gain
---                            (where total_gain = portfolio_value - (deposits - withdrawals))
---                            This guarantees: total_growth_usd = from_contributions_usd + from_returns_usd
+--   from_returns_usd       = market_return = delta of (realized_gain + unrealized_gain)
+--                            (pure price/realized P/L). Deliberately NOT delta of
+--                            portfolio_status_sql.total_gain, because that field =
+--                            portfolio_value - (deposits - withdrawals) also absorbs
+--                            dividend/interest income and standalone fees, which would
+--                            mis-attribute income as market returns. With market_return
+--                            defined this way the identity that holds is:
+--                            total_growth_usd = from_contributions_usd + from_returns_usd
+--                                             + total_income - total_fees_and_taxes
 --
 -- Guards:
 --   total_growth_usd = 0 -> percentage split is NULL to avoid a misleading 0/0
@@ -2645,7 +2651,15 @@ AS $$
             COALESCE(se.income, 0.0) - COALESCE(ss.income, 0.0)                  AS total_income,
             (COALESCE(se.fees, 0.0) - COALESCE(ss.fees, 0.0))
               + (COALESCE(se.taxes, 0.0) - COALESCE(ss.taxes, 0.0))             AS total_fees_and_taxes,
-            COALESCE(se.total_gain, 0.0) - COALESCE(ss.total_gain, 0.0)          AS market_return
+            -- market_return = pure price/realized P/L over the window = delta of (realized + unrealized).
+            -- Must NOT use portfolio_status_sql.total_gain here: that field is
+            -- (portfolio_value - net_invested), which absorbs dividend/interest income and
+            -- standalone fees, so it would mis-attribute income as market returns. Using the
+            -- realized+unrealized delta keeps from_returns_usd distinct from total_income /
+            -- total_fees_and_taxes and satisfies the identity
+            -- total_growth = contributions + market_return + income - fees_and_taxes.
+            COALESCE(se.realized_gain, 0.0) - COALESCE(ss.realized_gain, 0.0)
+              + COALESCE(se.unrealized_gain, 0.0) - COALESCE(ss.unrealized_gain, 0.0) AS market_return
         FROM status_start ss
         CROSS JOIN status_end se
         CROSS JOIN start_info si
