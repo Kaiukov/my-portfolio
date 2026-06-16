@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { loadEnv } from "./env.js";
 import { success, error, buildPagination } from "./response.js";
+import { APP_VERSION } from "./version.js";
 import { getStatus } from "./commands/status.js";
 import { getTransactions } from "./commands/transactions.js";
 import { addTransaction } from "./commands/add.js";
@@ -136,7 +137,11 @@ function parseArgs(argv: string[]): { command: string; flags: Map<string, FlagVa
   const args = argv.slice(2);
   const raw = args[0] ?? "";
   const command =
-    raw === "--help" || raw === "-h" || raw === "" ? "help" : raw;
+    raw === "--help" || raw === "-h" || raw === ""
+      ? "help"
+      : raw === "--version" || raw === "-v"
+        ? "version"
+        : raw;
 
   const flags = new Map<string, FlagValue>();
   for (let i = 1; i < args.length; i++) {
@@ -184,6 +189,11 @@ export async function dispatch(argv: string[]): Promise<void> {
   switch (normalizedCommand) {
     case "help": {
       console.log(HELP_TEXT);
+      return;
+    }
+
+    case "version": {
+      console.log(APP_VERSION);
       return;
     }
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { APP_VERSION } from "../src/version.js";
 
 describe("portfolio MCP server", () => {
   test("exports the full read/write tool surface for tunnel-client", async () => {
@@ -45,5 +46,14 @@ describe("portfolio MCP server", () => {
     const server = mod.createPortfolioMcpServer();
     expect(server).toBeDefined();
     expect(typeof server.registerTool).toBe("function");
+  });
+
+  test("server reports APP_VERSION as version", async () => {
+    const mod = await import("../src/mcp/server.js");
+    const server = mod.createPortfolioMcpServer();
+    // Access server info directly
+    const serverInfo = (server as { _info?: { name: string; version: string } })._info;
+    expect(serverInfo).toBeDefined();
+    expect(serverInfo?.version).toBe(APP_VERSION);
   });
 });
