@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **#303 follow-up** — `test` script now runs `bun test --isolate`. The `bunfig.toml`
+  `isolate = true` setting is not fully honored by bun 1.3.14 in a large
+  DB-enabled run (cross-file `mock.module(db.js)` leakage reappeared, failing the
+  real-DB `financial_parity`/`asset_metadata` tests); the explicit `--isolate`
+  flag is reliable, so the canonical test command uses it.
+
 ## [0.8.0] - 2026-06-16
 
 First tagged release. Retroactively versions the feature-complete pre-1.0 portfolio
