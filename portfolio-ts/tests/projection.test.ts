@@ -697,7 +697,10 @@ describe("Projection — CLI integration", () => {
 
 describe("Projection — DB-gated integration", () => {
   const dbUrl = process.env.PORTFOLIO_DB_URL;
-  const runDb = test.if(dbUrl !== undefined && dbUrl !== "");
+  // These DB-gated blocks need a dedicated fixture DB and cannot run while db.js is module-mocked in this file
+  const runDb = test.if(
+    dbUrl !== undefined && dbUrl !== "" && !!process.env.PORTFOLIO_TEST_FIXTURE_DB,
+  );
 
   runDb("projection fetches current portfolio value from live DB and returns SQL-backed result", async () => {
     const mod = await import("../src/cli.js");
