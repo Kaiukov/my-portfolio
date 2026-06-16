@@ -697,7 +697,10 @@ describe("Projection — CLI integration", () => {
 
 describe("Projection — DB-gated integration", () => {
   const dbUrl = process.env.PORTFOLIO_DB_URL;
-  const runDb = test.if(dbUrl !== undefined && dbUrl !== "");
+  // These DB-gated blocks need a dedicated fixture DB and cannot run while db.js is module-mocked in this file
+  const runDb = test.if(
+    dbUrl !== undefined && dbUrl !== "" && !!process.env.PORTFOLIO_TEST_FIXTURE_DB,
+  );
 
   runDb("projection fetches current portfolio value from live DB and returns SQL-backed result", async () => {
     const mod = await import("../src/cli.js");
@@ -758,7 +761,7 @@ describe("Projection — DB-gated integration", () => {
       inflationRate: 0.025,
     });
 
-    if (result.current_value <= 0) return;
+    expect(result.current_value).toBeGreaterThan(0);
 
     expect(result.projection_years).toBe(0);
     expect(result.projected_value_nominal).toBe(result.current_value);
@@ -776,7 +779,7 @@ describe("Projection — DB-gated integration", () => {
       projectionYears: 5,
     });
 
-    if (baseline.current_value <= 0) return;
+    expect(baseline.current_value).toBeGreaterThan(0);
 
     const result = await getProjection({
       monthlyContribution: 1000,
@@ -799,7 +802,7 @@ describe("Projection — DB-gated integration", () => {
       projectionYears: 1,
     });
 
-    if (baseline.current_value <= 0) return;
+    expect(baseline.current_value).toBeGreaterThan(0);
 
     const contribution = 1000;
     const monthlyLoss = Math.abs(-0.2 / 12.0) * baseline.current_value;
