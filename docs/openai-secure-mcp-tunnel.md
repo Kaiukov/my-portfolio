@@ -269,11 +269,15 @@ curl http://localhost:8080/readyz     # tunnel-to-MCP connectivity probe
 
 ### 6. Transport mode reference
 
-| Mode | Command | MCP Endpoint | Use case |
-|------|---------|-------------|----------|
-| Stdio | `bun run mcp` | stdin/stdout | Same host, single process |
-| HTTP | `bun run start api --port 8787` | `http://localhost:8787/mcp` | Separate host, container |
-| SSE | `bun run start api --port 8787` | `http://localhost:8787/sse` | Legacy SSE clients |
+**Для tunnel-client:** stdio (`bun run mcp`) — дочерний процесс.
+
+**Для всех остальных клиентов:** канонический Streamable HTTP (`http://<host>:8787/mcp`).
+Спека: [MCP Connection Spec](wiki/mcp-connect-spec.md).
+
+| Transport | Entrypoint | Use case |
+|-----------|-----------|----------|
+| Stdio | `bun run mcp` | Только tunnel-client (дочерний процесс) |
+| Streamable HTTP | `http://<host>:8787/mcp` | Все внешние сервисы, агенты, dashboard |
 
 ### 7. Troubleshooting
 

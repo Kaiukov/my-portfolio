@@ -187,56 +187,86 @@ Optional fields for POST/PATCH/PUT bodies: price, currency, fees, feeCurrency (o
 
 MCP (Model Context Protocol) adapter for AI-agent integration. Implemented in `portfolio-ts/src/mcp/`. Exposes both read and write tools, reusing the same shared service layer as the CLI and HTTP API.
 
+### Canonical Connection
+
+**Streamable HTTP** — единый канонический метод: `http://<host>:8787/mcp`.
+
+Подробная спека подключения: [MCP Connection Spec](wiki/mcp-connect-spec.md).
+
+Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-client как дочерний процесс. Внешние сервисы используют исключительно Streamable HTTP.
+
 ### Scope
 
-**Full read and write.** All read-only CLI commands are available as MCP read tools (`mcpRead` in `src/mcp/read.ts`). Write operations are available as MCP write tools (`mcpWrite` in `src/mcp/adapter.ts`), reusing the same shared `WriteHandlers` from `src/adapters/shared.ts` as the HTTP API.
+**Full read and write (28 инструментов).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write-операции доступны как MCP write tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
 
-### Read Tools
+### Read Tools (23)
 
-All read tools return the same JSON envelope as the CLI and HTTP API (`response.ts`). The `mcpRead(toolName, args)` function dispatches by tool name, exactly mirroring the envelope produced by the CLI and/or HTTP API handler.
+Все read tools возвращают JSON-конверт идентичный CLI и HTTP API.
 
 | Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
 |---|---|---|---|---|
 | `status` | `status` | — | `as_of` / `asOf` | Yes |
 | `summary` | `summary` | — | `as_of` / `asOf` | Yes |
 | `cash` | `cash` | — | `as_of` / `asOf` | Yes |
-| `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
-| `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
-| `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period` | Yes |
-| `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
-| `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
-| `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
-| `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
-| `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
-| `widget` | `widget` | `days` | `as_of` / `asOf` | — |
-| `asset_analysis` | `asset_analysis` | — | `ticker` / `asset`, `period`, `lookback_days` / `lookbackDays`, `benchmark`, `as_of` / `asOf`, `risk_free_rate` / `riskFreeRate` | — |
+| `cash_drag` | `cash_drag` | — | `as_of`, `from_date`, `benchmark_return_rate`, `cash_return_rate` | Yes |
+| `currency_exposure` | `currency_exposure` | — | `as_of` | Yes |
+| `income` | `income` | — | `as_of`, `from_date`, `asset` | — |
+| `realized_gains` | `realized_gains` | — | `from_date`, `to_date`, `asset`, `by_year` | — |
+| `allocation` | `allocation` | — | `as_of` | Yes |
+| `rebalance` | `rebalance` | `target` | `as_of` | — |
+| `concentration` | `concentration` | — | `as_of`, `top_n` | Yes |
+| `diversification` | `diversification` | — | `as_of`, `lookback_days`, `min_correlation` | Yes |
+| `decomposition` | `decomposition` | — | `as_of` | Yes |
+| `performance` | `performance` | — | `as_of`, `benchmark`, `from_date`, `period`, `inflation_rate` | Yes |
+| `mwr` | `mwr` | — | `as_of` | Yes |
+| `transactions` | `transactions` | — | `limit`, `offset`, `start_date`, `end_date` | — |
+| `report` | `report` | — | `limit`, `offset`, `start_date`, `end_date` | — |
+| `health` | `health` | — | `max_age_days` | — |
+| `verify_prices` | `verify_prices` | — | `max_age_days` | — |
+| `widget` | `widget` | — | `days`, `as_of` | — |
+| `asset_metadata` | `asset_metadata` | — | `asset`, `refresh` | — |
+| `projection` | `projection` | — | `as_of`, `monthly_contribution`, `annual_return_rate`, `target_value`, `projection_years`, `inflation_rate` | — |
+| `withdrawal` | `withdrawal` | — | `as_of`, `annual_withdrawal`, `withdrawal_rate`, `time_horizon_years`, `expected_return`, `inflation_rate` | — |
+| `asset_analysis` | `asset_analysis` | `ticker` или `asset` | `period`, `lookback_days`, `benchmark`, `as_of`, `risk_free_rate` | — |
 
-### Write Tools
-
-All tools return the same JSON envelope as the CLI and HTTP API (`response.ts`). The `mcpWrite(toolName, args, ctx)` function dispatches by tool name.
+### Write Tools (5)
 
 | Tool name | CLI equivalent | Required args | Optional args |
 |---|---|---|---|
-| `add_transaction` | `add` | date, asset, action, quantity, exchange | price, currency, fees, feeCurrency/fee_currency, account |
-| `edit_transaction` | `edit` | id/transactionId/transaction_id/transId | date, asset, action, quantity, price, currency, fees, feeCurrency/fee_currency, exchange, dataSource/data_source, account, dry_run/dryRun/dry-run |
-| `delete_transaction` | `delete` | id/transactionId/transaction_id/transId | dry_run/dryRun/dry-run, confirm |
-| `exchange_currency` | `exchange` | date, fromAsset/from_asset/from, toAsset/to_asset/to, quantity, rate | — |
+| `add_transaction` | `add` | `date`, `asset`, `action`, `quantity`, `exchange` | `price`, `currency`, `fees`, `feeCurrency`, `account` |
+| `edit_transaction` | `edit` | `id` | `date`, `asset`, `action`, `quantity`, `price`, `currency`, `fees`, `feeCurrency`, `exchange`, `dataSource`, `account`, `dry_run` |
+| `delete_transaction` | `delete` | `id` | `dry_run`, `confirm` |
+| `exchange_currency` | `exchange` | `date`, `fromAsset`, `toAsset`, `quantity`, `rate` | — |
+| `split` | `split` | `date`, `asset`, `ratio`, `confirm` | — |
 
 ### Arg Aliases
 
-MCP tools accept multiple key aliases per arg for client flexibility:
+Все параметры принимают snake_case и camelCase варианты:
 
-- `add_transaction`: `feeCurrency` or `fee_currency`
-- `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
-- `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
-- `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
+| Значение | Альтернативы |
+|----------|-------------|
+| `id` | `id`, `transactionId`, `transaction_id`, `transId` |
+| `as_of` | `as_of`, `asOf` |
+| `from_date` / `to_date` | `from_date`/`fromDate`, `to_date`/`toDate` |
+| `dry_run` | `dry_run`, `dryRun`, `dry-run` |
+| `feeCurrency` | `feeCurrency`, `fee_currency` |
+| `dataSource` | `dataSource`, `data_source` |
+| `fromAsset` / `toAsset` | `fromAsset`/`from_asset`/`from`, `toAsset`/`to_asset`/`to` |
+| `top_n` | `top_n`, `topN` |
+| `lookback_days` | `lookback_days`, `lookbackDays` |
+| `monthly_contribution` | `monthly_contribution`, `monthlyContribution` |
+| `annual_return_rate` | `annual_return_rate`, `annualReturnRate` |
+| `inflation_rate` | `inflation_rate`, `inflationRate` |
+| `benchmark_return_rate` | `benchmark_return_rate`, `benchmarkReturnRate` |
+| `cash_return_rate` | `cash_return_rate`, `cashReturnRate` |
 
 ### Rules
 
-- Same `WriteHandlers` interface as the HTTP API — identical behavior for add, edit, delete, exchange.
-- Dry-run supported on `edit_transaction` and `delete_transaction`.
-- Delete requires `confirm: true` unless dry-run.
-- Unknown tool name returns `{"ok": false, "error": {"code": "NOT_FOUND", "message": "..."}}`.
+- Единый `WriteHandlers` интерфейс с HTTP API — идентичное поведение add/edit/delete/exchange/split.
+- Dry-run на `edit_transaction` и `delete_transaction`.
+- Delete требует `confirm: true` (кроме dry-run).
+- Split требует `confirm: true`.
+- Неизвестный tool name → `{"ok": false, "error": {"code": "NOT_FOUND", "message": "..."}}`.
 
 ### 3.1 Success Envelope
 
