@@ -100,8 +100,13 @@ MAYBE_SKIP("integration: realized-gains command (#214)", () => {
 
           // FIFO: oldest first → row1 buy_id < row2 buy_id
           expect(Number(row1.matched_buy_id)).toBeLessThan(Number(row2.matched_buy_id));
-          expect(row1.matched_buy_date).toBe("2026-01-02");
-          expect(row2.matched_buy_date).toBe("2026-01-05");
+
+          const dateKey = (v: unknown) =>
+            v instanceof Date
+              ? `${v.getUTCFullYear()}-${String(v.getUTCMonth()+1).padStart(2,"0")}-${String(v.getUTCDate()).padStart(2,"0")}`
+              : String(v);
+          expect(dateKey(row1.matched_buy_date)).toBe("2026-01-02");
+          expect(dateKey(row2.matched_buy_date)).toBe("2026-01-05");
         });
       } finally {
         await sql.end();

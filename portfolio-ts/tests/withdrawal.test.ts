@@ -499,7 +499,8 @@ describe("Withdrawal — DB-gated integration", () => {
       inflation_rate: 3.0,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    expect(result.data).toBeDefined();
 
     const data = result.data as Record<string, unknown>;
     const pv = Number(data.portfolio_value);
@@ -532,7 +533,8 @@ describe("Withdrawal — DB-gated integration", () => {
       inflation_rate: 2.0,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    expect(result.data).toBeDefined();
 
     const data = result.data as Record<string, unknown>;
     const maxSafe = Number(data.max_safe_withdrawal);
@@ -555,7 +557,8 @@ describe("Withdrawal — DB-gated integration", () => {
       inflation_rate: 0.0,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    expect(result.data).toBeDefined();
 
     const data = result.data as Record<string, unknown>;
     const pv = Number(data.portfolio_value);
@@ -572,7 +575,8 @@ describe("Withdrawal — DB-gated integration", () => {
       annual_withdrawal: 10000,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    expect(result.data).toBeDefined();
 
     const data = result.data as Record<string, unknown>;
     expect(data.terminal_value).toBe(data.portfolio_value);

@@ -758,7 +758,7 @@ describe("Projection — DB-gated integration", () => {
       inflationRate: 0.025,
     });
 
-    if (result.current_value <= 0) return;
+    expect(result.current_value).toBeGreaterThan(0);
 
     expect(result.projection_years).toBe(0);
     expect(result.projected_value_nominal).toBe(result.current_value);
@@ -776,7 +776,7 @@ describe("Projection — DB-gated integration", () => {
       projectionYears: 5,
     });
 
-    if (baseline.current_value <= 0) return;
+    expect(baseline.current_value).toBeGreaterThan(0);
 
     const result = await getProjection({
       monthlyContribution: 1000,
@@ -799,7 +799,7 @@ describe("Projection — DB-gated integration", () => {
       projectionYears: 1,
     });
 
-    if (baseline.current_value <= 0) return;
+    expect(baseline.current_value).toBeGreaterThan(0);
 
     const contribution = 1000;
     const monthlyLoss = Math.abs(-0.2 / 12.0) * baseline.current_value;
