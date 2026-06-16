@@ -21,9 +21,10 @@ describe("version parity", () => {
 
     await mod.dispatch(["node", "portfolio", "--version"]);
 
+    const { APP_VERSION } = await import("../src/version.js");
     expect(logSpy).toHaveBeenCalled();
     const output = logSpy.mock.calls[0][0];
-    expect(output).toBe("0.8.0");
+    expect(output).toBe(APP_VERSION);
 
     logSpy.mockRestore();
   });
@@ -34,9 +35,10 @@ describe("version parity", () => {
 
     await mod.dispatch(["node", "portfolio", "-v"]);
 
+    const { APP_VERSION } = await import("../src/version.js");
     expect(logSpy).toHaveBeenCalled();
     const output = logSpy.mock.calls[0][0];
-    expect(output).toBe("0.8.0");
+    expect(output).toBe(APP_VERSION);
 
     logSpy.mockRestore();
   });

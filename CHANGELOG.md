@@ -6,7 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-16
+
+### Added
+- **#307** — application version is now surfaced across every surface from the
+  single `package.json` source of truth (`src/version.ts`): CLI `--version`/`-v`,
+  `meta.version` in every JSON envelope (success and error), MCP `serverInfo.version`,
+  and the `/health` response. No more hardcoded `"1.0.0"` in the MCP server.
+
 ### Changed
+- **#293** — read/analytics commands now dispatch through a single shared
+  read-registry (`src/adapters/read_shared.ts#dispatchRead`); CLI, REST API, and MCP
+  all route reads through one source instead of three parallel implementations.
+  Behavior-preserving except that the REST API error envelope now reports the real
+  command name (e.g. `summary`) instead of the generic `api`.
 - **#303 follow-up** — `test` script now runs `bun test --isolate`. The `bunfig.toml`
   `isolate = true` setting is not fully honored by bun 1.3.14 in a large
   DB-enabled run (cross-file `mock.module(db.js)` leakage reappeared, failing the
