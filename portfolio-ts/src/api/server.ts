@@ -479,7 +479,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         );
       }
 
-      const result = await write.addTransaction({
+      const params = {
         dateStr,
         asset,
         action,
@@ -490,8 +490,15 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         feeCurrency: strField(body, "feeCurrency") ?? strField(body, "fee_currency"),
         exchange: strField(body, "exchange") ?? "",
         account: strField(body, "account"),
-      });
+      };
 
+      const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
+      if (isDryRun) {
+        const result = await write.addDryRun(params);
+        return respond(success("add", result), 200);
+      }
+
+      const result = await write.addTransaction(params);
       return respond(success("add", result), 200);
     }
 
