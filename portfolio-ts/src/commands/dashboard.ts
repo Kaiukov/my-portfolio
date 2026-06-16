@@ -5,6 +5,7 @@ import { getAllocation as _getAllocation, type AllocationRow } from "./allocatio
 import { getCash as _getCash, type CashRow } from "./cash.js";
 import { getPerformance as _getPerformance, type PerformanceResult } from "./performance.js";
 import { getPriceFreshness as _getPriceFreshness } from "./freshness.js";
+import { APP_VERSION } from "../version.js";
 import {
   buildPublishSnapshotContext,
   type PublishSnapshotContext,
@@ -44,6 +45,7 @@ export interface DashboardSnapshot {
   total: { abs: number; pct: number };
   history: Array<{ date: string; value: number }>;
   prices_as_of: string | null;
+  version: string;
   updatedAt: string;
 }
 
@@ -153,6 +155,7 @@ export async function buildDashboardSnapshotFromContext(
     total,
     history,
     prices_as_of,
+    version: APP_VERSION,
     updatedAt: context.updatedAt,
   };
 }

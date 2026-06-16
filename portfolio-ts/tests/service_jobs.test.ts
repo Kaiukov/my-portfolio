@@ -1,4 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
+import { APP_VERSION } from "../src/version.js";
 import type { PortfolioSnapshot } from "../src/cloudflare/types.js";
 import type { DashboardSnapshot } from "../src/commands/dashboard.js";
 
@@ -107,6 +108,7 @@ describe("service job wrappers", () => {
     total: { abs: 100, pct: 10 },
     history: [{ date: "2026-06-05", value: 1000 }],
     prices_as_of: "2026-06-05",
+    version: APP_VERSION,
     updatedAt: "2026-06-05T12:00:00.000Z",
   };
 
