@@ -43,6 +43,16 @@ function str(val: unknown): string {
   return String(val);
 }
 
+export function formatDate(val: unknown): string {
+  if (val instanceof Date) {
+    const y = val.getUTCFullYear();
+    const m = String(val.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(val.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return val != null ? String(val) : "";
+}
+
 function int(val: unknown): number {
   const n = Number(val);
   return Number.isInteger(n) ? n : 0;
@@ -63,7 +73,7 @@ export async function getRealizedGains(opts?: {
   );
 
   const gainRows: RealizedGainRow[] = rows.map((r) => ({
-    sell_date: str(r["sell_date"]),
+    sell_date: formatDate(r["sell_date"]),
     sell_id: int(r["sell_id"]),
     asset: str(r["asset"]),
     sell_quantity: num(r["sell_quantity"]),
@@ -72,7 +82,7 @@ export async function getRealizedGains(opts?: {
     realized_gain: num(r["realized_gain"]),
     holding_days: int(r["holding_days"]),
     matched_buy_id: int(r["matched_buy_id"]),
-    matched_buy_date: str(r["matched_buy_date"]),
+    matched_buy_date: formatDate(r["matched_buy_date"]),
   }));
 
   const total_realized_gain = gainRows.reduce((s, r) => s + r.realized_gain, 0);
