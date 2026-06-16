@@ -51,8 +51,10 @@ describe("portfolio MCP server", () => {
   test("server reports APP_VERSION as version", async () => {
     const mod = await import("../src/mcp/server.js");
     const server = mod.createPortfolioMcpServer();
-    // Access server info directly
-    const serverInfo = (server as { _info?: { name: string; version: string } })._info;
+    // McpServer.server is the low-level Server; its _serverInfo holds {name, version}.
+    const serverInfo = (
+      server as unknown as { server: { _serverInfo?: { name: string; version: string } } }
+    ).server._serverInfo;
     expect(serverInfo).toBeDefined();
     expect(serverInfo?.version).toBe(APP_VERSION);
   });

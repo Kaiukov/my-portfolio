@@ -62,7 +62,9 @@ describe("version parity", () => {
     const { APP_VERSION } = await import("../src/version.js");
 
     const server = mod.createPortfolioMcpServer();
-    const serverInfo = (server as { _info?: { name: string; version: string } })._info;
+    const serverInfo = (
+      server as unknown as { server: { _serverInfo?: { name: string; version: string } } }
+    ).server._serverInfo;
     expect(serverInfo?.version).toBe(APP_VERSION);
   });
 
@@ -74,7 +76,9 @@ describe("version parity", () => {
     const successEnv = success("test", { x: 1 });
     const errorEnv = error("test", "DB_ERROR", "boom");
     const server = mod.createPortfolioMcpServer();
-    const serverInfo = (server as { _info?: { name: string; version: string } })._info;
+    const serverInfo = (
+      server as unknown as { server: { _serverInfo?: { name: string; version: string } } }
+    ).server._serverInfo;
 
     expect(successEnv.meta.version).toBe(APP_VERSION);
     expect(errorEnv.meta.version).toBe(APP_VERSION);
