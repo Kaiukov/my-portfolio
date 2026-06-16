@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { APP_VERSION } from "../version.js";
 import { mcpRead } from "./read.js";
 import { mcpWrite } from "./adapter.js";
 
@@ -75,7 +76,7 @@ function registerTool(
 export function createPortfolioMcpServer() {
   const server = new McpServer({
     name: "portfolio-mcp",
-    version: "1.0.0",
+    version: APP_VERSION,
   }, {
     capabilities: {
       tools: {},

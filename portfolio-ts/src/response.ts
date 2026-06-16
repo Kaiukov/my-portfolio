@@ -1,3 +1,5 @@
+import { APP_VERSION } from "./version.js";
+
 export interface PaginationMeta {
   limit: number;
   offset: number;
@@ -13,6 +15,7 @@ export interface SuccessEnvelope {
   meta: {
     generated_at: string;
     count: number | null;
+    version: string;
     pagination?: PaginationMeta;
     [key: string]: unknown;
   };
@@ -28,6 +31,7 @@ export interface ErrorEnvelope {
   meta: {
     generated_at: string;
     count: null;
+    version: string;
   };
 }
 
@@ -44,7 +48,7 @@ export function success(
   pagination?: PaginationMeta,
   extraMeta?: Record<string, unknown>,
 ): SuccessEnvelope {
-  const meta: Record<string, unknown> = { generated_at: nowUtc(), count };
+  const meta: Record<string, unknown> = { generated_at: nowUtc(), count, version: APP_VERSION };
   if (pagination) meta.pagination = pagination;
   if (extraMeta) Object.assign(meta, extraMeta);
   return { ok: true, command, data, meta: meta as SuccessEnvelope["meta"] };
@@ -59,7 +63,7 @@ export function error(
     ok: false,
     command,
     error: { code, message },
-    meta: { generated_at: nowUtc(), count: null },
+    meta: { generated_at: nowUtc(), count: null, version: APP_VERSION },
   };
 }
 
