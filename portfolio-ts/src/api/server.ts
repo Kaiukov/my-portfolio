@@ -1,6 +1,7 @@
 import { success, error, type SuccessEnvelope } from "../response.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createPortfolioMcpServer } from "../mcp/server.js";
+import { mcpSessionRegistry } from "./mcp_session_registry.js";
 import { getStatus } from "../commands/status.js";
 import { getSummary } from "../commands/summary.js";
 import { getAllocation } from "../commands/allocation.js";
@@ -353,32 +354,64 @@ async function parseJsonBody(req: Request): Promise<JsonObject> {
   return parsed as JsonObject;
 }
 
+function mcpJsonRpcError(status: number, code: number, message: string): Response {
+  return new Response(
+    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }),
+    { status, headers: { "Content-Type": "application/json" } },
+  );
+}
+
 async function handleMcpHttpRequest(req: Request): Promise<Response> {
+  // Optional bearer auth check
+  const mcpToken = process.env.PORTFOLIO_MCP_TOKEN;
+  if (mcpToken) {
+    const authHeader = req.headers.get("authorization");
+    const expectedAuth = `Bearer ${mcpToken}`;
+    if (authHeader !== expectedAuth) {
+      return mcpJsonRpcError(401, -32000, "Unauthorized");
+    }
+  }
+
   try {
-    const server = createPortfolioMcpServer();
+    const sessionId = req.headers.get("mcp-session-id") ?? undefined;
+
+    // Existing session: reuse its persistent transport.
+    if (sessionId) {
+      const existing = mcpSessionRegistry.get(sessionId);
+      if (existing) {
+        return await existing.handleRequest(req);
+      }
+      return mcpJsonRpcError(404, -32000, "Bad Request: unknown session ID");
+    }
+
+    // No session id. Only a POST (an `initialize` request) may open a new session.
+    if (req.method !== "POST") {
+      return mcpJsonRpcError(400, -32000, "Bad Request: missing session ID");
+    }
+
+    // New session: stateful transport + persistent server, stored on init.
     const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
+      sessionIdGenerator: () => crypto.randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (sid: string) => {
+        mcpSessionRegistry.set(sid, transport);
+      },
+      onsessionclosed: (sid: string) => {
+        mcpSessionRegistry.delete(sid);
+      },
     });
+    transport.onclose = () => {
+      if (transport.sessionId) {
+        mcpSessionRegistry.delete(transport.sessionId);
+      }
+    };
+
+    const server = createPortfolioMcpServer();
     await server.connect(transport);
     return await transport.handleRequest(req);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return new Response(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: {
-          code: -32603,
-          message,
-        },
-        id: null,
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return mcpJsonRpcError(500, -32603, message);
   }
 }
 
@@ -446,7 +479,7 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         );
       }
 
-      const result = await write.addTransaction({
+      const params = {
         dateStr,
         asset,
         action,
@@ -457,8 +490,15 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         feeCurrency: strField(body, "feeCurrency") ?? strField(body, "fee_currency"),
         exchange: strField(body, "exchange") ?? "",
         account: strField(body, "account"),
-      });
+      };
 
+      const isDryRun = boolFlag(url.searchParams, body, "dry_run", "dryRun", "dry-run");
+      if (isDryRun) {
+        const result = await write.addDryRun(params);
+        return respond(success("add", result), 200);
+      }
+
+      const result = await write.addTransaction(params);
       return respond(success("add", result), 200);
     }
 

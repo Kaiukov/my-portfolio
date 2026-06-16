@@ -4,13 +4,25 @@ Model Context Protocol (MCP) adapter for AI-agent integration. Lives in `portfol
 
 The MCP adapter is a full read+write peer adapter alongside the CLI and HTTP API. It reuses the same shared service layer (`src/commands/*`) — no duplicated business logic.
 
+## Canonical Connection Method
+
+**Streamable HTTP** — единый канонический метод для любых внешних сервисов и AI-агентов.
+
+```
+http://<host>:8787/mcp
+```
+
+Никаких spawn, pipe, child processes. Просто HTTP-endpoint. Подробнее: [MCP Connection Spec](mcp-connect-spec.md).
+
+Stdio-транспорт (`bun run mcp`) используется **только** как внутренний дочерний процесс для OpenAI tunnel-client — внешние сервисы к нему не подключаются.
+
 ## Files
 
 | File | Exports | Purpose |
 |---|---|---|
 | `read.ts` | `mcpRead(toolName, args)` | Read tools (23 tools) |
 | `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (5 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
-| `server.ts` | `createPortfolioMcpServer()` / `runPortfolioMcpServer()` | Stdio MCP entrypoint for OpenAI tunnel-client |
+| `server.ts` | `createPortfolioMcpServer()` / `runPortfolioMcpServer()` | MCP server factory + stdio transport (для tunnel-client) |
 | `index.ts` | Re-exports `mcpRead`, `mcpWrite`, `McpWriteContext` | Package entry point |
 
 ## JSON Envelope
@@ -31,15 +43,14 @@ Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/ada
 - **5 write tools** — full parity with CLI and REST API
 - **28 total tools** exposed via `tools/list`
 
-## Transport Modes
+## Transport
 
-| Mode | Entrypoint | Transport | Use case |
-|------|-----------|-----------|----------|
-| Stdio | `bun run mcp` (`src/mcp/server.ts`) | stdin/stdout JSON-RPC | tunnel-client child process |
-| Streamable HTTP | `GET/POST/DELETE /mcp` on API server (`src/api/server.ts`) | HTTP + optional SSE upgrade | tunnel-client remote, containers |
-| SSE (legacy) | `GET /sse` on API server | Server-Sent Events | Legacy SSE-only clients |
+| Transport | Entrypoint | Use case |
+|-----------|-----------|----------|
+| **Streamable HTTP** (канонический) | `http://<host>:8787/mcp` | Все внешние сервисы, AI-агенты, dashboard |
+| Stdio (внутренний) | `bun run mcp` | Только как дочерний процесс для OpenAI tunnel-client |
 
-The streamable HTTP transport is served by the same `Bun.serve` instance as the REST API — no separate process required. See `src/api/server.ts` for the `/mcp` and `/sse` route handlers.
+Streamable HTTP endpoint обслуживается тем же `Bun.serve`, что и REST API — отдельный процесс не нужен. Все 28 инструментов доступны через оба транспорта с идентичным поведением.
 
 ## Read Tools
 
@@ -96,19 +107,7 @@ MCP tools accept multiple key aliases per arg:
 
 ## OpenAI Secure MCP Tunnel
 
-The MCP server entrypoint is `portfolio-ts/src/mcp/server.ts` (or `bun run mcp`).
-It is a stdio MCP server compatible with OpenAI `tunnel-client`.
-
-Quick start:
-
-```bash
-cd portfolio-ts
-bun run mcp
-# in another terminal, point tunnel-client at the same command
-# tunnel-client init --sample sample_mcp_stdio_local --profile portfolio --mcp-command "bun run mcp"
-```
-
-See the release link shared in the issue for the current tunnel-client build stream.
+Для подключения через OpenAI tunnel-client используйте stdio-транспорт (`bun run mcp`) как дочерний процесс. Подробный ранбук: [OpenAI Secure MCP Tunnel](../../docs/openai-secure-mcp-tunnel.md).
 
 ## Write Context
 
@@ -121,7 +120,7 @@ See the release link shared in the issue for the current tunnel-client build str
 
 ## Dashboard MCP Endpoint (Cloudflare Worker)
 
-The portfolio dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) exposes a separate **9-tool read-only MCP endpoint** backed by Cloudflare KV. This is a deliberately simplified subset — it does **not** aim for full parity with the 28-tool portfolio MCP server.
+Dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) exposes a separate **9-tool read-only MCP endpoint** backed by Cloudflare KV — упрощённое подмножество для быстрых AI-запросов без live PostgreSQL.
 
 | # | Dashboard MCP tool | Source |
 |---|-------------------|--------|
@@ -135,9 +134,7 @@ The portfolio dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) ex
 | 8 | `widget` | KV snapshot |
 | 9 | `projection` | KV snapshot |
 
-The dashboard MCP endpoint is stateless and read-only. It serves latest-snapshot data for quick AI queries without needing a live PostgreSQL connection. Write and maintenance operations (`add`, `edit`, `delete`, `exchange`, `split`, `recalculate`, `repair_prices`, `sync`) are **only** available through the full portfolio MCP server.
-
-> **v2 roadmap:** Dashboard live-write and real-time sync are deferred.
+Dashboard MCP — stateless, read-only. Write и maintenance операции (`add`, `edit`, `delete`, `exchange`, `split`, `recalculate`, `repair_prices`, `sync`) доступны **только** через основной portfolio MCP server (28 инструментов) по каноническому Streamable HTTP.
 
 ## Error Handling
 

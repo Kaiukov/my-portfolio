@@ -110,4 +110,8 @@ The echoed `data.request` also includes resolved `annualization_periods` so annu
 
 ## Adapter Access
 
-The same write operations are available via the HTTP API and MCP adapter, using identical JSON envelopes. See `docs/platform-adapters.md` for route/tool tables, shared write layer, and error-mapping parity.
+Те же операции доступны через HTTP API и MCP adapter с идентичными JSON-конвертами.
+
+- **MCP (канонический):** Streamable HTTP `http://<host>:8787/mcp` — [Connection Spec](mcp-connect-spec.md)
+- **HTTP API:** RESTful endpoints на том же порту — [Platform Adapters](../platform-adapters.md)
+- **Инструменты:** 23 read + 5 write — [MCP Reference](mcp-reference.md)

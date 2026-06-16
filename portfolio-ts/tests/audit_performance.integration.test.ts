@@ -113,12 +113,14 @@ MAYBE_SKIP("integration: hard performance audit fixture (#226)", () => {
           ) as any[];
           expect(Number(countRow.count)).toBe(EXPECTED.daily_returns.count);
 
+          const dates = EXPECTED.daily_returns.checkpoints.map((row) => row.date);
+          const placeholders = dates.map((_, i) => `$${i + 1}`).join(", ");
           const checkpointRows = await tx.unsafe(
             `SELECT date, portfolio_value, portfolio_daily_return, investment_return, cash_flow_impact
              FROM daily_returns
-             WHERE date = ANY($1::DATE[])
+             WHERE date IN (${placeholders})
              ORDER BY date`,
-            [EXPECTED.daily_returns.checkpoints.map((row) => row.date)],
+            dates,
           ) as any[];
           expect(checkpointRows.length).toBe(EXPECTED.daily_returns.checkpoints.length);
           for (let i = 0; i < checkpointRows.length; i += 1) {
