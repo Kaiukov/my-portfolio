@@ -460,6 +460,37 @@ AS $$
     END;
 $$;
 
+-- Helper: was there any observed price activity for a pricing bucket on p_date?
+-- Reuses get_asset_type_sql() so the checkpoint grouping stays aligned with the
+-- rest of the pricing model.
+DROP FUNCTION IF EXISTS market_has_price_activity_sql(TEXT, DATE) CASCADE;
+CREATE OR REPLACE FUNCTION market_has_price_activity_sql(p_asset_type TEXT, p_date DATE)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM prices p
+        WHERE get_asset_type_sql(p.ticker) = p_asset_type
+          AND p.date = p_date
+    );
+$$;
+
+-- Helper: most recent observed price date for a pricing bucket on or before p_end_date.
+-- This is intentionally data-driven instead of relying on a hardcoded trading calendar.
+DROP FUNCTION IF EXISTS market_last_price_date_sql(TEXT, DATE) CASCADE;
+CREATE OR REPLACE FUNCTION market_last_price_date_sql(p_asset_type TEXT, p_end_date DATE)
+RETURNS DATE
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT MAX(p.date)
+    FROM prices p
+    WHERE get_asset_type_sql(p.ticker) = p_asset_type
+      AND p.date <= p_end_date;
+$$;
+
 -- Required price checkpoints per ticker: trade dates + end date
 -- Used to validate that the price cache covers all valuation points.
 DROP FUNCTION IF EXISTS get_required_price_checkpoints_sql(DATE);
@@ -468,69 +499,121 @@ RETURNS TABLE(ticker TEXT, checkpoint_date DATE)
 LANGUAGE sql
 STABLE
 AS $$
-    SELECT DISTINCT t.asset::TEXT, t.date
-    FROM transactions t
-    WHERE t.action IN ('BUY', 'SELL')
-      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
-      AND NOT is_stablecoin_sql(t.asset)
-      AND t.asset NOT LIKE 'CASH %'
+    WITH asset_trade_dates AS (
+        SELECT DISTINCT
+            t.asset::TEXT AS ticker,
+            get_asset_type_sql(t.asset) AS asset_type,
+            t.date AS checkpoint_date
+        FROM transactions t
+        WHERE t.action IN ('BUY', 'SELL')
+          AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
+          AND NOT is_stablecoin_sql(t.asset)
+          AND t.asset NOT LIKE 'CASH %'
+    ),
+    asset_current_sources AS (
+        SELECT DISTINCT
+            t.asset::TEXT AS ticker,
+            get_asset_type_sql(t.asset) AS asset_type
+        FROM transactions t
+        WHERE t.action IN ('BUY', 'SELL')
+          AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
+          AND NOT is_stablecoin_sql(t.asset)
+          AND t.asset NOT LIKE 'CASH %'
+    ),
+    foreign_fx_trade_dates AS (
+        SELECT DISTINCT
+            cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT AS ticker,
+            get_asset_type_sql(cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))) AS asset_type,
+            t.date AS checkpoint_date
+        FROM transactions t
+        WHERE t.action IN ('BUY', 'SELL')
+          AND get_asset_type_sql(t.asset) IN (
+              'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+              'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+          )
+    ),
+    foreign_fx_current_sources AS (
+        SELECT DISTINCT
+            cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT AS ticker,
+            get_asset_type_sql(cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))) AS asset_type
+        FROM transactions t
+        WHERE t.action IN ('BUY', 'SELL')
+          AND get_asset_type_sql(t.asset) IN (
+              'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
+              'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
+          )
+    ),
+    cash_fx_trade_dates AS (
+        SELECT DISTINCT
+            normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT AS ticker,
+            get_asset_type_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))) AS asset_type,
+            t.date AS checkpoint_date
+        FROM transactions t
+        WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+           OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+          AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+          AND NOT is_stablecoin_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)))
+    ),
+    cash_fx_current_sources AS (
+        SELECT DISTINCT
+            normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT AS ticker,
+            get_asset_type_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))) AS asset_type
+        FROM transactions t
+        WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
+           OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
+          AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
+          AND NOT is_stablecoin_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)))
+    ),
+    candidates AS (
+        SELECT ticker, asset_type, checkpoint_date
+        FROM asset_trade_dates
 
-    UNION
+        UNION
 
-    SELECT DISTINCT t.asset::TEXT,
-        CASE WHEN get_asset_type_sql(t.asset) = 'crypto'
-             THEN p_end_date
-             ELSE last_trading_day_sql(p_end_date)
-        END
-    FROM transactions t
-    WHERE t.action IN ('BUY', 'SELL')
-      AND get_asset_type_sql(t.asset) NOT IN ('cash_base', 'cash_fx', 'cash_stable')
-      AND NOT is_stablecoin_sql(t.asset)
-      AND t.asset NOT LIKE 'CASH %'
+        SELECT
+            ticker,
+            asset_type,
+            CASE
+                WHEN asset_type = 'crypto' THEN p_end_date
+                ELSE market_last_price_date_sql(asset_type, p_end_date)
+            END AS checkpoint_date
+        FROM asset_current_sources
 
-    UNION
+        UNION
 
-    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT, t.date
-    FROM transactions t
-    WHERE t.action IN ('BUY', 'SELL')
-      AND get_asset_type_sql(t.asset) IN (
-          'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
-          'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
-      )
+        SELECT ticker, asset_type, checkpoint_date
+        FROM foreign_fx_trade_dates
 
-    UNION
+        UNION
 
-    SELECT DISTINCT cash_currency_for_asset_type_sql(get_asset_type_sql(t.asset))::TEXT,
-        last_trading_day_sql(p_end_date)
-    FROM transactions t
-    WHERE t.action IN ('BUY', 'SELL')
-      AND get_asset_type_sql(t.asset) IN (
-          'stock_eur', 'stock_gbp', 'stock_jpy', 'stock_chf',
-          'stock_cad', 'stock_aud', 'stock_hkd', 'stock_sgd'
-      )
+        SELECT
+            ticker,
+            asset_type,
+            market_last_price_date_sql(asset_type, p_end_date) AS checkpoint_date
+        FROM foreign_fx_current_sources
 
-    UNION
+        UNION
 
-    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT, t.date
-    FROM transactions t
-    WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
-       OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
-      AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
-      AND NOT is_stablecoin_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)))
+        SELECT ticker, asset_type, checkpoint_date
+        FROM cash_fx_trade_dates
 
-    UNION
+        UNION
 
-    SELECT DISTINCT normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))::TEXT,
-        CASE
-            WHEN get_asset_type_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset))) = 'crypto'
-            THEN p_end_date
-            ELSE last_trading_day_sql(p_end_date)
-        END
-    FROM transactions t
-    WHERE (get_asset_type_sql(t.asset) = 'cash_fx'
-       OR (t.asset LIKE 'CASH %' AND t.asset != 'CASH USD'))
-      AND normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)) != 'USD'
-      AND NOT is_stablecoin_sql(normalize_cash_asset_sql(t.asset, get_asset_type_sql(t.asset)))
+        SELECT
+            ticker,
+            asset_type,
+            CASE
+                WHEN asset_type = 'crypto' THEN p_end_date
+                ELSE market_last_price_date_sql(asset_type, p_end_date)
+            END AS checkpoint_date
+        FROM cash_fx_current_sources
+    )
+    SELECT DISTINCT c.ticker, c.checkpoint_date
+    FROM candidates c
+    WHERE c.checkpoint_date IS NOT NULL
+      -- ponytail: single-ticker buckets with no same-day prints cannot prove the market was open,
+      -- so a real gap may be dropped until some ticker in that bucket prints on that date.
+      AND market_has_price_activity_sql(c.asset_type, c.checkpoint_date)
 $$;
 
 -- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.
