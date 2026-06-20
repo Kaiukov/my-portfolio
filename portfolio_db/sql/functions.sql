@@ -611,8 +611,13 @@ AS $$
     SELECT DISTINCT c.ticker, c.checkpoint_date
     FROM candidates c
     WHERE c.checkpoint_date IS NOT NULL
-      -- ponytail: single-ticker buckets with no same-day prints cannot prove the market was open,
-      -- so a real gap may be dropped until some ticker in that bucket prints on that date.
+      -- ponytail: this data-driven filter has two honest blind spots.
+      -- First, a whole-bucket same-day fetch failure on a real trading day is not flagged by
+      -- coverage here, because no same-bucket print exists to prove the market was open; that
+      -- case is only caught later by stale_tickers_sql() once the missing day ages past
+      -- p_max_age_days. Second, full-bucket historical outages are likewise dropped here, not
+      -- just single-ticker-bucket gaps. The upgrade path is an external market-open signal
+      -- (for example refresh-audit state), not a hardcoded holiday calendar.
       AND market_has_price_activity_sql(c.asset_type, c.checkpoint_date)
 $$;
 
