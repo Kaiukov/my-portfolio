@@ -572,7 +572,7 @@ AS $$
       -- just single-ticker-bucket gaps. The upgrade path is an external market-open signal
       -- (for example refresh-audit state), not a hardcoded holiday calendar.
       AND market_has_price_activity_sql(c.asset_type, c.checkpoint_date)
-    
+
     UNION
 
     -- Refresh audit: when a same-day price refresh loaded at least one row,
