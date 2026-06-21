@@ -1,4 +1,5 @@
 import { calculateMovingAverages } from "./math.js";
+import { roundTo } from "../utils.js";
 
 export type MacroRegime = "AGGRESSIVE" | "CAUTION" | "PROTECTION";
 
@@ -99,7 +100,7 @@ async function fetchFearGreed(): Promise<Record<string, unknown>> {
   const fg = data?.fear_and_greed;
   if (!fg || fg.score == null)
     return { value: null, error: "parse_failed", source: "CNN dataviz API" };
-  const value = Math.round(parseFloat(fg.score) * 100) / 100;
+  const value = roundTo(parseFloat(fg.score));
   return {
     value,
     rating: fg.rating ?? null,
@@ -208,8 +209,8 @@ async function fetchSpxSma200(): Promise<Record<string, unknown>> {
 
   const above = currentPrice > ma200;
   return {
-    spx_price: Math.round(currentPrice * 100) / 100,
-    sma200: Math.round(ma200 * 100) / 100,
+    spx_price: roundTo(currentPrice),
+    sma200: roundTo(ma200),
     above_sma200: above,
     peak: !above,
     source: "Yahoo Finance",

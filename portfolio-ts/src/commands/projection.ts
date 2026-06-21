@@ -44,6 +44,7 @@
 import { querySingle } from "../db.js";
 import { getSummary } from "./summary.js";
 import type { SummaryData } from "./summary.js";
+import { roundTo } from "../utils.js";
 
 // ── SQL-backed projection (API/MCP compatibility) ──
 
@@ -187,10 +188,6 @@ export interface GoalProjection extends ProjectionBase {
 
 export type ProjectionResult = DetailedProjection | AccumulationProjection | GoalProjection;
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
 export function annualToMonthly(annualRatePct: number): number {
   const R = annualRatePct / 100;
   return Math.pow(1 + R, 1 / 12) - 1;
@@ -250,7 +247,7 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
   const base: ProjectionBase = {
     mode,
     as_of_date: asOfDate,
-    current_value: round2(P0),
+    current_value: roundTo(P0),
     monthly_contribution: C,
     annual_rate_pct: annualRatePct,
     monthly_rate: monthlyRate,
@@ -272,8 +269,8 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
         target,
         feasible: true,
         months_needed: 0,
-        projected_value: round2(P0),
-        max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
+        projected_value: roundTo(P0),
+        max_achievable: Number.isFinite(achievable) ? roundTo(achievable) : Infinity,
       };
     }
 
@@ -285,8 +282,8 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
         target,
         feasible: false,
         months_needed: null,
-        projected_value: round2(fvAt),
-        max_achievable: round2(achievable),
+        projected_value: roundTo(fvAt),
+        max_achievable: roundTo(achievable),
       };
     }
 
@@ -300,8 +297,8 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
           target,
           feasible: true,
           months_needed: n,
-          projected_value: round2(fvAt),
-          max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
+          projected_value: roundTo(fvAt),
+          max_achievable: Number.isFinite(achievable) ? roundTo(achievable) : Infinity,
         };
       }
     }
@@ -313,8 +310,8 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
       target,
       feasible: false,
       months_needed: null,
-      projected_value: round2(fvAt),
-      max_achievable: Number.isFinite(achievable) ? round2(achievable) : Infinity,
+      projected_value: roundTo(fvAt),
+      max_achievable: Number.isFinite(achievable) ? roundTo(achievable) : Infinity,
     };
   }
 
@@ -328,16 +325,16 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
   if (mode === "accumulation") {
     const values: number[] = [];
     for (let i = 0; i <= n; i++) {
-      values.push(round2(futureValue(P0, monthlyRate, C, i)));
+      values.push(roundTo(futureValue(P0, monthlyRate, C, i)));
     }
 
     return {
       ...base,
       mode: "accumulation",
       months: n,
-      projected_value: round2(fvFinal),
-      total_contributions: round2(totalContributions),
-      gain_from_returns: round2(gainFromReturns),
+      projected_value: roundTo(fvFinal),
+      total_contributions: roundTo(totalContributions),
+      gain_from_returns: roundTo(gainFromReturns),
       values,
     };
   }
@@ -350,9 +347,9 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
 
     projection.push({
       month: i,
-      value: round2(fv),
-      contribution_sum: round2(contribSum),
-      gain: round2(gain),
+      value: roundTo(fv),
+      contribution_sum: roundTo(contribSum),
+      gain: roundTo(gain),
     });
   }
 
@@ -360,9 +357,9 @@ export async function computeProjection(input: ComputeProjectionInput): Promise<
     ...base,
     mode: "detailed",
     months: n,
-    projected_value: round2(fvFinal),
-    total_contributions: round2(totalContributions),
-    gain_from_returns: round2(gainFromReturns),
+    projected_value: roundTo(fvFinal),
+    total_contributions: roundTo(totalContributions),
+    gain_from_returns: roundTo(gainFromReturns),
     projection,
   };
 }

@@ -1,5 +1,6 @@
 import { getAllocation, type AllocationRow } from "./allocation.js";
 import { ValidationError } from "../validators.js";
+import { roundTo } from "../utils.js";
 
 export const TARGET_SUM_EPSILON = 0.01;
 export const DRIFT_HOLD_THRESHOLD = 0.01;
@@ -25,10 +26,6 @@ export interface RebalanceResult {
   total_portfolio_value: number;
   total_absolute_drift: number;
   rows: DriftRow[];
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 export function parseTargetString(targetStr: string): TargetEntry[] {
@@ -78,7 +75,7 @@ export function parseTargetString(targetStr: string): TargetEntry[] {
 
   if (Math.abs(sum - 100) > TARGET_SUM_EPSILON) {
     throw new ValidationError(
-      `Target percentages sum to ${round2(sum)}%, expected 100% (±${TARGET_SUM_EPSILON}%)`,
+      `Target percentages sum to ${roundTo(sum)}%, expected 100% (±${TARGET_SUM_EPSILON}%)`,
     );
   }
 
@@ -124,25 +121,25 @@ export function computeDrift(
 
     rows.push({
       asset,
-      current_pct: round2(currentPct),
+      current_pct: roundTo(currentPct),
       target_pct: targetPct,
-      drift_pct: round2(driftPct),
-      current_value_usd: round2(currentValue),
-      target_value_usd: round2(targetValue),
-      suggested_delta_usd: round2(deltaUsd),
+      drift_pct: roundTo(driftPct),
+      current_value_usd: roundTo(currentValue),
+      target_value_usd: roundTo(targetValue),
+      suggested_delta_usd: roundTo(deltaUsd),
       action,
     });
   }
 
   rows.sort((a, b) => Math.abs(b.drift_pct) - Math.abs(a.drift_pct));
 
-  const totalAbsoluteDrift = round2(
+  const totalAbsoluteDrift = roundTo(
     rows.reduce((sum, r) => sum + Math.abs(r.drift_pct), 0),
   );
 
   return {
     as_of_date: asOfDate,
-    total_portfolio_value: round2(totalPortfolioValue),
+    total_portfolio_value: roundTo(totalPortfolioValue),
     total_absolute_drift: totalAbsoluteDrift,
     rows,
   };

@@ -1,5 +1,6 @@
 import { querySingle } from "../db.js";
 import { getSummary } from "./summary.js";
+import { roundTo } from "../utils.js";
 
 export interface MwrData {
   mwr_pct: number;
@@ -11,10 +12,6 @@ export interface MwrData {
 function num(val: unknown): number {
   const n = Number(val);
   return Number.isFinite(n) ? n : 0;
-}
-
-function round4(val: number): number {
-  return Math.round(val * 10000) / 10000;
 }
 
 export async function getMwr(asOfDate?: string): Promise<MwrData> {
@@ -41,7 +38,7 @@ export async function getMwr(asOfDate?: string): Promise<MwrData> {
   }
 
   return {
-    mwr_pct: round4(mwrRaw * 100),
+    mwr_pct: roundTo(mwrRaw * 100, 4),
     as_of_date: actualDate,
     portfolio_value: summary.portfolio_value_usd,
     note: "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",

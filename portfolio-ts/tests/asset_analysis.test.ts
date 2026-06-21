@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { analyzeAsset, normalizeAssetAnalysisOptions } from "../src/asset_analysis/analysis.js";
 import {
-  analyzeAsset,
   calculateMacd,
   calculateMaxDrawdown,
   calculateMovingAverages,
   calculateStochastic,
   calculateUlcerIndex,
   calculateStochRsi,
+} from "../src/asset_analysis/math.js";
+import {
   createDefaultYahooClient,
   createYahooAssetAnalysisProvider,
   DEFAULT_YAHOO_SUPPRESS_NOTICES,
-  normalizeAssetAnalysisOptions,
-} from "../src/asset_analysis/index.js";
+} from "../src/asset_analysis/provider.js";
 import { alignReturnSeriesByDate } from "../src/asset_analysis/math.js";
 import { computeAllMetrics } from "../src/asset_analysis/metrics.js";
 import type {

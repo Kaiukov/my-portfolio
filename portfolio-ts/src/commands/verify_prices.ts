@@ -29,7 +29,7 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
   const requiredRows = await query<{ ticker: string; ticker_category: string }>(
     "SELECT ticker, ticker_category FROM discover_required_tickers_sql() ORDER BY ticker",
   );
-  const requiredTickers = [...new Set(requiredRows.map((r) => r.ticker))];
+  const requiredTickers = [...new Set((requiredRows ?? []).map((r) => r.ticker))];
 
   // Determine end date for checkpoint validation
   const today = new Date().toISOString().split("T")[0];
@@ -40,7 +40,7 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
 
   // Group checkpoints by ticker and check coverage
   const checkpointMap = new Map<string, string[]>();
-  for (const row of checkpointRows) {
+  for (const row of checkpointRows ?? []) {
     const dates = checkpointMap.get(row.ticker) ?? [];
     dates.push(row.checkpoint_date);
     checkpointMap.set(row.ticker, dates);
@@ -58,10 +58,10 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
        )`,
       [ticker],
     );
-    if (missingRows.length > 0) {
+    if ((missingRows ?? []).length > 0) {
       coverageIssues.push({
         ticker,
-        issues: [`missing_dates: ${missingRows.map((r) => r.d).join(", ")}`],
+        issues: [`missing_dates: ${(missingRows ?? []).map((r) => r.d).join(", ")}`],
       });
     }
   }
@@ -73,7 +73,7 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
       "SELECT ticker, last_price_date::text, age_days::int FROM stale_tickers_sql($1)",
       [maxAgeDays],
     );
-    staleTickers = staleRows.map((r) => ({
+    staleTickers = (staleRows ?? []).map((r) => ({
       ticker: r.ticker,
       last_price_date: r.last_price_date,
       age_days: r.age_days,

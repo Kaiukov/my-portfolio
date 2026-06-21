@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-21
+
+### Fixed
+- **#325** — same-day whole-bucket price-fetch failures are no longer hidden until
+  `stale_tickers_sql()` ages them out. A `price_refresh` row in `refresh_log` with
+  `rows_affected > 0` now forces a `CURRENT_DATE` coverage checkpoint for every
+  non-cash required ticker, surfaced immediately by `health`, `verify_prices`,
+  `freshness`, and the repair/verify maintenance jobs. Closed-market days (zero-row
+  refresh) are preserved — no false coverage gap. Verified against live postgres.
+
+### Changed
+- **#320** — hand-rolled `Math.round(n * 10^k) / 10^k` rounding consolidated into a
+  single shared `roundTo()` helper (`src/utils.ts`), used by `rebalance`, `projection`,
+  `mwr`, and `macro`.
+- **#325 refactor** — the refresh-audit coverage logic is folded directly into
+  `get_required_price_checkpoints_sql` as one `UNION` branch, so callers (CLI commands
+  and the SQL maintenance jobs) issue a single checkpoint query instead of a second
+  audit query merged in JS.
+
+### Removed
+- **#322** — deleted unused barrel files `src/asset_analysis/index.ts` and
+  `src/mcp/index.ts` (no real consumers); imports now reference modules directly.
+
 ## [0.9.0] - 2026-06-16
 
 ### Added

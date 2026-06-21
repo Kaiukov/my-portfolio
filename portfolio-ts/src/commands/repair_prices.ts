@@ -127,24 +127,26 @@ async function recordRepair(ticker: string, startDate: string, endDate: string, 
   );
 }
 
-async function markRefreshSuccess(rowsAffected: number): Promise<void> {
-  const now = new Date().toISOString();
+async function recordRefreshAudit(rowsAffected: number): Promise<void> {
   await query(
     `INSERT INTO refresh_log (refresh_date, refresh_type, rows_affected)
      VALUES (CURRENT_DATE, 'price_refresh', $1)`,
     [rowsAffected],
   );
-  await query(
-    `INSERT INTO service_state (state_key, state_value, updated_at)
-     VALUES ('last_successful_price_refresh', $1, $2)
-     ON CONFLICT (state_key)
-     DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = EXCLUDED.updated_at`,
-    [now, now],
-  );
-  await query(
-    `UPDATE service_state SET state_value = 'false', updated_at = NOW()
-     WHERE state_key = 'prices_need_fetch'`,
-  );
+  if (rowsAffected > 0) {
+    const now = new Date().toISOString();
+    await query(
+      `INSERT INTO service_state (state_key, state_value, updated_at)
+       VALUES ('last_successful_price_refresh', $1, $2)
+       ON CONFLICT (state_key)
+       DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = EXCLUDED.updated_at`,
+      [now, now],
+    );
+    await query(
+      `UPDATE service_state SET state_value = 'false', updated_at = NOW()
+       WHERE state_key = 'prices_need_fetch'`,
+    );
+  }
 }
 
 export async function repairPrices(
@@ -194,8 +196,8 @@ export async function repairPrices(
     }
   }
 
-  if (totalRows > 0 && (params.tickers?.length ?? 0) === 0) {
-    await markRefreshSuccess(totalRows);
+  if ((params.tickers?.length ?? 0) === 0) {
+    await recordRefreshAudit(totalRows);
   }
 
   // Final coverage/freshness check (issue #144). Only meaningful for

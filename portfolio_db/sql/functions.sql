@@ -493,6 +493,9 @@ $$;
 
 -- Required price checkpoints per ticker: trade dates + end date
 -- Used to validate that the price cache covers all valuation points.
+-- Same-day market-open inference comes from the refresh audit:
+-- a `price_refresh` row in `refresh_log` with rows_affected > 0 proves the
+-- portfolio refresh ran far enough to expect current-day checkpoints.
 DROP FUNCTION IF EXISTS get_required_price_checkpoints_sql(DATE);
 CREATE OR REPLACE FUNCTION get_required_price_checkpoints_sql(p_end_date DATE)
 RETURNS TABLE(ticker TEXT, checkpoint_date DATE)
@@ -569,6 +572,24 @@ AS $$
       -- just single-ticker-bucket gaps. The upgrade path is an external market-open signal
       -- (for example refresh-audit state), not a hardcoded holiday calendar.
       AND market_has_price_activity_sql(c.asset_type, c.checkpoint_date)
+    
+    UNION
+
+    -- Refresh audit: when a same-day price refresh loaded at least one row,
+    -- enforce current-day coverage for all non-cash required tickers. This
+    -- prevents a bucket-wide zero-row fetch from hiding until stale_tickers_sql()
+    -- ages out, while preserving closed-market days (no positive refresh audit).
+    SELECT DISTINCT dt.ticker, p_end_date
+    FROM discover_required_tickers_sql() dt
+    WHERE p_end_date = CURRENT_DATE
+      AND NOT is_cash_like_sql(dt.ticker)
+      AND EXISTS (
+          SELECT 1
+          FROM refresh_log rl
+          WHERE rl.refresh_date = p_end_date
+            AND rl.refresh_type = 'price_refresh'
+            AND COALESCE(rl.rows_affected, 0) > 0
+      )
 $$;
 
 -- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.

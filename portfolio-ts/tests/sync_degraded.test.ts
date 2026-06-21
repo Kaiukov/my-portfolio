@@ -31,7 +31,8 @@ describe("repairPrices status / unresolved (issue #144)", () => {
     mockQuery.mockResolvedValueOnce([{ ticker: "AAPL" }]);
     // catch branch: recordRepair(failed) for AAPL
     mockQuery.mockResolvedValueOnce([]);
-    // totalRows === 0 -> markRefreshSuccess NOT called
+    // refresh_log audit still records the failed full-portfolio attempt
+    mockQuery.mockResolvedValueOnce([]);
     // verifyPrices:
     mockQuerySingle.mockResolvedValueOnce({ total_rows: 0, min_date: null, max_date: null });
     // distinct tickers from prices (empty)
@@ -73,7 +74,7 @@ describe("repairPrices status / unresolved (issue #144)", () => {
     mockQuery.mockResolvedValueOnce([]);
     // recordRepair(success)
     mockQuery.mockResolvedValueOnce([]);
-    // markRefreshSuccess:
+    // refresh_log audit:
     //   refresh_log insert
     mockQuery.mockResolvedValueOnce([]);
     //   service_state upsert

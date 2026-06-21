@@ -37,7 +37,7 @@ export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
      )`,
     [today],
   );
-  const coverageIssueTickers = [...new Set(checkpointRows.map((r) => r.ticker))].sort();
+  const coverageIssueTickers = [...new Set((checkpointRows ?? []).map((r) => r.ticker))].sort();
 
   // Stale-price detection via SQL (per-ticker staleness, no masking)
   let stalePriceTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
@@ -46,7 +46,7 @@ export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
       "SELECT ticker, last_price_date::text, age_days::int FROM stale_tickers_sql($1)",
       [maxAgeDays],
     );
-    stalePriceTickers = staleRows.map((r) => ({
+    stalePriceTickers = (staleRows ?? []).map((r) => ({
       ticker: r.ticker,
       last_price_date: r.last_price_date,
       age_days: r.age_days,
