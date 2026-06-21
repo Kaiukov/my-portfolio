@@ -36,3 +36,4 @@ This page documents the dev and prod runtime boundaries only. The app runs via D
 - **Dev** is a **permanent QA twin**, NOT scheduled for decommission. It serves as the integration environment for testing changes before they reach prod.
 - **Prod** is the canonical environment for consumers — the agent skills on the openclaw/hermes box (`192.168.1.131`) and the production widget (`portfolio-widget-prod.kayukov2010.workers.dev`) point at prod (`192.168.1.104:8787`).
 - The two environments run independently. They may show slightly different `portfolio_value` due to price-refresh timing, while sharing identical cost basis. Decommissioning dev would be a separate, explicit decision — it is not implied by prod going live.
+- Before any prod recreate, run `docker compose config | grep PORTFOLIO_DB_URL` and verify the resolved URL contains the 48-char prod password, not `portfolio_password`.
