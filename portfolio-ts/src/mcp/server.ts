@@ -38,7 +38,77 @@ export const MCP_WRITE_TOOLS = [
   "split",
 ] as const;
 
-const OPEN_ARGS_SCHEMA = z.object({}).passthrough();
+const READ_ARGS_SCHEMA = z.object({}).passthrough();
+
+const ADD_TRANSACTION_SCHEMA = z
+  .object({
+    date: z.string().describe("Transaction date (YYYY-MM-DD)"),
+    asset: z.string().describe("Asset symbol/ticker"),
+    action: z.string().describe("Buy or Sell"),
+    quantity: z.number().describe("Number of units/shares"),
+    price: z.number().optional().describe("Price per unit"),
+    currency: z.string().optional().describe("Transaction currency"),
+    fees: z.number().optional().describe("Transaction fees"),
+    feeCurrency: z.string().optional().describe("Fee currency"),
+    exchange: z.string().optional().describe("Exchange name"),
+    account: z.string().optional().describe("Account name"),
+  })
+  .passthrough();
+
+const EDIT_TRANSACTION_SCHEMA = z
+  .object({
+    id: z.number().int().describe("Transaction ID"),
+    date: z.string().optional().describe("Transaction date (YYYY-MM-DD)"),
+    asset: z.string().optional().describe("Asset symbol/ticker"),
+    action: z.string().optional().describe("Buy or Sell"),
+    quantity: z.number().optional().describe("Number of units/shares"),
+    price: z.number().optional().describe("Price per unit"),
+    currency: z.string().optional().describe("Transaction currency"),
+    fees: z.number().optional().describe("Transaction fees"),
+    feeCurrency: z.string().optional().describe("Fee currency"),
+    exchange: z.string().optional().describe("Exchange name"),
+    dataSource: z.string().optional().describe("Data source"),
+    account: z.string().optional().describe("Account name"),
+    dryRun: z.boolean().optional().describe("Preview changes without applying"),
+  })
+  .passthrough();
+
+const DELETE_TRANSACTION_SCHEMA = z
+  .object({
+    id: z.number().int().describe("Transaction ID"),
+    dryRun: z.boolean().optional().describe("Preview deletion without applying"),
+    confirm: z.boolean().optional().describe("Confirm deletion"),
+  })
+  .passthrough();
+
+const EXCHANGE_CURRENCY_SCHEMA = z
+  .object({
+    date: z.string().describe("Exchange date (YYYY-MM-DD)"),
+    fromAsset: z.string().describe("Source currency/asset"),
+    toAsset: z.string().describe("Target currency/asset"),
+    quantity: z.number().describe("Amount to convert"),
+    rate: z.number().describe("Exchange rate"),
+  })
+  .passthrough();
+
+const SPLIT_SCHEMA = z
+  .object({
+    date: z.string().describe("Split date (YYYY-MM-DD)"),
+    asset: z.string().describe("Asset symbol/ticker"),
+    ratio: z.number().describe("Split ratio (e.g., 2 for 2:1 split)"),
+    confirm: z.boolean().describe("Confirm the split operation"),
+    exchange: z.string().optional().describe("Exchange name"),
+    account: z.string().optional().describe("Account name"),
+  })
+  .passthrough();
+
+const WRITE_TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  add_transaction: ADD_TRANSACTION_SCHEMA,
+  edit_transaction: EDIT_TRANSACTION_SCHEMA,
+  delete_transaction: DELETE_TRANSACTION_SCHEMA,
+  exchange_currency: EXCHANGE_CURRENCY_SCHEMA,
+  split: SPLIT_SCHEMA,
+};
 
 function toolResponse(envelope: unknown) {
   return {
@@ -56,11 +126,16 @@ function registerTool(
   toolName: (typeof MCP_READ_TOOLS)[number] | (typeof MCP_WRITE_TOOLS)[number],
   kind: "read" | "write",
 ) {
+  const inputSchema =
+    kind === "write"
+      ? (WRITE_TOOL_SCHEMAS[toolName] ?? READ_ARGS_SCHEMA)
+      : READ_ARGS_SCHEMA;
+
   server.registerTool(
     toolName,
     {
       description: `${kind === "read" ? "Read" : "Write"} tool for ${toolName}`,
-      inputSchema: OPEN_ARGS_SCHEMA,
+      inputSchema,
       annotations: kind === "read" ? { readOnlyHint: true, openWorldHint: false } : undefined,
     },
     async (args) => {
