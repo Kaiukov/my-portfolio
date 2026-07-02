@@ -1,4 +1,4 @@
-import * as z from "zod/v4";
+import * as z from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { mcpRead } from "./read.js";
@@ -38,7 +38,7 @@ export const MCP_WRITE_TOOLS = [
   "split",
 ] as const;
 
-const READ_ARGS_SCHEMA = z.object({}).passthrough();
+const READ_ARGS_SCHEMA = z.object({}).passthrough(); // read tools accept any args, harmless
 
 const ADD_TRANSACTION_SCHEMA = z
   .object({
@@ -51,10 +51,9 @@ const ADD_TRANSACTION_SCHEMA = z
     fees: z.number().optional().describe("Transaction fees"),
     feeCurrency: z.string().optional().describe("Fee currency"),
     fee_currency: z.string().optional().describe("Fee currency (alias)"),
-    exchange: z.string().optional().describe("Exchange name"),
+    exchange: z.string().describe("Exchange name (e.g., FREEDOM24) — REQUIRED"),
     account: z.string().optional().describe("Account name"),
-  })
-  .passthrough();
+  });
 
 const EDIT_TRANSACTION_SCHEMA = z
   .object({
@@ -78,8 +77,7 @@ const EDIT_TRANSACTION_SCHEMA = z
     dryRun: z.boolean().optional().describe("Preview changes without applying"),
     dry_run: z.boolean().optional().describe("Preview changes without applying (alias)"),
     "dry-run": z.boolean().optional().describe("Preview changes without applying (alias)"),
-  })
-  .passthrough();
+  });
 
 const DELETE_TRANSACTION_SCHEMA = z
   .object({
@@ -91,8 +89,7 @@ const DELETE_TRANSACTION_SCHEMA = z
     dry_run: z.boolean().optional().describe("Preview deletion without applying (alias)"),
     "dry-run": z.boolean().optional().describe("Preview deletion without applying (alias)"),
     confirm: z.boolean().optional().describe("Confirm deletion"),
-  })
-  .passthrough();
+  });
 
 const EXCHANGE_CURRENCY_SCHEMA = z
   .object({
@@ -105,8 +102,7 @@ const EXCHANGE_CURRENCY_SCHEMA = z
     to: z.string().optional().describe("Target currency/asset (alias)"),
     quantity: z.number().describe("Amount to convert"),
     rate: z.number().describe("Exchange rate"),
-  })
-  .passthrough();
+  });
 
 const SPLIT_SCHEMA = z
   .object({
@@ -116,8 +112,7 @@ const SPLIT_SCHEMA = z
     confirm: z.boolean().describe("Confirm the split operation"),
     exchange: z.string().optional().describe("Exchange name"),
     account: z.string().optional().describe("Account name"),
-  })
-  .passthrough();
+  });
 
 const WRITE_TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
   add_transaction: ADD_TRANSACTION_SCHEMA,
