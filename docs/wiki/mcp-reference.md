@@ -4,13 +4,25 @@ Model Context Protocol (MCP) adapter for AI-agent integration. Lives in `portfol
 
 The MCP adapter is a full read+write peer adapter alongside the CLI and HTTP API. It reuses the same shared service layer (`src/commands/*`) — no duplicated business logic.
 
+## Canonical Connection Method
+
+**Streamable HTTP** — единый канонический метод для любых внешних сервисов и AI-агентов.
+
+```
+http://<host>:8787/mcp
+```
+
+Никаких spawn, pipe, child processes. Просто HTTP-endpoint. Подробнее: [MCP Connection Spec](mcp-connect-spec.md).
+
+Stdio-транспорт (`bun run mcp`) используется **только** как внутренний дочерний процесс для OpenAI tunnel-client — внешние сервисы к нему не подключаются.
+
 ## Files
 
 | File | Exports | Purpose |
 |---|---|---|
 | `read.ts` | `mcpRead(toolName, args)` | Read tools (23 tools) |
 | `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (5 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
-| `server.ts` | `createPortfolioMcpServer()` / `runPortfolioMcpServer()` | Stdio MCP entrypoint for OpenAI tunnel-client |
+| `server.ts` | `createPortfolioMcpServer()` / `runPortfolioMcpServer()` | MCP server factory + stdio transport (для tunnel-client) |
 | `index.ts` | Re-exports `mcpRead`, `mcpWrite`, `McpWriteContext` | Package entry point |
 
 ## JSON Envelope
@@ -25,24 +37,50 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 
 Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/adapters/shared.ts`).
 
+## Tool Counts
+
+- **23 read tools** — full parity with CLI and REST API
+- **5 write tools** — full parity with CLI and REST API
+- **28 total tools** exposed via `tools/list`
+
+## Transport
+
+| Transport | Entrypoint | Use case |
+|-----------|-----------|----------|
+| **Streamable HTTP** (канонический) | `http://<host>:8787/mcp` | Все внешние сервисы, AI-агенты, dashboard |
+| Stdio (внутренний) | `bun run mcp` | Только как дочерний процесс для OpenAI tunnel-client |
+
+Streamable HTTP endpoint обслуживается тем же `Bun.serve`, что и REST API — отдельный процесс не нужен. Все 28 инструментов доступны через оба транспорта с идентичным поведением.
+
 ## Read Tools
 
 Dispatched via `mcpRead(toolName, args)`. Each tool mirrors its CLI/API counterpart exactly.
 
-| Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
-|---|---|---|---|---|
-| `status` | `status` | — | `as_of` / `asOf` | Yes |
-| `summary` | `summary` | — | `as_of` / `asOf` | Yes |
-| `cash` | `cash` | — | `as_of` / `asOf` | Yes |
-| `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
-| `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
-| `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period` | Yes |
-| `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
-| `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
-| `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
-| `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
-| `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
-| `widget` | `widget` | `days` | `as_of` / `asOf` | — |
+| # | Tool name | CLI equivalent | Required args | Optional args | Freshness meta |
+|---|-----------|---------------|---------------|---------------|---------------|
+| 1 | `status` | `status` | — | `as_of` / `asOf` | Yes |
+| 2 | `summary` | `summary` | — | `as_of` / `asOf` | Yes |
+| 3 | `cash` | `cash` | — | `as_of` / `asOf` | Yes |
+| 4 | `cash_drag` | `cash_drag` | — | `as_of` / `asOf`, `from_date` / `fromDate`, `benchmark_return_rate` / `benchmarkReturnRate`, `cash_return_rate` / `cashReturnRate` | Yes |
+| 5 | `currency_exposure` | `currency_exposure` | — | `as_of` / `asOf` | Yes |
+| 6 | `income` | `income` | — | `as_of` / `asOf`, `from_date` / `fromDate`, `asset` | — |
+| 7 | `realized_gains` | `realized_gains` | — | `from_date` / `fromDate`, `to_date` / `toDate`, `asset`, `by_year` / `byYear` | — |
+| 8 | `allocation` | `allocation` | — | `as_of` / `asOf` | Yes |
+| 9 | `rebalance` | `rebalance` | `target` | `as_of` / `asOf` | — |
+| 10 | `concentration` | `concentration` | — | `as_of` / `asOf`, `top_n` / `topN` | Yes |
+| 11 | `diversification` | `diversification` | — | `as_of` / `asOf`, `lookback_days` / `lookbackDays`, `min_correlation` / `minCorrelation` | Yes |
+| 12 | `decomposition` | `decomposition` | — | `as_of` / `asOf` | Yes |
+| 13 | `performance` | `performance` | — | `as_of` / `asOf`, `benchmark`, `from_date` / `fromDate`, `period`, `inflation_rate` / `inflationRate` | Yes |
+| 14 | `mwr` | `mwr` | — | `as_of` / `asOf` | Yes |
+| 15 | `transactions` | `transactions` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| 16 | `report` | `report` | — | `limit`, `offset`, `start_date` / `startDate`, `end_date` / `endDate` | — |
+| 17 | `health` | `health` | — | `max_age_days` / `maxAgeDays` | — |
+| 18 | `verify_prices` | `verify_prices` | — | `max_age_days` / `maxAgeDays` | — |
+| 19 | `widget` | `widget` | `days` | `as_of` / `asOf` | — |
+| 20 | `asset_metadata` | `asset_metadata` | — | `asset`, `refresh` | — |
+| 21 | `projection` | `projection` | — | `as_of` / `asOf`, `monthly_contribution` / `monthlyContribution`, `annual_return_rate` / `annualReturnRate`, `target_value` / `targetValue`, `projection_years` / `projectionYears`, `inflation_rate` / `inflationRate` | — |
+| 22 | `withdrawal` | `withdrawal` | — | `as_of` / `asOf`, `annual_withdrawal` / `annualWithdrawal`, `withdrawal_rate` / `withdrawalRate`, `time_horizon_years` / `timeHorizonYears`, `expected_return` / `expectedReturn`, `inflation_rate` / `inflationRate` | — |
+| 23 | `asset_analysis` | `asset_analysis` | `ticker` or `asset` | `period`, `lookback_days` / `lookbackDays`, `benchmark`, `as_of` / `as_of_date` / `asOf` / `asOfDate`, `risk_free_rate` / `riskFreeRate` | — |
 
 Tools with "Freshness meta" inject `needs_recalc`/`recalc_warning`/`stale`/`prices_as_of`/`price_age_days` into the response `meta` envelope (see [CLI Reference](cli-reference.md#freshness-meta-fields)).
 
@@ -69,19 +107,7 @@ MCP tools accept multiple key aliases per arg:
 
 ## OpenAI Secure MCP Tunnel
 
-The MCP server entrypoint is `portfolio-ts/src/mcp/server.ts` (or `bun run mcp`).
-It is a stdio MCP server compatible with OpenAI `tunnel-client`.
-
-Quick start:
-
-```bash
-cd portfolio-ts
-bun run mcp
-# in another terminal, point tunnel-client at the same command
-# tunnel-client init --sample sample_mcp_stdio_local --profile portfolio --mcp-command "bun run mcp"
-```
-
-See the release link shared in the issue for the current tunnel-client build stream.
+Для подключения через OpenAI tunnel-client используйте stdio-транспорт (`bun run mcp`) как дочерний процесс. Подробный ранбук: [OpenAI Secure MCP Tunnel](../../docs/openai-secure-mcp-tunnel.md).
 
 ## Write Context
 
@@ -91,6 +117,24 @@ See the release link shared in the issue for the current tunnel-client build str
 
 - `edit_transaction` and `delete_transaction` support dry-run via `dry_run: true` (or `dryRun`, `dry-run`).
 - `delete_transaction` requires `confirm: true` unless dry-run.
+
+## Dashboard MCP Endpoint (Cloudflare Worker)
+
+Dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) exposes a separate **9-tool read-only MCP endpoint** backed by Cloudflare KV — упрощённое подмножество для быстрых AI-запросов без live PostgreSQL.
+
+| # | Dashboard MCP tool | Source |
+|---|-------------------|--------|
+| 1 | `status` | KV snapshot |
+| 2 | `summary` | KV snapshot |
+| 3 | `allocation` | KV snapshot |
+| 4 | `cash` | KV snapshot |
+| 5 | `concentration` | KV snapshot |
+| 6 | `performance` | KV snapshot |
+| 7 | `mwr` | KV snapshot |
+| 8 | `widget` | KV snapshot |
+| 9 | `projection` | KV snapshot |
+
+Dashboard MCP — stateless, read-only. Write и maintenance операции (`add`, `edit`, `delete`, `exchange`, `split`, `recalculate`, `repair_prices`, `sync`) доступны **только** через основной portfolio MCP server (28 инструментов) по каноническому Streamable HTTP.
 
 ## Error Handling
 

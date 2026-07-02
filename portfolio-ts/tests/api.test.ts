@@ -3,6 +3,7 @@ import { NotFoundError, ValidationError } from "../src/validators.js";
 
 const mockQuerySingle = mock();
 const mockQuery = mock();
+const mockGetAssetMetadata = mock();
 const mockAddTransaction = mock();
 const mockEditTransaction = mock();
 const mockEditDryRun = mock();
@@ -13,8 +14,11 @@ const mockExchangeCurrency = mock();
 mock.module("../src/db.js", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
+  getAssetMetadata: mockGetAssetMetadata,
+  upsertAssetMetadata: () => Promise.resolve(),
   connect: () => {},
   close: async () => {},
+  getSql: () => ({}),
 }));
 
 mock.module("../src/tx.js", () => ({
@@ -26,6 +30,8 @@ mock.module("../src/tx.js", () => ({
 beforeEach(() => {
   mockQuerySingle.mockReset();
   mockQuery.mockReset();
+  mockGetAssetMetadata.mockReset();
+  mockGetAssetMetadata.mockResolvedValue([]);
   mockAddTransaction.mockReset();
   mockEditTransaction.mockReset();
   mockEditDryRun.mockReset();
@@ -794,7 +800,7 @@ describe("handleRequest", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.ok).toBe(false);
-    expect(body.command).toBe("api");
+    expect(body.command).toBe("summary");
     expect(body.error.code).toBe("INTERNAL_ERROR");
     expect(body.error.message).toBe("Connection refused");
   });
@@ -878,6 +884,69 @@ describe("handleRequest", () => {
     const body = await res.json();
     expect(body.ready).toBe(false);
     expect(body.error).toBe("connection refused");
+  });
+
+  test("GET /mcp returns an SSE stream for Cloudflare/OpenAI server URL mode", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+
+    // Step 1: Initialize session with POST
+    const initReq = new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "test", version: "0" },
+        },
+      }),
+    });
+    const initRes = await handleRequest(initReq);
+    expect(initRes.status).toBe(200);
+    const sessionId = initRes.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    // Step 2: Use session ID for SSE stream with GET
+    const req = new Request("http://localhost/mcp", {
+      method: "GET",
+      headers: {
+        Accept: "text/event-stream",
+        "mcp-session-id": sessionId || "",
+      },
+    });
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/event-stream");
+    expect(res.headers.get("Cache-Control")).toContain("no-cache");
+  });
+
+  test("MCP /mcp CORS headers present when PORTFOLIO_API_CORS_ORIGIN is set", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/mcp", { method: "OPTIONS" });
+    const res = await handleRequest(req, { corsOrigin: "https://chatgpt.example.com" });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://chatgpt.example.com");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Mcp-Session-Id");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Mcp-Protocol-Version");
+    expect(res.headers.get("Access-Control-Expose-Headers")).toContain("Mcp-Session-Id");
+    expect(res.headers.get("Access-Control-Expose-Headers")).toContain("Mcp-Protocol-Version");
+  });
+
+  test("MCP /sse OPTIONS returns CORS headers when enabled", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/sse", { method: "OPTIONS" });
+    const res = await handleRequest(req, { corsOrigin: "*" });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
   });
 
   test("OPTIONS /status returns CORS headers when enabled", async () => {

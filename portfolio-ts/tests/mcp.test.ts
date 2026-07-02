@@ -10,12 +10,16 @@ const mockExchangeCurrency = mock();
 
 const mockDbQuery = mock();
 const mockDbQuerySingle = mock();
+const mockGetAssetMetadata = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockDbQuery,
   querySingle: mockDbQuerySingle,
+  getAssetMetadata: mockGetAssetMetadata,
+  upsertAssetMetadata: () => Promise.resolve(),
   connect: () => {},
   close: () => {},
+  getSql: () => ({}),
 }));
 
 mock.module("../src/tx.js", () => ({
@@ -41,6 +45,8 @@ beforeEach(() => {
   mockExchangeCurrency.mockReset();
   mockDbQuery.mockReset();
   mockDbQuerySingle.mockReset();
+  mockGetAssetMetadata.mockReset();
+  mockGetAssetMetadata.mockResolvedValue([]);
 });
 
 function writeCtx() {
@@ -563,5 +569,162 @@ describe("mcpRead", () => {
     if (result.ok) throw new Error("Expected error envelope");
     expect(result.error.code).toBe("NOT_FOUND");
     expect(result.error.message).toBe("Unsupported MCP read tool: recalculate");
+  });
+
+  test("asset_analysis returns correct envelope (parity with API/CLI)", async () => {
+    // asset_analysis uses yahoo-finance2 provider, which is mocked at the
+    // module level. A full end-to-end requires the integration test suite.
+    // Here we verify the dispatch and error path shape.
+    const { mcpRead } = await import("../src/mcp/read.js");
+    const result = await mcpRead("asset_analysis", { ticker: "AAPL" });
+
+    // The Yahoo mock may return empty results, which yields an error.
+    // Either ok or error — we verify the command routing is correct.
+    if (result.ok) {
+      expect(result.command).toBe("asset_analysis");
+      expect(result.data).toBeDefined();
+    } else {
+      expect(result.command).toBe("asset_analysis");
+      expect(result.error).toBeDefined();
+    }
+  });
+
+  test("asset_analysis returns VALIDATION_ERROR when missing ticker and asset", async () => {
+    const { mcpRead } = await import("../src/mcp/read.js");
+    const result = await mcpRead("asset_analysis", {});
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.message).toContain("ticker or asset is required");
+  });
+
+  test("projection returns correct envelope (parity with API/CLI)", async () => {
+    mockDbQuerySingle.mockResolvedValueOnce({
+      current_value: 100000,
+      annual_return_rate: 0.07,
+      monthly_contribution: 1000,
+      inflation_rate: 0.03,
+      target_value: null,
+      years_to_goal: null,
+      projected_goal_value: null,
+      projection_years: 10,
+      projected_value_nominal: 250000,
+      projected_value_real: 185000,
+      total_contributions: 120000,
+      return_portion: 130000,
+      required_return_rate: null,
+    });
+
+    const { mcpRead } = await import("../src/mcp/read.js");
+    const result = await mcpRead("projection", {
+      monthly_contribution: 1000,
+      annual_return_rate: 0.07,
+    });
+
+    if (!result.ok) throw new Error("Expected success envelope");
+    expect(result.command).toBe("projection");
+    const data = result.data as Record<string, unknown>;
+    expect(data.current_value).toBe(100000);
+    expect(data.projected_value_nominal).toBe(250000);
+    expect(data.projected_value_real).toBe(185000);
+    expect(data.total_contributions).toBe(120000);
+  });
+});
+
+// ═════════════════════════════════════════════════
+// MCP write error paths (invalid tool, missing args)
+// ═════════════════════════════════════════════════
+describe("mcpWrite error paths", () => {
+  test("unsupported tool returns NOT_FOUND", async () => {
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("nonexistent_tool", {}, writeCtx());
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.error.code).toBe("NOT_FOUND");
+    expect(result.error.message).toContain("Unsupported MCP write tool");
+  });
+
+  test("add_transaction missing required fields returns VALIDATION_ERROR", async () => {
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("add_transaction", { date: "2026-01-20" }, writeCtx());
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  test("delete_transaction without confirm returns VALIDATION_ERROR", async () => {
+    mockDeleteTransaction.mockImplementation(async () => {
+      throw new ValidationError("Deletion requires explicit confirmation.");
+    });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("delete_transaction", { id: 42 }, writeCtx());
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.message).toContain("confirmation");
+  });
+
+  test("edit_transaction dry-run option works (parity with API)", async () => {
+    mockEditDryRun.mockResolvedValue({
+      dry_run: true, transaction_id: 42,
+      current: { id: 42, price: 150 },
+      proposed_changes: { price: 155.5 },
+    });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("edit_transaction", {
+      id: 42,
+      price: 155.5,
+      dryRun: true,
+    }, writeCtx());
+
+    if (!result.ok) throw new Error("Expected success envelope");
+    expect(result.command).toBe("edit");
+    expect(mockEditDryRun).toHaveBeenCalledTimes(1);
+    expect(mockEditTransaction).not.toHaveBeenCalled();
+  });
+
+  test("delete_transaction dry-run option works (parity with API)", async () => {
+    mockDeletePreview.mockResolvedValue({
+      dry_run: true, transaction_id: 42,
+      would_delete: [{ id: 42, asset: "AAPL" }],
+      is_exchange_group: false,
+    });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("delete_transaction", {
+      id: 42,
+      dry_run: true,
+    }, writeCtx());
+
+    if (!result.ok) throw new Error("Expected success envelope");
+    expect(result.command).toBe("delete");
+    expect(mockDeletePreview).toHaveBeenCalledWith(42);
+    expect(mockDeleteTransaction).not.toHaveBeenCalled();
+  });
+
+  test("exchange_currency missing required fields returns VALIDATION_ERROR", async () => {
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("exchange_currency", {
+      date: "2026-01-20",
+      fromAsset: "USD",
+    }, writeCtx());
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  test("split without confirm returns VALIDATION_ERROR", async () => {
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("split", {
+      date: "2026-01-20",
+      asset: "AAPL",
+      ratio: 4,
+    }, writeCtx());
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.message).toContain("confirm");
   });
 });

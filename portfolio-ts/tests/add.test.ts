@@ -7,6 +7,9 @@ const mockWithTransaction = mock();
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mockQuerySingle,
+  getAssetMetadata: mock(async () => []),
+  upsertAssetMetadata: mock(async () => {}),
+  getSql: () => ({}),
   connect: () => {},
   close: () => {},
 }));

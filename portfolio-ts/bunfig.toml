@@ -1,0 +1,6 @@
+[test]
+# Per-file module isolation. Without this, bun 1.3.14 defaults to no isolation
+# and `mock.module("../src/db.js", …)` in the 27 mocking test files leaks
+# process-globally, poisoning tests/financial_parity.test.ts (the only real-DB
+# consumer of db.js) → 6 spurious failures. See issue #303.
+isolate = true

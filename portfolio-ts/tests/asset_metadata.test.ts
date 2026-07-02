@@ -6,6 +6,7 @@ const mockQuerySingle = mock();
 mock.module("../src/db.js", () => ({
   query: mockQuery,
   querySingle: mockQuerySingle,
+  getSql: () => ({}),
   connect: () => {},
   close: () => {},
   upsertAssetMetadata: mock(async () => {}),

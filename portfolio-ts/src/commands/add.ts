@@ -17,7 +17,38 @@ export interface AddResult {
   recalculated: boolean;
 }
 
-export async function addTransaction(params: {
+export interface AddDryRunResult {
+  dry_run: true;
+  preview: {
+    date: string;
+    asset: string;
+    action: string;
+    quantity: number;
+    price?: number;
+    currency?: string;
+    fees?: number;
+    fee_currency?: string;
+    exchange: string;
+    asset_type?: string;
+    account?: string;
+  };
+}
+
+interface NormalizedAdd {
+  date: string;
+  asset: string;
+  action: string;
+  quantity: number;
+  price: number | null;
+  currency: string;
+  fees: number | null;
+  feeCurrency: string | null;
+  exchange: string;
+  account: string | null;
+  assetType: string;
+}
+
+async function prepareAdd(params: {
   dateStr: string;
   asset: string;
   action: string;
@@ -28,7 +59,7 @@ export async function addTransaction(params: {
   feeCurrency?: string;
   exchange: string;
   account?: string;
-}): Promise<AddResult> {
+}): Promise<NormalizedAdd> {
   const date = parseDate(params.dateStr, "--date");
   const action = validateAction(params.action);
 
@@ -93,14 +124,45 @@ export async function addTransaction(params: {
     }
   }
 
+  // Get asset type
+  const atRow = await querySingle<{ asset_type: string }>(
+    "SELECT get_asset_type_sql($1) AS asset_type",
+    [params.asset],
+  );
+  const assetType = atRow?.asset_type ?? "stock_usd";
+
+  return {
+    date,
+    asset: params.asset,
+    action,
+    quantity: params.quantity,
+    price: params.price ?? null,
+    currency: params.currency ?? "USD",
+    fees: params.fees ?? null,
+    feeCurrency: params.feeCurrency ?? null,
+    exchange: params.exchange,
+    account: params.account ?? null,
+    assetType,
+  };
+}
+
+export async function addTransaction(params: {
+  dateStr: string;
+  asset: string;
+  action: string;
+  quantity: number;
+  price?: number;
+  currency?: string;
+  fees?: number;
+  feeCurrency?: string;
+  exchange: string;
+  account?: string;
+}): Promise<AddResult> {
+  const normalized = await prepareAdd(params);
+  const { date, asset, action, quantity, price, currency, fees, feeCurrency, exchange, account, assetType } = normalized;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inserted = await runTx(async (tx: any) => {
-    const [atRow] = (await tx.unsafe(
-      "SELECT get_asset_type_sql($1) AS asset_type",
-      [params.asset],
-    )) as { asset_type: string }[];
-    const assetType = atRow?.asset_type ?? "stock_usd";
-
     const [ins] = (await tx.unsafe(
       `INSERT INTO transactions
        (date, asset, action, quantity, asset_type, price, currency,
@@ -109,17 +171,17 @@ export async function addTransaction(params: {
        RETURNING id`,
       [
         date,
-        params.asset,
+        asset,
         action,
-        params.quantity,
+        quantity,
         assetType,
-        params.price ?? null,
-        params.currency ?? "USD",
-        params.fees ?? null,
-        params.feeCurrency ?? null,
-        params.exchange,
+        price,
+        currency,
+        fees,
+        feeCurrency,
+        exchange,
         "",
-        params.account ?? null,
+        account,
       ],
     )) as { id: number }[];
     const transId = ins.id;
@@ -136,4 +198,37 @@ export async function addTransaction(params: {
   });
 
   return { transaction: parseRow(inserted), recalculated: true };
+}
+
+export async function addDryRun(params: {
+  dateStr: string;
+  asset: string;
+  action: string;
+  quantity: number;
+  price?: number;
+  currency?: string;
+  fees?: number;
+  feeCurrency?: string;
+  exchange: string;
+  account?: string;
+}): Promise<AddDryRunResult> {
+  const normalized = await prepareAdd(params);
+  const { date, asset, action, quantity, price, currency, fees, feeCurrency, exchange, assetType, account } = normalized;
+
+  return {
+    dry_run: true,
+    preview: {
+      date,
+      asset,
+      action,
+      quantity,
+      ...(price !== null ? { price } : {}),
+      ...(currency ? { currency } : {}),
+      ...(fees !== null ? { fees } : {}),
+      ...(feeCurrency !== null ? { fee_currency: feeCurrency } : {}),
+      exchange,
+      asset_type: assetType,
+      ...(account !== null ? { account } : {}),
+    },
+  };
 }

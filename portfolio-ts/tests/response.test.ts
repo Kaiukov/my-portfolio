@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { success, error, buildPagination, nowUtc } from "../src/response.js";
+import { APP_VERSION } from "../src/version.js";
 
 describe("success envelope", () => {
   test("returns correct shape with data", () => {
@@ -32,6 +35,11 @@ describe("success envelope", () => {
     const date = new Date(env.meta.generated_at);
     expect(date.toISOString()).toBe(env.meta.generated_at);
   });
+
+  test("success meta includes APP_VERSION", () => {
+    const env = success("test", { x: 1 });
+    expect(env.meta.version).toBe(APP_VERSION);
+  });
 });
 
 describe("error envelope", () => {
@@ -43,6 +51,11 @@ describe("error envelope", () => {
     expect(env.error.message).toBe("Something went wrong");
     expect(env.meta.count).toBeNull();
     expect(env.meta.generated_at).toBeDefined();
+  });
+
+  test("error meta includes APP_VERSION", () => {
+    const env = error("test", "DB_ERROR", "boom");
+    expect(env.meta.version).toBe(APP_VERSION);
   });
 });
 
@@ -71,5 +84,12 @@ describe("nowUtc", () => {
     const ts = nowUtc();
     const d = new Date(ts);
     expect(d.toISOString()).toBe(ts);
+  });
+});
+
+describe("version consistency", () => {
+  test("APP_VERSION matches package.json version", () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8"));
+    expect(APP_VERSION).toBe(pkg.version);
   });
 });

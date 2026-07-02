@@ -124,8 +124,8 @@ MAYBE_SKIP("integration: income command", () => {
             (sum: number, r: any) => sum + Number(r.usd_value),
             0,
           );
-          // Only Feb 20 USD DIVIDEND (0.25), Feb 28 EUR DIVIDEND (0.54), Mar 15 INTEREST (5.00) = 5.79
-          expect(fromFebTotal).toBeCloseTo(5.79, 2);
+          // Feb 20 USD DIVIDEND (0.25), Feb 28 EUR DIVIDEND (0.54), Mar 15 INTEREST (5.00), Mar 20 USD DIVIDEND (0.30) = 6.09
+          expect(fromFebTotal).toBeCloseTo(6.09, 2);
 
           // Test asset filter
           const usdOnly = await tx.unsafe(

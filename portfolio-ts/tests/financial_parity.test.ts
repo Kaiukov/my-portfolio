@@ -351,7 +351,7 @@ describe("financial parity", () => {
               -10::DOUBLE PRECISION,
               NULL::DOUBLE PRECISION,
               NULL::DOUBLE PRECISION,
-              0::DOUBLE PRECISION,
+              -10::DOUBLE PRECISION,
               0::DOUBLE PRECISION,
               -10::DOUBLE PRECISION,
               p_as_of_date::TEXT
@@ -378,6 +378,104 @@ describe("financial parity", () => {
         expect(n(row.from_returns_pct)).toBe(-25);
       } finally {
         await unsafe("ROLLBACK TO SAVEPOINT financial_parity_decomposition");
+      }
+    }, getSql());
+  });
+
+  // Regression: portfolio_decomposition_sql must NOT attribute dividend/interest income
+  // to market returns. Before the fix, from_returns_usd used delta of
+  // portfolio_status_sql.total_gain (= portfolio_value - net_invested), which absorbs
+  // income, so a dividend-only period with flat prices reported from_returns_usd = income
+  // instead of 0. See the function header comment in portfolio_db/sql/functions.sql.
+  runDb("decomposition from_returns_usd excludes income (no price change)", async () => {
+    await runTx(async ({ unsafe }: TxContext) => {
+      await unsafe("SAVEPOINT financial_parity_decomposition_income");
+      try {
+        // Reuse the daily_returns shadow table (a prior test in this file may have created
+        // a TEMP daily_returns; drop+recreate so our fixture is exact).
+        await unsafe(`DROP TABLE IF EXISTS daily_returns;`);
+        await unsafe(`
+          CREATE TEMP TABLE daily_returns (
+            date DATE NOT NULL,
+            portfolio_value DOUBLE PRECISION NOT NULL
+          ) ON COMMIT DROP;
+        `);
+        await unsafe(
+          `INSERT INTO daily_returns (date, portfolio_value) VALUES
+            ('2026-01-01', 1000::double precision);`,
+        );
+        // Stub portfolio_status_sql so the decomposition is evaluated in isolation.
+        // Fixture: portfolio grew 1000 -> 1030 entirely from a 30 dividend; flat prices
+        // mean realized_gain = unrealized_gain = 0 (no market return). The OLD buggy
+        // code derived market_return from total_gain (1030-1000=30) and reported
+        // from_returns_usd = 30; the fix derives it from realized+unrealized delta (=0).
+        await unsafe(`
+          CREATE OR REPLACE FUNCTION public.portfolio_status_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
+          RETURNS TABLE (
+            transactions_count INTEGER,
+            start_date TEXT,
+            end_date TEXT,
+            portfolio_value DOUBLE PRECISION,
+            total_invested DOUBLE PRECISION,
+            deposits DOUBLE PRECISION,
+            withdrawals DOUBLE PRECISION,
+            income DOUBLE PRECISION,
+            fees DOUBLE PRECISION,
+            taxes DOUBLE PRECISION,
+            total_gain DOUBLE PRECISION,
+            total_gain_pct DOUBLE PRECISION,
+            cost_basis DOUBLE PRECISION,
+            realized_gain DOUBLE PRECISION,
+            unrealized_gain DOUBLE PRECISION,
+            total_profit DOUBLE PRECISION,
+            as_of_date TEXT
+          )
+          LANGUAGE sql
+          STABLE
+          AS $$
+            SELECT
+              0::INTEGER, NULL::TEXT, NULL::TEXT,
+              1000::DOUBLE PRECISION, 1000::DOUBLE PRECISION,
+              1000::DOUBLE PRECISION, 0::DOUBLE PRECISION,
+              0::DOUBLE PRECISION, 0::DOUBLE PRECISION, 0::DOUBLE PRECISION,
+              0::DOUBLE PRECISION, NULL::DOUBLE PRECISION, NULL::DOUBLE PRECISION,
+              0::DOUBLE PRECISION, 0::DOUBLE PRECISION, 0::DOUBLE PRECISION,
+              p_as_of_date::TEXT
+            WHERE p_as_of_date = DATE '2026-01-01'
+            UNION ALL
+            SELECT
+              0::INTEGER, NULL::TEXT, NULL::TEXT,
+              1030::DOUBLE PRECISION, 1000::DOUBLE PRECISION,
+              1000::DOUBLE PRECISION, 0::DOUBLE PRECISION,
+              30::DOUBLE PRECISION, 0::DOUBLE PRECISION, 0::DOUBLE PRECISION,
+              30::DOUBLE PRECISION, NULL::DOUBLE PRECISION, NULL::DOUBLE PRECISION,
+              0::DOUBLE PRECISION, 0::DOUBLE PRECISION, 0::DOUBLE PRECISION,
+              p_as_of_date::TEXT
+            WHERE p_as_of_date = DATE '2026-06-01';
+          $$;
+        `);
+
+        const rows = await unsafe(
+          `SELECT * FROM portfolio_decomposition_sql($1::date)`,
+          ["2026-06-01"],
+        );
+        const row = rows[0] as Record<string, unknown>;
+
+        // total_growth = current_value - initial_value = 1030 - 1000 = 30
+        expect(n(row.total_growth_usd)).toBe(30);
+        expect(n(row.total_income)).toBe(30);
+        expect(n(row.total_fees_and_taxes)).toBe(0);
+        // The bug previously made this 30; the correct value is 0 (flat prices).
+        expect(n(row.from_returns_usd)).toBe(0);
+        // Identity: growth = contributions + market_return + income - fees_and_taxes
+        expect(
+          n(row.from_contributions_usd) +
+          n(row.from_returns_usd) +
+          n(row.total_income) -
+          n(row.total_fees_and_taxes),
+        ).toBeCloseTo(n(row.total_growth_usd), 6);
+      } finally {
+        await unsafe("ROLLBACK TO SAVEPOINT financial_parity_decomposition_income");
       }
     }, getSql());
   });

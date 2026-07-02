@@ -5,6 +5,7 @@ const mockQuerySingle = mock();
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mockQuerySingle as unknown,
+  getSql: () => ({}),
   connect: () => {},
   close: async () => {},
   getAssetMetadata: async () => [],
@@ -393,7 +394,10 @@ describe("Withdrawal — CLI integration (mocked DB)", () => {
 
 describe("Withdrawal — DB-gated integration", () => {
   const dbUrl = process.env.PORTFOLIO_DB_URL;
-  const runDb = test.if(dbUrl !== undefined && dbUrl !== "");
+  // These DB-gated blocks need a dedicated fixture DB and cannot run while db.js is module-mocked in this file
+  const runDb = test.if(
+    dbUrl !== undefined && dbUrl !== "" && !!process.env.PORTFOLIO_TEST_FIXTURE_DB,
+  );
 
   runDb("portfolio_withdrawal_sql parses and runs (SQL smoke test)", async () => {
     const mod = await import("../src/cli.js");
@@ -498,7 +502,8 @@ describe("Withdrawal — DB-gated integration", () => {
       inflation_rate: 3.0,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     const pv = Number(data.portfolio_value);
@@ -531,7 +536,8 @@ describe("Withdrawal — DB-gated integration", () => {
       inflation_rate: 2.0,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     const maxSafe = Number(data.max_safe_withdrawal);
@@ -554,7 +560,8 @@ describe("Withdrawal — DB-gated integration", () => {
       inflation_rate: 0.0,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     const pv = Number(data.portfolio_value);
@@ -571,7 +578,8 @@ describe("Withdrawal — DB-gated integration", () => {
       annual_withdrawal: 10000,
     });
 
-    if (!result.ok || !result.data) return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("withdrawal envelope not ok");
 
     const data = result.data as Record<string, unknown>;
     expect(data.terminal_value).toBe(data.portfolio_value);

@@ -34,6 +34,7 @@ mock.module("../src/db.js", () => ({
   getSql: mock(() => ({
     begin: mock(async () => ({})),
   })),
+  connect: () => {},
   close: mock(async () => {}),
 }));
 

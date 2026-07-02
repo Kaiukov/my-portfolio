@@ -10,6 +10,7 @@ Live deploys, KV writes, and DB migrations are orchestrator-only; delegated agen
 - [Getting Started](getting-started.md) - setup, database configuration, and the first CLI run.
 - [CLI Reference](cli-reference.md) - command surface, flags, JSON envelopes, and date rules.
 - [MCP Reference](mcp-reference.md) - MCP adapter tools (read + write) for AI-agent integration.
+- [MCP Connection Spec](mcp-connect-spec.md) - Canonical connection method: Streamable HTTP `/mcp` endpoint.
 - [Transactions](transactions.md) - supported actions and validation.
 - [Performance Metrics](performance-metrics.md) - TWR, MWR, risk, and benchmark metric definitions.
 - [Architecture](architecture.md) - three-layer design and data flow.

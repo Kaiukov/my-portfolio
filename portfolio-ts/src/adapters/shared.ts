@@ -1,5 +1,5 @@
 import { type ErrorEnvelope, error } from "../response.js";
-import { addTransaction } from "../commands/add.js";
+import { addTransaction, addDryRun } from "../commands/add.js";
 import { editTransaction, editDryRun } from "../commands/edit.js";
 import { deleteTransaction, deletePreview } from "../commands/delete.js";
 import { exchangeCurrency } from "../commands/exchange.js";
@@ -8,6 +8,7 @@ import { NotFoundError, ValidationError } from "../validators.js";
 
 export type WriteHandlers = {
   addTransaction: typeof addTransaction;
+  addDryRun: typeof addDryRun;
   editTransaction: typeof editTransaction;
   editDryRun: typeof editDryRun;
   deleteTransaction: typeof deleteTransaction;
@@ -18,6 +19,7 @@ export type WriteHandlers = {
 
 const defaultWriteHandlers: WriteHandlers = {
   addTransaction,
+  addDryRun,
   editTransaction,
   editDryRun,
   deleteTransaction,
@@ -29,6 +31,7 @@ const defaultWriteHandlers: WriteHandlers = {
 export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): WriteHandlers {
   return {
     addTransaction: overrides.addTransaction ?? defaultWriteHandlers.addTransaction,
+    addDryRun: overrides.addDryRun ?? defaultWriteHandlers.addDryRun,
     editTransaction: overrides.editTransaction ?? defaultWriteHandlers.editTransaction,
     editDryRun: overrides.editDryRun ?? defaultWriteHandlers.editDryRun,
     deleteTransaction: overrides.deleteTransaction ?? defaultWriteHandlers.deleteTransaction,

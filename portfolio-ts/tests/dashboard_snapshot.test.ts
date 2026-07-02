@@ -4,6 +4,7 @@ mock.module("../src/db.js", () => ({
   query: mock(() => Promise.resolve([])),
   querySingle: mock(() => Promise.resolve(null)),
   getAssetMetadata: mock(() => Promise.resolve([])),
+  upsertAssetMetadata: mock(async () => {}),
   connect: () => {},
   close: () => {},
   getSql: () => ({
