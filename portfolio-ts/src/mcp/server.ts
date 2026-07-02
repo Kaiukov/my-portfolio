@@ -39,7 +39,114 @@ export const MCP_WRITE_TOOLS = [
   "split",
 ] as const;
 
-const OPEN_ARGS_SCHEMA = z.object({}).passthrough();
+const READ_ARGS_SCHEMA = z.object({}).passthrough();
+
+function hasAnyKey(args: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.some((key) => args[key] !== undefined);
+}
+
+const ADD_TRANSACTION_SCHEMA = z
+  .object({
+    date: z.string().describe("Transaction date (YYYY-MM-DD)"),
+    asset: z.string().describe("Asset symbol/ticker"),
+    action: z.string().describe("Buy or Sell"),
+    quantity: z.number().describe("Number of units/shares"),
+    price: z.number().optional().describe("Price per unit"),
+    currency: z.string().optional().describe("Transaction currency"),
+    fees: z.number().optional().describe("Transaction fees"),
+    feeCurrency: z.string().optional().describe("Fee currency"),
+    fee_currency: z.string().optional().describe("Fee currency (alias)"),
+    exchange: z.string().optional().describe("Exchange name"),
+    account: z.string().optional().describe("Account name"),
+  })
+  .passthrough();
+
+const EDIT_TRANSACTION_SCHEMA = z
+  .object({
+    id: z.number().int().optional().describe("Transaction ID"),
+    transactionId: z.number().int().optional().describe("Transaction ID (alias)"),
+    transaction_id: z.number().int().optional().describe("Transaction ID (alias)"),
+    transId: z.number().int().optional().describe("Transaction ID (alias)"),
+    date: z.string().optional().describe("Transaction date (YYYY-MM-DD)"),
+    asset: z.string().optional().describe("Asset symbol/ticker"),
+    action: z.string().optional().describe("Buy or Sell"),
+    quantity: z.number().optional().describe("Number of units/shares"),
+    price: z.number().optional().describe("Price per unit"),
+    currency: z.string().optional().describe("Transaction currency"),
+    fees: z.number().optional().describe("Transaction fees"),
+    feeCurrency: z.string().optional().describe("Fee currency"),
+    fee_currency: z.string().optional().describe("Fee currency (alias)"),
+    exchange: z.string().optional().describe("Exchange name"),
+    dataSource: z.string().optional().describe("Data source"),
+    data_source: z.string().optional().describe("Data source (alias)"),
+    account: z.string().optional().describe("Account name"),
+    dryRun: z.boolean().optional().describe("Preview changes without applying"),
+    dry_run: z.boolean().optional().describe("Preview changes without applying (alias)"),
+    "dry-run": z.boolean().optional().describe("Preview changes without applying (alias)"),
+  })
+  .passthrough()
+  .refine((args) => hasAnyKey(args as Record<string, unknown>, ["id", "transactionId", "transaction_id", "transId"]), {
+    message: "Transaction ID is required",
+    path: ["id"],
+  });
+
+const DELETE_TRANSACTION_SCHEMA = z
+  .object({
+    id: z.number().int().optional().describe("Transaction ID"),
+    transactionId: z.number().int().optional().describe("Transaction ID (alias)"),
+    transaction_id: z.number().int().optional().describe("Transaction ID (alias)"),
+    transId: z.number().int().optional().describe("Transaction ID (alias)"),
+    dryRun: z.boolean().optional().describe("Preview deletion without applying"),
+    dry_run: z.boolean().optional().describe("Preview deletion without applying (alias)"),
+    "dry-run": z.boolean().optional().describe("Preview deletion without applying (alias)"),
+    confirm: z.boolean().optional().describe("Confirm deletion"),
+  })
+  .passthrough()
+  .refine((args) => hasAnyKey(args as Record<string, unknown>, ["id", "transactionId", "transaction_id", "transId"]), {
+    message: "Transaction ID is required",
+    path: ["id"],
+  });
+
+const EXCHANGE_CURRENCY_SCHEMA = z
+  .object({
+    date: z.string().describe("Exchange date (YYYY-MM-DD)"),
+    fromAsset: z.string().optional().describe("Source currency/asset"),
+    from_asset: z.string().optional().describe("Source currency/asset (alias)"),
+    from: z.string().optional().describe("Source currency/asset (alias)"),
+    toAsset: z.string().optional().describe("Target currency/asset"),
+    to_asset: z.string().optional().describe("Target currency/asset (alias)"),
+    to: z.string().optional().describe("Target currency/asset (alias)"),
+    quantity: z.number().describe("Amount to convert"),
+    rate: z.number().describe("Exchange rate"),
+  })
+  .passthrough()
+  .refine((args) => hasAnyKey(args as Record<string, unknown>, ["fromAsset", "from_asset", "from"]), {
+    message: "Source currency/asset is required",
+    path: ["fromAsset"],
+  })
+  .refine((args) => hasAnyKey(args as Record<string, unknown>, ["toAsset", "to_asset", "to"]), {
+    message: "Target currency/asset is required",
+    path: ["toAsset"],
+  });
+
+const SPLIT_SCHEMA = z
+  .object({
+    date: z.string().describe("Split date (YYYY-MM-DD)"),
+    asset: z.string().describe("Asset symbol/ticker"),
+    ratio: z.number().describe("Split ratio, for example 2 for 2:1"),
+    confirm: z.boolean().describe("Confirm the split operation"),
+    exchange: z.string().optional().describe("Exchange name"),
+    account: z.string().optional().describe("Account name"),
+  })
+  .passthrough();
+
+export const MCP_WRITE_TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  add_transaction: ADD_TRANSACTION_SCHEMA,
+  edit_transaction: EDIT_TRANSACTION_SCHEMA,
+  delete_transaction: DELETE_TRANSACTION_SCHEMA,
+  exchange_currency: EXCHANGE_CURRENCY_SCHEMA,
+  split: SPLIT_SCHEMA,
+};
 
 function toolResponse(envelope: unknown) {
   return {
@@ -57,11 +164,16 @@ function registerTool(
   toolName: (typeof MCP_READ_TOOLS)[number] | (typeof MCP_WRITE_TOOLS)[number],
   kind: "read" | "write",
 ) {
+  const inputSchema =
+    kind === "write"
+      ? (MCP_WRITE_TOOL_SCHEMAS[toolName] ?? READ_ARGS_SCHEMA)
+      : READ_ARGS_SCHEMA;
+
   server.registerTool(
     toolName,
     {
       description: `${kind === "read" ? "Read" : "Write"} tool for ${toolName}`,
-      inputSchema: OPEN_ARGS_SCHEMA,
+      inputSchema,
       annotations: kind === "read" ? { readOnlyHint: true, openWorldHint: false } : undefined,
     },
     async (args) => {

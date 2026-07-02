@@ -58,4 +58,47 @@ describe("portfolio MCP server", () => {
     expect(serverInfo).toBeDefined();
     expect(serverInfo?.version).toBe(APP_VERSION);
   });
+
+  test("write tool schemas accept documented aliases and reject missing required groups", async () => {
+    const mod = await import("../src/mcp/server.js");
+    const schemas = mod.MCP_WRITE_TOOL_SCHEMAS;
+
+    expect(schemas.add_transaction.safeParse({
+      date: "2026-07-02",
+      asset: "SPY",
+      action: "BUY",
+      quantity: 1,
+      fee_currency: "USD",
+    }).success).toBe(true);
+    expect(schemas.add_transaction.safeParse({
+      date: "2026-07-02",
+      asset: "SPY",
+      action: "BUY",
+    }).success).toBe(false);
+
+    expect(schemas.edit_transaction.safeParse({
+      transactionId: 42,
+      dry_run: true,
+      data_source: "MANUAL",
+    }).success).toBe(true);
+    expect(schemas.delete_transaction.safeParse({
+      transId: 42,
+      "dry-run": true,
+      confirm: true,
+    }).success).toBe(true);
+
+    expect(schemas.exchange_currency.safeParse({
+      date: "2026-07-02",
+      from: "USD",
+      to: "EUR",
+      quantity: 100,
+      rate: 0.9,
+    }).success).toBe(true);
+    expect(schemas.exchange_currency.safeParse({
+      date: "2026-07-02",
+      from: "USD",
+      quantity: 100,
+      rate: 0.9,
+    }).success).toBe(false);
+  });
 });
