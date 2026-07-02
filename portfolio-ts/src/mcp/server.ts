@@ -50,6 +50,7 @@ const ADD_TRANSACTION_SCHEMA = z
     currency: z.string().optional().describe("Transaction currency"),
     fees: z.number().optional().describe("Transaction fees"),
     feeCurrency: z.string().optional().describe("Fee currency"),
+    fee_currency: z.string().optional().describe("Fee currency (alias)"),
     exchange: z.string().optional().describe("Exchange name"),
     account: z.string().optional().describe("Account name"),
   })
@@ -58,6 +59,9 @@ const ADD_TRANSACTION_SCHEMA = z
 const EDIT_TRANSACTION_SCHEMA = z
   .object({
     id: z.number().int().describe("Transaction ID"),
+    transactionId: z.number().int().optional().describe("Transaction ID (alias)"),
+    transaction_id: z.number().int().optional().describe("Transaction ID (alias)"),
+    transId: z.number().int().optional().describe("Transaction ID (alias)"),
     date: z.string().optional().describe("Transaction date (YYYY-MM-DD)"),
     asset: z.string().optional().describe("Asset symbol/ticker"),
     action: z.string().optional().describe("Buy or Sell"),
@@ -66,17 +70,26 @@ const EDIT_TRANSACTION_SCHEMA = z
     currency: z.string().optional().describe("Transaction currency"),
     fees: z.number().optional().describe("Transaction fees"),
     feeCurrency: z.string().optional().describe("Fee currency"),
+    fee_currency: z.string().optional().describe("Fee currency (alias)"),
     exchange: z.string().optional().describe("Exchange name"),
     dataSource: z.string().optional().describe("Data source"),
+    data_source: z.string().optional().describe("Data source (alias)"),
     account: z.string().optional().describe("Account name"),
     dryRun: z.boolean().optional().describe("Preview changes without applying"),
+    dry_run: z.boolean().optional().describe("Preview changes without applying (alias)"),
+    "dry-run": z.boolean().optional().describe("Preview changes without applying (alias)"),
   })
   .passthrough();
 
 const DELETE_TRANSACTION_SCHEMA = z
   .object({
     id: z.number().int().describe("Transaction ID"),
+    transactionId: z.number().int().optional().describe("Transaction ID (alias)"),
+    transaction_id: z.number().int().optional().describe("Transaction ID (alias)"),
+    transId: z.number().int().optional().describe("Transaction ID (alias)"),
     dryRun: z.boolean().optional().describe("Preview deletion without applying"),
+    dry_run: z.boolean().optional().describe("Preview deletion without applying (alias)"),
+    "dry-run": z.boolean().optional().describe("Preview deletion without applying (alias)"),
     confirm: z.boolean().optional().describe("Confirm deletion"),
   })
   .passthrough();
@@ -85,7 +98,11 @@ const EXCHANGE_CURRENCY_SCHEMA = z
   .object({
     date: z.string().describe("Exchange date (YYYY-MM-DD)"),
     fromAsset: z.string().describe("Source currency/asset"),
+    from_asset: z.string().optional().describe("Source currency/asset (alias)"),
+    from: z.string().optional().describe("Source currency/asset (alias)"),
     toAsset: z.string().describe("Target currency/asset"),
+    to_asset: z.string().optional().describe("Target currency/asset (alias)"),
+    to: z.string().optional().describe("Target currency/asset (alias)"),
     quantity: z.number().describe("Amount to convert"),
     rate: z.number().describe("Exchange rate"),
   })
