@@ -1,4 +1,5 @@
 import { describe, expect, test, mock } from "bun:test";
+import { APP_VERSION } from "../src/version.js";
 
 mock.module("../src/db.js", () => ({
   query: mock(() => Promise.resolve([])),
@@ -354,6 +355,31 @@ describe("buildDashboardSnapshot", () => {
 
     expect(snapshot.performance.total_days).toBe(999);
     expect(snapshot.performance.cagr).toBe(99.9);
+  });
+
+  test("version equals APP_VERSION", async () => {
+    const mockGetSummary = mock(async () => summaryFixture);
+    const mockGetStatus = mock(async () => statusFixture);
+    const mockGetWidget = mock(async () => widgetFixture);
+    const mockGetAllocation = mock(async () => allocationFixture);
+    const mockGetCash = mock(async () => cashFixture);
+    const mockGetPerformance = mock(async () => performanceFixture);
+    const mockGetPriceFreshness = mock(async () => freshnessFixture);
+
+    const { buildDashboardSnapshot } = await import("../src/commands/dashboard.js");
+    const snapshot = await buildDashboardSnapshot("2026-06-03", {
+      getSummary: mockGetSummary,
+      getStatus: mockGetStatus,
+      getWidget: mockGetWidget,
+      getAllocation: mockGetAllocation,
+      getCash: mockGetCash,
+      getPerformance: mockGetPerformance,
+      getPriceFreshness: mockGetPriceFreshness,
+    });
+
+    expect(snapshot.version).toBe(APP_VERSION);
+    expect(typeof snapshot.version).toBe("string");
+    expect(snapshot.version.length).toBeGreaterThan(0);
   });
 
   test("getWidget is called with 365 days", async () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { APP_VERSION } from "../src/version.js";
 
 import { saveLocalConfig } from "../src/cloudflare/config.js";
 import type { DashboardSnapshot } from "../src/commands/dashboard.js";
@@ -45,6 +46,7 @@ const snapshot: DashboardSnapshot = {
   total: { abs: 4500.12, pct: 11.84 },
   history: [{ date: "2026-06-03", value: 42500.12 }],
   prices_as_of: "2026-06-03",
+  version: APP_VERSION,
   updatedAt: "2026-06-03T00:00:00.000Z",
 };
 
