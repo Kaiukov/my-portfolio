@@ -8,7 +8,7 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 
 | Python command | TypeScript command | Final status | Notes |
 |---|---|---|---|
-| `portfolio status` | `portfolio-ts status` | **accepted behavior change** | Calls `portfolio_status_sql()` — PostgreSQL owns all calculations. TypeScript's `portfolio_status_sql()` now uses `cash_amount_to_usd_sql()` for FX-converted deposits/withdrawals/income/fees/taxes. For USD-only portfolios results are identical. For non-USD portfolios, totals are now FX-converted consistent with Python's original behavior. |
+| `portfolio status` | `portfolio-ts status` | **accepted behavior change** | Calls `portfolio_status_sql()` — PostgreSQL owns all calculations. TypeScript's `portfolio_status_sql()` now uses `cash_amount_to_usd_sql()` for FX-converted deposits/withdrawals/income/fees/taxes. For USD-only portfolios results are identical. For non-USD portfolios, totals are now FX-converted consistent with Python's original behavior. Read-side metadata now includes dust-filter context (`abs(allocation_pct) < 1%` hidden by default, opt out with `--include-dust`). |
 | `portfolio transactions` | `portfolio-ts transactions` | **parity tested** | Paginated daily_returns: row count, pagination shape, and row fields validated live against PostgreSQL. |
 | `portfolio add` | `portfolio-ts add` | **accepted behavior change** | PG transaction rollback via `runTx` → Bun's `sql.begin()` (connection-pinned, true transaction) vs Python application-level snapshot/restore. Functionally equivalent. No `--data-source` flag (Python also doesn't expose it in add). SELL holdings check before insert preserved. |
 | `portfolio edit` | `portfolio-ts edit` | **accepted behavior change** | Same pinned-connection rollback approach as add. `--dry-run` supported. `--fee-currency` not exposed (Python also doesn't expose it). |
@@ -25,10 +25,10 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 | — | `portfolio-ts realized-gains` | **TS-only command** | Read-only FIFO realized gains detail. Calls `portfolio_realized_gains_sql()` and `portfolio_realized_gains_by_year_sql()`. No Python equivalent. `--from-date`, `--to-date`, `--asset`, `--by-year` filters. Returns per-lot matched-gain rows + tax-year aggregation. Consistency invariant: SUM(detail.realized_gain) == status.realized_gain. |
 | `portfolio backup` | `portfolio-ts backup` | **parity tested** | `pg_dump` subprocess. Same flags. `--out` path optional. |
 | — | `portfolio-ts sync` | **TS-only command** | Convenience: `daily_maintenance_check` + `repair_prices` + `recalculate`. Stale-price max-age enforced via `--max-age-days` (default `STALE_MAX_AGE_DAYS=5`). No Python equivalent. |
-| `portfolio allocation` | `portfolio-ts allocation` | **accepted behavior change** | Calls `portfolio_allocation_sql(as_of_date)` — PostgreSQL owns all calculations. Returns FX-converted per-asset USD values with allocation percentages. TypeScript only sums `value_usd` for `portfolio_value` and formats rows. Supports `--as-of-date`. |
+| `portfolio allocation` | `portfolio-ts allocation` | **accepted behavior change** | Calls `portfolio_allocation_sql(as_of_date)` — PostgreSQL owns all calculations. Returns FX-converted per-asset USD values with allocation percentages. TypeScript only sums `value_usd` for `portfolio_value` and formats rows. Default output hides dust rows where `abs(allocation_pct) < 1%`; `--include-dust` returns the raw set. Supports `--as-of-date`. |
 | `portfolio cash` | `portfolio-ts cash` | **accepted behavior change** | Calls `portfolio_cash_sql(as_of_date)` — PostgreSQL owns all calculations. Returns per-currency cash buckets (including stablecoins: USDT, USDC, DAI, etc.) with FX-converted (or 1:1 for stablecoins) USD values. TypeScript only sums `usd_value` to compute `total_usd` (aggregation only, no financial calculation). Supports `--as-of-date` for historical snapshots. |
-| `portfolio summary` | `portfolio-ts summary` | **accepted behavior change** | Calls `portfolio_summary_sql(as_of_date)` — PostgreSQL owns all calculations. Returns holding count, total cash, portfolio value, transaction metadata. Supports `--as-of-date`. |
-| `portfolio concentration` | `portfolio-ts concentration` | **parity tested** | Calls `portfolio_concentration_sql` — HHI (0-10000), holding count, top-N holdings by allocation. Supports `--as-of-date` and `--top-n`. |
+| `portfolio summary` | `portfolio-ts summary` | **accepted behavior change** | Calls `portfolio_summary_sql(as_of_date)` — PostgreSQL owns all calculations. Returns holding count, total cash, portfolio value, transaction metadata. `holding_count` is the visible holdings count after dust filtering by default; raw dust rows stay available via `--include-dust` and are reported in `meta.dust_filter`. Supports `--as-of-date`. |
+| `portfolio concentration` | `portfolio-ts concentration` | **parity tested** | Calls `portfolio_concentration_sql` — HHI (0-10000), holding count, top-N holdings by allocation. Top holdings are dust-filtered by default (`abs(allocation_pct) < 1%` hidden); `--include-dust` returns the raw list. Supports `--as-of-date` and `--top-n`. |
 | — | `portfolio-ts diversification` | **TS-only command** | Correlation-aware diversification depth. Calls `portfolio_diversification_depth_sql()` — HHI, effective holdings, pairwise Pearson correlations from price series, correlation-weighted HHI. Supports `--as-of-date`, `--lookback-days`, `--min-correlation`. |
 | `portfolio performance` | `portfolio-ts performance` | **implemented** | Calls `portfolio_performance_sql(as_of_date, benchmark, from_date)` — PostgreSQL owns all TWR/Sharpe/MDD/benchmark calculations. Returns total_gain (investment returns only, reconciled with TWR), median_monthly_return via PERCENTILE_CONT, CAGR, risk metrics, benchmark comparison. Also includes `period_returns` (1M/3M/6M/YTD/1Y/SII via `portfolio_period_returns_sql`) and `rolling_12m_returns` (via `portfolio_rolling_returns_sql`). All period/rolling returns are TWR (geometric-linked investment_return). Supports `--as-of-date`, `--benchmark`, `--from-date`, `--period` (ytd/1y/6m/3m). |
 | `portfolio mwr` | `portfolio-ts mwr` | **implemented** | SQL-native XIRR (Newton-Raphson + bisection fallback) via `xirr_sql()` and `portfolio_mwr_sql(as_of_date)`. External cash flows (DEPOSIT/WITHDRAW) + terminal portfolio value. Returns annualized MWR as percentage. Supports `--as-of-date`. |
@@ -81,11 +81,11 @@ contract of the CLI and HTTP API exactly.
 
 | MCP read tool | CLI equivalent | API route | Freshness meta | Parity |
 |---|---|---|---|---|
-| `status` | `status` | `GET /status` | Yes | Identical envelope to CLI and API |
-| `summary` | `summary` | `GET /summary` | Yes | Identical envelope to CLI and API |
+| `status` | `status` | `GET /status` | Yes | Identical envelope to CLI and API; dust-filter context exposed in `meta` |
+| `summary` | `summary` | `GET /summary` | Yes | Identical envelope to CLI and API; visible holding_count by default |
 | `cash` | `cash` | `GET /cash` | Yes | Identical envelope to CLI and API |
 | `cash_drag` | `cash_drag` | `GET /cash_drag` | Yes | Identical envelope to CLI and API |
-| `allocation` | `allocation` | `GET /allocation` | Yes | Identical envelope to CLI and API |
+| `allocation` | `allocation` | `GET /allocation` | Yes | Identical envelope to CLI and API; dust rows hidden by default |
 | `concentration` | `concentration` | `GET /concentration` | Yes | Identical envelope to CLI and API |
 | `diversification` | `diversification` | `GET /diversification` | Yes | Identical envelope to CLI and API |
 | `performance` | `performance` | `GET /performance` | Yes | Identical envelope to CLI and API |
@@ -132,4 +132,3 @@ Files preserved in `portfolio_db/sql/`:
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
-

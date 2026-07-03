@@ -49,6 +49,7 @@ describe("getConcentration", () => {
     expect(result.top_holdings).toHaveLength(3);
     expect(result.top_holdings[0].asset).toBe("AAPL");
     expect(result.top_holdings[0].allocation_pct).toBe(40);
+    expect(result.dust_filter!.threshold_pct).toBe(1);
     expect(result.as_of_date).toBeDefined();
   });
 
@@ -62,7 +63,7 @@ describe("getConcentration", () => {
     await getConcentration("2026-01-15", 3);
 
     expect(mockQuerySingle.mock.calls[0][1]).toEqual(["2026-01-15"]);
-    expect(mockQuery.mock.calls[0][1]).toEqual(["2026-01-15", 3]);
+    expect(mockQuery.mock.calls[0][1]).toEqual(["2026-01-15"]);
   });
 
   test("defaults top_n to 5", async () => {
@@ -74,7 +75,7 @@ describe("getConcentration", () => {
     const { getConcentration } = await import("../src/commands/concentration.js");
     await getConcentration("2026-01-15");
 
-    expect(mockQuery.mock.calls[0][1]).toEqual(["2026-01-15", 5]);
+    expect(mockQuery.mock.calls[0][1]).toEqual(["2026-01-15"]);
   });
 
   test("handles null concentration row", async () => {
@@ -96,11 +97,28 @@ describe("getConcentration", () => {
     ]);
 
     const { getConcentration } = await import("../src/commands/concentration.js");
-    const result = await getConcentration();
+    const result = await getConcentration(undefined, undefined, true);
 
     expect(result.top_holdings).toHaveLength(1);
     expect(result.top_holdings[0].asset).toBe("");
     expect(result.top_holdings[0].allocation_pct).toBe(0);
+  });
+
+  test("filters dust holdings from top holdings by default", async () => {
+    mockQuerySingle.mockResolvedValue(makeConcRow());
+    mockQuery.mockResolvedValue([
+      { asset: "PAXG-USD", asset_type: "crypto", allocation_pct: 0.0066 },
+      { asset: "BNB-USD", asset_type: "crypto", allocation_pct: -0.016 },
+      { asset: "AAPL", asset_type: "stock_usd", allocation_pct: 40 },
+      { asset: "MSFT", asset_type: "stock_usd", allocation_pct: 30 },
+    ]);
+
+    const { getConcentration } = await import("../src/commands/concentration.js");
+    const result = await getConcentration();
+
+    expect(result.top_holdings.map((row) => row.asset)).toEqual(["AAPL", "MSFT"]);
+    expect(result.dust_filter!.hidden_count).toBe(2);
+    expect(result.dust_filter!.hidden_assets).toEqual(["PAXG-USD", "BNB-USD"]);
   });
 });
 

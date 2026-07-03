@@ -84,6 +84,7 @@ function setupFreshnessDb() {
   mockDbQuerySingle.mockResolvedValueOnce({ needs_recalc: false });
   mockDbQuery.mockResolvedValueOnce(freshCoverageEmpty());
   mockDbQuery.mockResolvedValueOnce(freshStaleEmpty());
+  mockDbQuery.mockResolvedValue([]);
 }
 
 // ═════════════════════════════════════════════════
@@ -259,6 +260,7 @@ describe("mcpRead", () => {
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
     expect(result.meta).toHaveProperty("stale", false);
     expect(result.meta).toHaveProperty("needs_recalc", false);
+    expect(result.meta).toHaveProperty("dust_filter.hidden_count", 0);
   });
 
   test("status with asOf alias works", async () => {
@@ -275,10 +277,36 @@ describe("mcpRead", () => {
   });
 
   test("summary returns correct envelope with freshness meta", async () => {
-    setupFreshnessDb();
-    mockDbQuerySingle.mockResolvedValueOnce({
-      holding_count: 5, total_cash_usd: 5000, portfolio_value_usd: 25000,
-      last_transaction_date: "2026-01-15", transaction_count: 42, as_of_date: "2026-01-15",
+    mockDbQuerySingle.mockImplementation((sql: string) => {
+      if (sql.includes("MAX(date)::text AS prices_as_of")) {
+        return Promise.resolve({ prices_as_of: "2026-01-20" });
+      }
+      if (sql.includes("needs_recalc()")) {
+        return Promise.resolve({ needs_recalc: false });
+      }
+      return Promise.resolve({
+        holding_count: 5,
+        total_cash_usd: 5000,
+        portfolio_value_usd: 25000,
+        last_transaction_date: "2026-01-15",
+        transaction_count: 42,
+        as_of_date: "2026-01-15",
+      });
+    });
+    mockDbQuery.mockImplementation((sql: string) => {
+      if (sql.includes("get_required_price_checkpoints_sql") || sql.includes("stale_tickers_sql")) {
+        return Promise.resolve([]);
+      }
+      if (sql.includes("portfolio_allocation_sql")) {
+        return Promise.resolve([
+          { asset: "AAPL", asset_type: "stock_usd", asset_kind: "", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+          { asset: "MSFT", asset_type: "stock_usd", asset_kind: "", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+          { asset: "GOOGL", asset_type: "stock_usd", asset_kind: "", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+          { asset: "BND", asset_type: "bond_usd", asset_kind: "", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+          { asset: "VXUS", asset_type: "etf_usd", asset_kind: "", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+        ]);
+      }
+      return Promise.resolve([]);
     });
 
     const { mcpRead } = await import("../src/mcp/read.js");
@@ -291,6 +319,7 @@ describe("mcpRead", () => {
     expect(data.portfolio_value_usd).toBe(25000);
     expect(result.meta.count).toBeNull();
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
+    expect(result.meta).toHaveProperty("dust_filter.hidden_count", 0);
   });
 
   test("cash returns correct envelope with freshness meta", async () => {

@@ -82,9 +82,9 @@ describe("getAllocation", () => {
     const { getAllocation } = await import("../src/commands/allocation.js");
     const result = await getAllocation();
 
-    expect(result.rows).toHaveLength(1);
-    expect(result.rows[0].value_usd).toBe(0);
-    expect(result.rows[0].allocation_pct).toBe(0);
+    expect(result.rows).toHaveLength(0);
+    expect(result.dust_filter!.hidden_count).toBe(1);
+    expect(result.dust_filter!.hidden_assets).toEqual(["AAPL"]);
   });
 
   test("response contains all required fields", async () => {
@@ -336,6 +336,49 @@ describe("getAllocation", () => {
 
     expect(result.rows[0].last_price).toBeUndefined();
     expect(result.rows[0].day_gain_usd).toBeUndefined();
+  });
+
+  test("filters tiny dust positions by default, including negative dust, and keeps the 1% boundary", async () => {
+    mockQuery.mockResolvedValueOnce([
+      makeRow({ asset: "PAXG-USD", asset_type: "crypto", asset_kind: "crypto", net_quantity: 0, value_usd: 1, allocation_pct: 0.0066 }),
+      makeRow({ asset: "BNB-USD", asset_type: "crypto", asset_kind: "crypto", net_quantity: 0, value_usd: 1, allocation_pct: -0.016 }),
+      makeRow({ asset: "TON11419-USD", asset_type: "crypto", asset_kind: "crypto", net_quantity: 0, value_usd: 1, allocation_pct: -0.5 }),
+      makeRow({ asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 0, value_usd: 100, allocation_pct: 1.0 }),
+      makeRow({ asset: "MSFT", asset_type: "stock", asset_kind: "equity", net_quantity: 0, value_usd: 897, allocation_pct: 89.7 }),
+    ]);
+    mockGetAssetMetadata.mockResolvedValue([]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation("2026-06-05");
+
+    expect(result.rows.map((row) => row.asset)).toEqual(["AAPL", "MSFT"]);
+    expect(result.portfolio_value).toBe(1000);
+    expect(result.dust_filter!.threshold_pct).toBe(1);
+    expect(result.dust_filter!.hidden_count).toBe(3);
+    expect(result.dust_filter!.hidden_assets).toEqual([
+      "PAXG-USD",
+      "BNB-USD",
+      "TON11419-USD",
+    ]);
+    expect(result.dust_filter!.include_dust).toBe(false);
+    expect(result.dust_filter!.filtered).toBe(true);
+  });
+
+  test("includeDust returns the raw allocation rows while still reporting dust metadata", async () => {
+    mockQuery.mockResolvedValueOnce([
+      makeRow({ asset: "PAXG-USD", asset_type: "crypto", asset_kind: "crypto", net_quantity: 0, value_usd: 1, allocation_pct: 0.0066 }),
+      makeRow({ asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 0, value_usd: 999, allocation_pct: 99.9934 }),
+    ]);
+    mockGetAssetMetadata.mockResolvedValue([]);
+
+    const { getAllocation } = await import("../src/commands/allocation.js");
+    const result = await getAllocation("2026-06-05", true);
+
+    expect(result.rows.map((row) => row.asset)).toEqual(["PAXG-USD", "AAPL"]);
+    expect(result.dust_filter!.include_dust).toBe(true);
+    expect(result.dust_filter!.filtered).toBe(false);
+    expect(result.dust_filter!.hidden_count).toBe(1);
+    expect(result.dust_filter!.hidden_assets).toEqual(["PAXG-USD"]);
   });
 });
 

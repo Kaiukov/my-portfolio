@@ -1,10 +1,13 @@
-import { query, querySingle } from "../db.js";
+import { querySingle } from "../db.js";
+import { getAllocation } from "./allocation.js";
+import type { DustFilterMeta } from "../dust.js";
 
 export interface ConcentrationData {
   hhi: number;
   total_holdings: number;
   top_holdings: Array<{ asset: string; asset_type: string; allocation_pct: number }>;
   as_of_date: string;
+  dust_filter?: DustFilterMeta;
 }
 
 function num(val: unknown): number {
@@ -12,37 +15,36 @@ function num(val: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function str(val: unknown): string {
-  if (val === null || val === undefined) return "";
-  return String(val);
-}
-
 export async function getConcentration(
   asOfDate?: string,
   topN?: number,
+  includeDust = false,
 ): Promise<ConcentrationData> {
   const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
   const limit = topN && topN > 0 ? topN : 5;
 
-  const [concRow, allocRows] = await Promise.all([
+  const [concRow, allocation] = await Promise.all([
     querySingle<Record<string, unknown>>(
       "SELECT hhi, total_holdings, as_of_date FROM portfolio_concentration_sql($1)",
       [actualDate],
     ),
-    query<Record<string, unknown>>(
-      "SELECT asset, asset_type, allocation_pct FROM portfolio_allocation_sql($1) ORDER BY allocation_pct DESC LIMIT $2",
-      [actualDate, limit],
-    ),
+    getAllocation(actualDate, includeDust),
   ]);
+
+  const topHoldings = [...allocation.rows]
+    .sort((a, b) => b.allocation_pct - a.allocation_pct)
+    .slice(0, limit)
+    .map((row) => ({
+      asset: row.asset,
+      asset_type: row.asset_type,
+      allocation_pct: row.allocation_pct,
+    }));
 
   return {
     hhi: num(concRow?.["hhi"]),
     total_holdings: num(concRow?.["total_holdings"]),
-    top_holdings: allocRows.map((r) => ({
-      asset: str(r["asset"]),
-      asset_type: str(r["asset_type"]),
-      allocation_pct: num(r["allocation_pct"]),
-    })),
+    top_holdings: topHoldings,
     as_of_date: actualDate,
+    dust_filter: allocation.dust_filter,
   };
 }
