@@ -360,7 +360,6 @@ describe("mcpRead", () => {
 
   test("concentration returns correct envelope with freshness meta", async () => {
     setupFreshnessDb();
-    mockDbQuerySingle.mockResolvedValueOnce({ hhi: 2500, total_holdings: 5, as_of_date: "2026-01-15" });
     mockDbQuery.mockResolvedValueOnce([
       { asset: "AAPL", asset_type: "stock_usd", allocation_pct: 40 },
       { asset: "GOOGL", asset_type: "stock_usd", allocation_pct: 30 },
@@ -373,7 +372,7 @@ describe("mcpRead", () => {
     expect(result.command).toBe("concentration");
     const data = result.data as Record<string, unknown>;
     expect(data.hhi).toBe(2500);
-    expect(data.total_holdings).toBe(5);
+    expect(data.total_holdings).toBe(2);
     expect(result.meta.count).toBeNull();
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
   });

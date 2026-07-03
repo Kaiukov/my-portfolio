@@ -1,4 +1,3 @@
-import { querySingle } from "../db.js";
 import { getAllocation } from "./allocation.js";
 import type { DustFilterMeta } from "../dust.js";
 
@@ -23,13 +22,7 @@ export async function getConcentration(
   const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
   const limit = topN && topN > 0 ? topN : 5;
 
-  const [concRow, allocation] = await Promise.all([
-    querySingle<Record<string, unknown>>(
-      "SELECT hhi, total_holdings, as_of_date FROM portfolio_concentration_sql($1)",
-      [actualDate],
-    ),
-    getAllocation(actualDate, includeDust),
-  ]);
+  const allocation = await getAllocation(actualDate, includeDust);
 
   const topHoldings = [...allocation.rows]
     .sort((a, b) => b.allocation_pct - a.allocation_pct)
@@ -40,9 +33,14 @@ export async function getConcentration(
       allocation_pct: row.allocation_pct,
     }));
 
+  const hhi = allocation.rows.reduce((sum, row) => {
+    const pct = num(row.allocation_pct);
+    return sum + (pct * pct);
+  }, 0);
+
   return {
-    hhi: num(concRow?.["hhi"]),
-    total_holdings: num(concRow?.["total_holdings"]),
+    hhi,
+    total_holdings: allocation.rows.length,
     top_holdings: topHoldings,
     as_of_date: actualDate,
     dust_filter: allocation.dust_filter,
