@@ -20,6 +20,23 @@ type CryptoAssetRow = {
   cash_like: boolean;
 };
 
+async function getHoldingsAsOf(asset: string, date: string): Promise<number> {
+  const row = await querySingle<{ net_quantity: number | string | null }>(
+    `SELECT COALESCE(SUM(CASE
+        WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP') THEN quantity
+        WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -quantity
+        WHEN action = 'EXCHANGE_FROM' THEN quantity
+        ELSE 0
+      END), 0) AS net_quantity
+     FROM transactions
+     WHERE asset = $1
+       AND date <= $2`,
+    [asset, date],
+  );
+
+  return Number(row?.net_quantity ?? 0);
+}
+
 async function validateCryptoAsset(asset: string, flagName: string): Promise<string> {
   const row = await querySingle<CryptoAssetRow>(
     "SELECT get_asset_type_sql($1) AS asset_type, is_cash_like_sql($1) AS cash_like",
@@ -59,6 +76,13 @@ async function applyCryptoWrapConversion(params: {
 
   await validateCryptoAsset(fromAsset, "--from-asset");
   await validateCryptoAsset(toAsset, "--to-asset");
+
+  const availableQuantity = await getHoldingsAsOf(fromAsset, date);
+  if (params.fromQuantity > availableQuantity) {
+    throw new ValidationError(
+      `Insufficient ${fromAsset} holdings on ${date}: trying to convert ${params.fromQuantity}, available ${availableQuantity}`,
+    );
+  }
 
   const ratio = params.toQuantity / params.fromQuantity;
   const exchangeGroupId = crypto.randomUUID();

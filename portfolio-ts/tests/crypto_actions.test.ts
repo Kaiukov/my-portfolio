@@ -85,6 +85,24 @@ describe("staking rewards", () => {
 });
 
 describe("crypto wrap conversions", () => {
+  test("rejects conversions that exceed holdings on the source side", async () => {
+    mockQuerySingle
+      .mockResolvedValueOnce({ asset_type: "crypto", cash_like: false })
+      .mockResolvedValueOnce({ asset_type: "crypto", cash_like: false })
+      .mockResolvedValueOnce({ net_quantity: "0.5" });
+    const { applyWrap } = await import("../src/commands/wrap.js");
+
+    await expect(
+      applyWrap({
+        dateStr: "2026-02-01",
+        fromAsset: "ETH-USD",
+        toAsset: "WBETH-USD",
+        fromQuantity: 1,
+        toQuantity: 1.05,
+      }),
+    ).rejects.toThrow("Insufficient ETH-USD holdings");
+  });
+
   test("rejects same asset on both sides", async () => {
     const { applyWrap } = await import("../src/commands/wrap.js");
 
@@ -102,7 +120,8 @@ describe("crypto wrap conversions", () => {
   test("accepts crypto conversion and returns exchange_group_id", async () => {
     mockQuerySingle
       .mockResolvedValueOnce({ asset_type: "crypto", cash_like: false })
-      .mockResolvedValueOnce({ asset_type: "crypto", cash_like: false });
+      .mockResolvedValueOnce({ asset_type: "crypto", cash_like: false })
+      .mockResolvedValueOnce({ net_quantity: "2.5" });
 
     mockWithTransaction.mockImplementation(async (fn: (tx: any) => Promise<any>) => {
       const fakeTx = {

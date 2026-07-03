@@ -94,11 +94,13 @@ mock.module("../src/commands/realized_gains.js", () => ({
 }));
 
 const mockAddTransaction = mock();
+const mockAddDryRun = mock();
 const mockApplyWrap = mock();
 const mockApplyUnwrap = mock();
 
 mock.module("../src/commands/add.js", () => ({
   addTransaction: mockAddTransaction,
+  addDryRun: mockAddDryRun,
 }));
 
 mock.module("../src/commands/wrap.js", () => ({
