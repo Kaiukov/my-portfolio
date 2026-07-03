@@ -111,6 +111,11 @@ export async function editTransaction(
   const newAction = (changes.action ?? existing.action).toUpperCase();
   const newQuantity = changes.quantity ?? existing.quantity;
   const newAsset = changes.asset ?? existing.asset;
+  const assetRow = await querySingle<{ asset_type: string }>(
+    "SELECT get_asset_type_sql($1) AS asset_type",
+    [newAsset],
+  );
+  const newAssetType = assetRow?.asset_type ?? existing.asset_type;
 
   if (newAction === "FEE" || newAction === "TAX" || newAction === "DIVIDEND" || newAction === "INTEREST") {
     const finalPrice = changes.price !== undefined ? changes.price : existing.price;
@@ -127,6 +132,26 @@ export async function editTransaction(
           `${newAction} requires a cash asset, got ${newAsset}`,
         );
       }
+    }
+  }
+
+  if (newAction === "STAKING_REWARD") {
+    const finalPrice = changes.price !== undefined ? changes.price : existing.price;
+    if (finalPrice != null) {
+      throw new ValidationError("STAKING_REWARD does not accept a price");
+    }
+    const finalFees = changes.fees !== undefined ? changes.fees : existing.fees;
+    if (finalFees != null && finalFees !== 0) {
+      throw new ValidationError("STAKING_REWARD does not accept fees");
+    }
+    const cashLikeRow = await querySingle<{ ok: boolean }>(
+      "SELECT is_cash_like_sql($1) AS ok",
+      [newAsset],
+    );
+    if (newAssetType !== "crypto" || cashLikeRow?.ok) {
+      throw new ValidationError(
+        `STAKING_REWARD requires a non-cash crypto asset, got ${newAsset}`,
+      );
     }
   }
 
@@ -155,7 +180,7 @@ export async function editTransaction(
       "SELECT get_asset_type_sql($1) AS asset_type",
       [newAsset],
     )) as { asset_type: string }[];
-    const assetType = atRow?.asset_type ?? existing.asset_type;
+    const assetType = atRow?.asset_type ?? newAssetType;
 
     const newFees = changes.fees !== undefined ? changes.fees : existing.fees;
     const newFeeCurrency = changes.feeCurrency !== undefined ? changes.feeCurrency : existing.fee_currency;

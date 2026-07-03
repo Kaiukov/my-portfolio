@@ -36,6 +36,8 @@ export const MCP_WRITE_TOOLS = [
   "edit_transaction",
   "delete_transaction",
   "exchange_currency",
+  "wrap",
+  "unwrap",
   "split",
 ] as const;
 
@@ -105,6 +107,21 @@ const EXCHANGE_CURRENCY_SCHEMA = z
     rate: z.number().describe("Exchange rate"),
   });
 
+const WRAP_SCHEMA = z
+  .object({
+    date: z.string().describe("Wrap date (YYYY-MM-DD)"),
+    fromAsset: z.string().describe("Source crypto asset"),
+    from_asset: z.string().optional().describe("Source crypto asset (alias)"),
+    from: z.string().optional().describe("Source crypto asset (alias)"),
+    toAsset: z.string().describe("Target crypto asset"),
+    to_asset: z.string().optional().describe("Target crypto asset (alias)"),
+    to: z.string().optional().describe("Target crypto asset (alias)"),
+    fromQuantity: z.number().describe("Source quantity"),
+    from_quantity: z.number().optional().describe("Source quantity (alias)"),
+    toQuantity: z.number().describe("Target quantity"),
+    to_quantity: z.number().optional().describe("Target quantity (alias)"),
+  });
+
 const SPLIT_SCHEMA = z
   .object({
     date: z.string().describe("Split date (YYYY-MM-DD)"),
@@ -120,6 +137,8 @@ const WRITE_TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
   edit_transaction: EDIT_TRANSACTION_SCHEMA,
   delete_transaction: DELETE_TRANSACTION_SCHEMA,
   exchange_currency: EXCHANGE_CURRENCY_SCHEMA,
+  wrap: WRAP_SCHEMA,
+  unwrap: WRAP_SCHEMA,
   split: SPLIT_SCHEMA,
 };
 

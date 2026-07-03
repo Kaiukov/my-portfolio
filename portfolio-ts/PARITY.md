@@ -10,10 +10,12 @@ TypeScript must not duplicate PostgreSQL-owned financial calculations.
 |---|---|---|---|
 | `portfolio status` | `portfolio-ts status` | **accepted behavior change** | Calls `portfolio_status_sql()` — PostgreSQL owns all calculations. TypeScript's `portfolio_status_sql()` now uses `cash_amount_to_usd_sql()` for FX-converted deposits/withdrawals/income/fees/taxes. For USD-only portfolios results are identical. For non-USD portfolios, totals are now FX-converted consistent with Python's original behavior. |
 | `portfolio transactions` | `portfolio-ts transactions` | **parity tested** | Paginated daily_returns: row count, pagination shape, and row fields validated live against PostgreSQL. |
-| `portfolio add` | `portfolio-ts add` | **accepted behavior change** | PG transaction rollback via `runTx` → Bun's `sql.begin()` (connection-pinned, true transaction) vs Python application-level snapshot/restore. Functionally equivalent. No `--data-source` flag (Python also doesn't expose it in add). SELL holdings check before insert preserved. |
+| `portfolio add` | `portfolio-ts add` | **accepted behavior change** | PG transaction rollback via `runTx` → Bun's `sql.begin()` (connection-pinned, true transaction) vs Python application-level snapshot/restore. Functionally equivalent. No `--data-source` flag (Python also doesn't expose it in add). SELL holdings check before insert preserved. `STAKING_REWARD` is accepted as a zero-price, zero-basis non-cash crypto acquisition. |
 | `portfolio edit` | `portfolio-ts edit` | **accepted behavior change** | Same pinned-connection rollback approach as add. `--dry-run` supported. `--fee-currency` not exposed (Python also doesn't expose it). |
 | `portfolio delete` | `portfolio-ts delete` | **accepted behavior change** | `--confirm` required. `--dry-run`. No `--backup` flag (Python backup is a separate command). PG transaction rollback via pinned connection. |
 | `portfolio exchange` | `portfolio-ts exchange` | **accepted behavior change** | Two-leg EXCHANGE_FROM/EXCHANGE_TO. Cash-like validation via `is_cash_like_sql()`. TypeScript checks `fromAsset === toAsset` case-insensitively; Python also checks normalized canonical form. Both reject same-asset exchanges. |
+| — | `portfolio-ts wrap` | **TS-only command** | Two-leg crypto conversion that transfers basis from the source asset into the target asset without a cash leg. Inserts grouped WRAP/UNWRAP rows with `exchange_group_id`, keeps cash/deposits unchanged, and preserves zero realized gain at conversion time. |
+| — | `portfolio-ts unwrap` | **TS-only command** | Inverse crypto conversion of `wrap`. Uses the same grouped WRAP/UNWRAP row model and basis transfer logic, with the source and target assets reversed. |
 | — | `portfolio-ts split` | **TS-only command** | Corporate action: stock split (forward/reverse). Inserts a single SPLIT transaction row with `quantity` = ratio. FIFO multiplies lot quantities and divides unit cost; cost basis invariant, no realized gain, no cash movement. `--confirm` required. |
 | `portfolio repair_prices` | `portfolio-ts repair_prices` | **accepted behavior change** | Uses `yahoo-finance2` npm package vs Python yfinance. Same Yahoo Finance data source; same inverted-FX handling. `--ticker` accepts comma-separated list; Python uses repeated flags. Writes `repair_log` per-ticker + `refresh_log` + `service_state` on successful run. |
 | `portfolio recalculate` | `portfolio-ts recalculate` | **parity tested** | Calls `refresh_daily_returns_sql(from_date)`. `--from-date`, `--force`, `--dry-run`, `--max-age-days` supported. **Stale-price enforcement**: refuses recalculation when required tickers lack prices within `STALE_MAX_AGE_DAYS` (default 5) unless `--force`. Same PostgreSQL function as Python. Writes `refresh_log` + `service_state` on successful run. |
@@ -78,6 +80,8 @@ Results: 16 pass, 0 fail, 0 skip
 The MCP adapter (`portfolio-ts/src/mcp/`) now exposes both read and write tools,
 plus a stdio server entrypoint for tunnel-client, matching the JSON envelope
 contract of the CLI and HTTP API exactly.
+Write tools now include `add_transaction`, `edit_transaction`, `delete_transaction`,
+`exchange_currency`, `wrap`, `unwrap`, and `split`.
 
 | MCP read tool | CLI equivalent | API route | Freshness meta | Parity |
 |---|---|---|---|---|
@@ -132,4 +136,3 @@ Files preserved in `portfolio_db/sql/`:
 - `procedures.sql` — `refresh_daily_returns_sql()` stored procedure
 - `views.sql` — `current_holdings`, `cash_balances`, `portfolio_allocation`, `holdings_with_value`
 - `triggers.sql` — audit triggers
-

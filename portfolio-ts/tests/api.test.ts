@@ -10,6 +10,8 @@ const mockEditDryRun = mock();
 const mockDeleteTransaction = mock();
 const mockDeletePreview = mock();
 const mockExchangeCurrency = mock();
+const mockApplyWrap = mock();
+const mockApplyUnwrap = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
@@ -38,6 +40,8 @@ beforeEach(() => {
   mockDeleteTransaction.mockReset();
   mockDeletePreview.mockReset();
   mockExchangeCurrency.mockReset();
+  mockApplyWrap.mockReset();
+  mockApplyUnwrap.mockReset();
 });
 
 const DEFAULT_FRESHNESS = {
@@ -748,6 +752,84 @@ describe("handleRequest", () => {
       toAsset: "EURUSD=X",
       quantity: 1000,
       rate: 0.92,
+    });
+  });
+
+  test("POST /wrap maps to applyWrap", async () => {
+    mockApplyWrap.mockResolvedValue({
+      from: { asset: "ETH-USD", quantity: 1 },
+      to: { asset: "WBETH-USD", quantity: 1.05 },
+      ratio: 1.05,
+      date: "2026-01-20",
+      transaction_ids: [301, 302],
+      exchange_group_id: "group-wrap-1",
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/wrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: "2026-01-20",
+        fromAsset: "ETH-USD",
+        toAsset: "WBETH-USD",
+        fromQuantity: 1,
+        toQuantity: 1.05,
+      }),
+    });
+    const res = await handleRequest(req, {
+      write: { applyWrap: mockApplyWrap },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("wrap");
+    expect(mockApplyWrap).toHaveBeenCalledWith({
+      dateStr: "2026-01-20",
+      fromAsset: "ETH-USD",
+      toAsset: "WBETH-USD",
+      fromQuantity: 1,
+      toQuantity: 1.05,
+    });
+  });
+
+  test("POST /unwrap maps to applyUnwrap", async () => {
+    mockApplyUnwrap.mockResolvedValue({
+      from: { asset: "WBETH-USD", quantity: 1.05 },
+      to: { asset: "ETH-USD", quantity: 1 },
+      ratio: 0.9523809524,
+      date: "2026-01-20",
+      transaction_ids: [401, 402],
+      exchange_group_id: "group-unwrap-1",
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/unwrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: "2026-01-20",
+        fromAsset: "WBETH-USD",
+        toAsset: "ETH-USD",
+        fromQuantity: 1.05,
+        toQuantity: 1,
+      }),
+    });
+    const res = await handleRequest(req, {
+      write: { applyUnwrap: mockApplyUnwrap },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("unwrap");
+    expect(mockApplyUnwrap).toHaveBeenCalledWith({
+      dateStr: "2026-01-20",
+      fromAsset: "WBETH-USD",
+      toAsset: "ETH-USD",
+      fromQuantity: 1.05,
+      toQuantity: 1,
     });
   });
 

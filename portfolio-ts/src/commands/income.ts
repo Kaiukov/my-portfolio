@@ -4,6 +4,8 @@ import { query } from "../db.js";
 // The `asset` column in DIVIDEND/INTEREST transactions holds the cash currency
 // (e.g. 'USD', 'EUR'), not the paying ticker. Per-stock dividend attribution is not
 // supported by the current data model and would require a schema change.
+// Staking rewards are intentionally excluded from this cash-income report because
+// they are modeled as non-cash asset acquisitions and are captured in holdings / FIFO.
 // See add.ts:62 for the validation that rejects stock-ticker dividends.
 
 export interface IncomeRow {

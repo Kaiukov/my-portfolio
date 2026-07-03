@@ -50,7 +50,7 @@ export async function deletePreview(transId: number): Promise<DeleteDryRunResult
   const action = String(row["action"] ?? "");
   const groupId = row["exchange_group_id"] as string | null;
 
-  if ((action === "EXCHANGE_FROM" || action === "EXCHANGE_TO") && groupId) {
+  if ((action === "EXCHANGE_FROM" || action === "EXCHANGE_TO" || action === "WRAP" || action === "UNWRAP") && groupId) {
     const siblings = await query<Record<string, unknown>>(
       `SELECT id, date, asset, action, quantity
        FROM transactions
@@ -66,7 +66,7 @@ export async function deletePreview(transId: number): Promise<DeleteDryRunResult
     };
   }
 
-  if (action === "EXCHANGE_FROM" || action === "EXCHANGE_TO") {
+  if (action === "EXCHANGE_FROM" || action === "EXCHANGE_TO" || action === "WRAP" || action === "UNWRAP") {
     return {
       dry_run: true,
       transaction_id: transId,
@@ -112,7 +112,7 @@ export async function deleteTransaction(
   const action = String(existing["action"] ?? "");
   const groupId = existing["exchange_group_id"] as string | null;
 
-  if (action === "EXCHANGE_FROM" || action === "EXCHANGE_TO") {
+  if (action === "EXCHANGE_FROM" || action === "EXCHANGE_TO" || action === "WRAP" || action === "UNWRAP") {
     if (groupId) {
       // Group-aware: delete both legs together
       const removed = await runTx(async (tx: { unsafe: typeof query }) => {
@@ -128,12 +128,12 @@ export async function deleteTransaction(
       return { deleted_ids: removed, recalculated: true };
     }
 
-    // Legacy: ungrouped exchange leg — reject to prevent value creation/destruction
+    // Legacy: ungrouped exchange/wrap leg — reject to prevent value creation/destruction
     throw new ValidationError(
-      `Transaction ID ${transId} is one leg of an exchange recorded before exchange grouping.\n` +
+      `Transaction ID ${transId} is one leg of an exchange/wrap recorded before exchange grouping.\n` +
         "Deleting a single leg would create or destroy portfolio value.\n" +
         "This delete is blocked to preserve value conservation.\n" +
-        "Tip: use the exchange command for new exchanges to enable safe paired deletion.",
+        "Tip: use the exchange/wrap commands for new paired conversions to enable safe deletion.",
     );
   }
 

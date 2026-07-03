@@ -7,6 +7,8 @@ const mockEditDryRun = mock();
 const mockDeleteTransaction = mock();
 const mockDeletePreview = mock();
 const mockExchangeCurrency = mock();
+const mockApplyWrap = mock();
+const mockApplyUnwrap = mock();
 
 const mockDbQuery = mock();
 const mockDbQuerySingle = mock();
@@ -43,6 +45,8 @@ beforeEach(() => {
   mockDeleteTransaction.mockReset();
   mockDeletePreview.mockReset();
   mockExchangeCurrency.mockReset();
+  mockApplyWrap.mockReset();
+  mockApplyUnwrap.mockReset();
   mockDbQuery.mockReset();
   mockDbQuerySingle.mockReset();
   mockGetAssetMetadata.mockReset();
@@ -58,6 +62,8 @@ function writeCtx() {
       deleteTransaction: mockDeleteTransaction,
       deletePreview: mockDeletePreview,
       exchangeCurrency: mockExchangeCurrency,
+      applyWrap: mockApplyWrap,
+      applyUnwrap: mockApplyUnwrap,
     },
   };
 }
@@ -182,6 +188,74 @@ describe("mcpWrite", () => {
       toAsset: "EURUSD=X",
       quantity: 1000,
       rate: 0.92,
+    });
+  });
+
+  test("wrap routes to applyWrap with quantity aliases", async () => {
+    mockApplyWrap.mockResolvedValue({
+      from: { asset: "ETH-USD", quantity: 1 },
+      to: { asset: "WBETH-USD", quantity: 1.05 },
+      ratio: 1.05,
+      date: "2026-01-20",
+      transaction_ids: [11, 12],
+      exchange_group_id: "group-1",
+    });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite(
+      "wrap",
+      {
+        date: "2026-01-20",
+        from_asset: "ETH-USD",
+        to: "WBETH-USD",
+        from_quantity: "1",
+        to_quantity: "1.05",
+      },
+      writeCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.command).toBe("wrap");
+    expect(mockApplyWrap).toHaveBeenCalledWith({
+      dateStr: "2026-01-20",
+      fromAsset: "ETH-USD",
+      toAsset: "WBETH-USD",
+      fromQuantity: 1,
+      toQuantity: 1.05,
+    });
+  });
+
+  test("unwrap routes to applyUnwrap", async () => {
+    mockApplyUnwrap.mockResolvedValue({
+      from: { asset: "WBETH-USD", quantity: 1.05 },
+      to: { asset: "ETH-USD", quantity: 1 },
+      ratio: 0.9523809524,
+      date: "2026-01-20",
+      transaction_ids: [21, 22],
+      exchange_group_id: "group-2",
+    });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite(
+      "unwrap",
+      {
+        date: "2026-01-20",
+        fromAsset: "WBETH-USD",
+        toAsset: "ETH-USD",
+        fromQuantity: 1.05,
+        toQuantity: 1,
+      },
+      writeCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.command).toBe("unwrap");
+    expect(mockApplyUnwrap).toHaveBeenCalledWith({
+      dateStr: "2026-01-20",
+      fromAsset: "WBETH-USD",
+      toAsset: "ETH-USD",
+      fromQuantity: 1.05,
+      toQuantity: 1,
     });
   });
 
