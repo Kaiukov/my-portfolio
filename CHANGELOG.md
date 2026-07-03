@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **#326** — corrected the prod deploy runbook safety notes so production recreates use plain `docker compose up` from `/opt/portfolio`, preserving `docker-compose.override.yml` auto-merge and the real prod DB password.
+
 ## [0.9.0] - 2026-06-16
 
 ### Added

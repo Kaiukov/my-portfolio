@@ -23,6 +23,7 @@ This page documents the dev and prod runtime boundaries only. The app runs via D
 |---|---|
 | Role | production (live, serving) |
 | Host | Proxmox CT 104 (Docker-in-LXC) -> `192.168.1.104` |
+| Deploy path | `/opt/portfolio` |
 | Provisioned | 2026-06-01 |
 | API | read + write (`POST`/`PATCH`/`DELETE /transactions`, `/exchange`) |
 | Automation / cron | price refresh hourly · widget publish hourly · backup every 24h |
