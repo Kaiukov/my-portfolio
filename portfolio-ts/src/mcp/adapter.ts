@@ -185,6 +185,23 @@ export async function mcpWrite(
       return success("split", result);
     }
 
+    if (toolName === "recalculate") {
+      const params = {
+        fromDateStr: strField(args, "fromDate") ?? strField(args, "from_date") ?? strField(args, "from-date"),
+        force: boolFlag(args, "force"),
+        maxAgeDays: intField(args, "maxAgeDays", "max_age_days", "max-age-days"),
+      };
+
+      const isDryRun = boolFlag(args, "dryRun", "dry_run", "dry-run");
+      if (isDryRun) {
+        const result = await write.recalculateDryRun(params);
+        return success("recalculate", result);
+      }
+
+      const result = await write.recalculate(params);
+      return success("recalculate", result);
+    }
+
     return error("mcp", "NOT_FOUND", `Unsupported MCP write tool: ${toolName}`);
   } catch (err) {
     const command =
@@ -194,6 +211,8 @@ export async function mcpWrite(
           ? "exchange"
           : toolName === "split"
             ? "split"
+            : toolName === "recalculate"
+              ? "recalculate"
             : toolName === "delete_transaction"
               ? "delete"
               : toolName === "edit_transaction"

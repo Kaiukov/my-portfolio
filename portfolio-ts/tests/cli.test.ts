@@ -1,5 +1,8 @@
 import { describe, expect, test, mock, jest } from "bun:test";
 
+const mockRecalculate = mock();
+const mockRecalculateDryRun = mock();
+
 mock.module("../src/db.js", () => ({
   query: mock(),
   querySingle: mock(),
@@ -12,6 +15,11 @@ mock.module("../src/db.js", () => ({
 
 mock.module("../src/tx.js", () => ({
   runTx: mock(),
+}));
+
+mock.module("../src/commands/recalculate.js", () => ({
+  recalculate: mockRecalculate,
+  recalculateDryRun: mockRecalculateDryRun,
 }));
 
 const MOCK_INCOME_RESULT = {
@@ -227,5 +235,74 @@ describe("CLI parsing", () => {
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  test("recalculate forwards non-force execution params", async () => {
+    mockRecalculate.mockReset();
+    mockRecalculateDryRun.mockReset();
+    mockRecalculate.mockResolvedValue({
+      rows_affected: 0,
+      recalc_type: "full",
+      from_date: null,
+      prices_stale: true,
+      stale_tickers: ["VTI"],
+    });
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    await mod.dispatch(["bun", "src/cli.ts", "recalculate", "--max-age-days", "3"]);
+
+    expect(mockRecalculate).toHaveBeenCalledWith({
+      fromDateStr: undefined,
+      force: false,
+      maxAgeDays: 3,
+    });
+    expect(mockRecalculateDryRun).not.toHaveBeenCalled();
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("recalculate");
+
+    logSpy.mockRestore();
+  });
+
+  test("recalculate forwards force dry-run params", async () => {
+    mockRecalculate.mockReset();
+    mockRecalculateDryRun.mockReset();
+    mockRecalculateDryRun.mockResolvedValue({
+      dry_run: true,
+      from_date: "2026-01-15",
+      forced: true,
+      needs_recalc: true,
+      prices_stale: false,
+      stale_tickers: [],
+    });
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    await mod.dispatch([
+      "bun",
+      "src/cli.ts",
+      "recalculate",
+      "--dry-run",
+      "--force",
+      "--from-date",
+      "2026-01-15",
+    ]);
+
+    expect(mockRecalculateDryRun).toHaveBeenCalledWith({
+      fromDateStr: "2026-01-15",
+      force: true,
+      maxAgeDays: undefined,
+    });
+    expect(mockRecalculate).not.toHaveBeenCalled();
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("recalculate");
+
+    logSpy.mockRestore();
   });
 });

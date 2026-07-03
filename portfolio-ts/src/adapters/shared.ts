@@ -4,6 +4,7 @@ import { editTransaction, editDryRun } from "../commands/edit.js";
 import { deleteTransaction, deletePreview } from "../commands/delete.js";
 import { exchangeCurrency } from "../commands/exchange.js";
 import { applySplit } from "../commands/split.js";
+import { recalculate, recalculateDryRun } from "../commands/recalculate.js";
 import { NotFoundError, ValidationError } from "../validators.js";
 
 export type WriteHandlers = {
@@ -15,6 +16,8 @@ export type WriteHandlers = {
   deletePreview: typeof deletePreview;
   exchangeCurrency: typeof exchangeCurrency;
   applySplit: typeof applySplit;
+  recalculate: typeof recalculate;
+  recalculateDryRun: typeof recalculateDryRun;
 };
 
 const defaultWriteHandlers: WriteHandlers = {
@@ -26,6 +29,8 @@ const defaultWriteHandlers: WriteHandlers = {
   deletePreview,
   exchangeCurrency,
   applySplit,
+  recalculate,
+  recalculateDryRun,
 };
 
 export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): WriteHandlers {
@@ -38,6 +43,8 @@ export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): Wr
     deletePreview: overrides.deletePreview ?? defaultWriteHandlers.deletePreview,
     exchangeCurrency: overrides.exchangeCurrency ?? defaultWriteHandlers.exchangeCurrency,
     applySplit: overrides.applySplit ?? defaultWriteHandlers.applySplit,
+    recalculate: overrides.recalculate ?? defaultWriteHandlers.recalculate,
+    recalculateDryRun: overrides.recalculateDryRun ?? defaultWriteHandlers.recalculateDryRun,
   };
 }
 

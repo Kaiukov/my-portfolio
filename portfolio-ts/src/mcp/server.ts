@@ -37,6 +37,7 @@ export const MCP_WRITE_TOOLS = [
   "delete_transaction",
   "exchange_currency",
   "split",
+  "recalculate",
 ] as const;
 
 const READ_ARGS_SCHEMA = z.object({}).passthrough(); // read tools accept any args, harmless
@@ -115,12 +116,27 @@ const SPLIT_SCHEMA = z
     account: z.string().optional().describe("Account name"),
   });
 
+const RECALCULATE_SCHEMA = z
+  .object({
+    fromDate: z.string().optional().describe("Recalculate from date (YYYY-MM-DD)"),
+    from_date: z.string().optional().describe("Recalculate from date (alias)"),
+    "from-date": z.string().optional().describe("Recalculate from date (alias)"),
+    force: z.boolean().optional().describe("Bypass recalc guardrails and stale-price guard"),
+    maxAgeDays: z.number().int().optional().describe("Max allowed stale price age in days"),
+    max_age_days: z.number().int().optional().describe("Max allowed stale price age in days (alias)"),
+    "max-age-days": z.number().int().optional().describe("Max allowed stale price age in days (alias)"),
+    dryRun: z.boolean().optional().describe("Preview recalculation without applying"),
+    dry_run: z.boolean().optional().describe("Preview recalculation without applying (alias)"),
+    "dry-run": z.boolean().optional().describe("Preview recalculation without applying (alias)"),
+  });
+
 const WRITE_TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
   add_transaction: ADD_TRANSACTION_SCHEMA,
   edit_transaction: EDIT_TRANSACTION_SCHEMA,
   delete_transaction: DELETE_TRANSACTION_SCHEMA,
   exchange_currency: EXCHANGE_CURRENCY_SCHEMA,
   split: SPLIT_SCHEMA,
+  recalculate: RECALCULATE_SCHEMA,
 };
 
 function toolResponse(envelope: unknown) {

@@ -84,7 +84,7 @@ Commands:
   cron            Manage pg_cron scheduled jobs (install / list / remove)
   withdrawal      Safe withdrawal rate / decumulation analysis (--annual-withdrawal, --withdrawal-rate, --time-horizon-years, --expected-return, --inflation-rate, --as-of-date)
   asset_analysis  Analyze any Yahoo Finance ticker with risk metrics and technical indicators (--ticker/--asset, --period/--lookback-days, --benchmark, --as-of-date, --risk-free-rate)
-  api             Start a local read-only REST API server (--port 8787)
+  api             Start a local REST API server (--port 8787)
   --help          Show this help message
 
 Dates: ISO YYYY-MM-DD (legacy DD-MM-YYYY also accepted on write commands)

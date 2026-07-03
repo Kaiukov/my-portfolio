@@ -9,15 +9,16 @@ describe("portfolio MCP server", () => {
     expect(mod.MCP_READ_TOOLS).toContain("status");
     expect(mod.MCP_WRITE_TOOLS).toContain("split");
     expect(mod.MCP_WRITE_TOOLS).toContain("exchange_currency");
+    expect(mod.MCP_WRITE_TOOLS).toContain("recalculate");
     expect(mod.MCP_READ_TOOLS.length).toBe(23);
-    expect(mod.MCP_WRITE_TOOLS.length).toBe(5);
+    expect(mod.MCP_WRITE_TOOLS.length).toBe(6);
   });
 
-  test("tools/list returns exactly 28 tools (23 read + 5 write)", async () => {
+  test("tools/list returns exactly 29 tools (23 read + 6 write/maintenance)", async () => {
     const mod = await import("../src/mcp/server.js");
 
     const total = mod.MCP_READ_TOOLS.length + mod.MCP_WRITE_TOOLS.length;
-    expect(total).toBe(28);
+    expect(total).toBe(29);
 
     // Verify all expected read tools are present
     const expectedRead = [
@@ -34,7 +35,7 @@ describe("portfolio MCP server", () => {
     // Verify all expected write tools are present
     const expectedWrite = [
       "add_transaction", "edit_transaction", "delete_transaction",
-      "exchange_currency", "split",
+      "exchange_currency", "split", "recalculate",
     ] as const;
     for (const tool of expectedWrite) {
       expect(mod.MCP_WRITE_TOOLS).toContain(tool);

@@ -113,7 +113,7 @@ HTTP access layer for dashboards, widgets, and trusted integrations. Implemented
 
 ### Scope
 
-**Read and write.** All read-only CLI commands are available as GET endpoints. Write operations (`add`, `edit`, `delete`, `exchange`) are available via POST/PATCH/PUT/DELETE, reusing the same shared command functions as the CLI — no duplicated business logic.
+**Read, write, and maintenance.** All read-only CLI commands are available as GET endpoints. Write operations (`add`, `edit`, `delete`, `exchange`, `split`) are available via POST/PATCH/PUT/DELETE, and maintenance recalculation is available via `POST /recalculate`, reusing the same shared command functions as the CLI — no duplicated business logic.
 
 ### Read-Only Endpoints
 
@@ -132,6 +132,12 @@ Each returns the same JSON envelope as the CLI, reusing the same PostgreSQL-owne
 | GET | `/asset_analysis` | `asset_analysis` | Yahoo-backed asset analytics for arbitrary tickers |
 
 Note: the read-only `transactions` command currently has no GET endpoint in server.ts — use the CLI for transaction listing. The `/ready` endpoint (GET) is a health-check probe, not a CLI command mapping.
+
+### Maintenance Endpoint
+
+| Method | Endpoint | CLI equivalent | Description |
+|---|---|---|---|
+| POST | `/recalculate` | `recalculate` | Rebuild `daily_returns` from cached prices; supports `force`, `dry-run`, `from_date`, and `max_age_days` |
 
 ### Query Parameters
 
@@ -154,7 +160,7 @@ Common parameters mapped from CLI flags:
 
 ### Write Endpoints
 
-Write operations reuse the same shared command functions (`src/adapters/shared.ts`) and are dispatched through `WriteHandlers` (addTransaction, editTransaction, editDryRun, deleteTransaction, deletePreview, exchangeCurrency). Dry-run is supported on edit and delete via `?dry_run=true` / `{"dry_run": true}`. Delete requires `?confirm=true` / `{"confirm": true}`.
+Write operations reuse the same shared command functions (`src/adapters/shared.ts`) and are dispatched through `WriteHandlers` (addTransaction, editTransaction, editDryRun, deleteTransaction, deletePreview, exchangeCurrency, recalculate, recalculateDryRun). Dry-run is supported on edit, delete, and recalculate via `?dry_run=true` / `{"dry_run": true}`. Delete requires `?confirm=true` / `{"confirm": true}`.
 
 | Method | Endpoint | CLI equivalent | Required body fields |
 |---|---|---|---|
@@ -163,6 +169,7 @@ Write operations reuse the same shared command functions (`src/adapters/shared.t
 | PUT | `/transactions/:id` | `edit` | Same as PATCH (both route through editTransaction) |
 | DELETE | `/transactions/:id` | `delete` | id (in path); confirm required unless dry-run |
 | POST | `/exchange` | `exchange` | date, fromAsset/by from_asset/by from, toAsset/by to_asset/by to, quantity, rate |
+| POST | `/recalculate` | `recalculate` | none; optional `fromDate`/`from_date`, `force`, `maxAgeDays`/`max_age_days`, `dryRun`/`dry_run` |
 
 Optional fields for POST/PATCH/PUT bodies: price, currency, fees, feeCurrency (or fee_currency), account, dataSource (or data_source). See `portfolio-ts/src/api/server.ts` for the canonical field resolution logic.
 
@@ -197,7 +204,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 
 ### Scope
 
-**Full read and write (28 инструментов).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write-операции доступны как MCP write tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
+**Full read, write, and maintenance (29 инструментов).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write и maintenance операции доступны как MCP tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
 
 ### Read Tools (23)
 
@@ -229,7 +236,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 | `withdrawal` | `withdrawal` | — | `as_of`, `annual_withdrawal`, `withdrawal_rate`, `time_horizon_years`, `expected_return`, `inflation_rate` | — |
 | `asset_analysis` | `asset_analysis` | `ticker` или `asset` | `period`, `lookback_days`, `benchmark`, `as_of`, `risk_free_rate` | — |
 
-### Write Tools (5)
+### Write and Maintenance Tools (6)
 
 | Tool name | CLI equivalent | Required args | Optional args |
 |---|---|---|---|
@@ -238,6 +245,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 | `delete_transaction` | `delete` | `id` | `dry_run`, `confirm` |
 | `exchange_currency` | `exchange` | `date`, `fromAsset`, `toAsset`, `quantity`, `rate` | — |
 | `split` | `split` | `date`, `asset`, `ratio`, `confirm` | — |
+| `recalculate` | `recalculate` | — | `fromDate`, `force`, `maxAgeDays`, `dryRun` plus snake_case / kebab-case aliases |
 
 ### Arg Aliases
 

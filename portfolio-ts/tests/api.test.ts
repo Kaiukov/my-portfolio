@@ -10,6 +10,8 @@ const mockEditDryRun = mock();
 const mockDeleteTransaction = mock();
 const mockDeletePreview = mock();
 const mockExchangeCurrency = mock();
+const mockRecalculate = mock();
+const mockRecalculateDryRun = mock();
 
 mock.module("../src/db.js", () => ({
   query: mockQuery,
@@ -38,6 +40,8 @@ beforeEach(() => {
   mockDeleteTransaction.mockReset();
   mockDeletePreview.mockReset();
   mockExchangeCurrency.mockReset();
+  mockRecalculate.mockReset();
+  mockRecalculateDryRun.mockReset();
 });
 
 const DEFAULT_FRESHNESS = {
@@ -749,6 +753,67 @@ describe("handleRequest", () => {
       quantity: 1000,
       rate: 0.92,
     });
+  });
+
+  test("POST /recalculate routes force execution to shared handler", async () => {
+    mockRecalculate.mockResolvedValue({
+      rows_affected: 12,
+      recalc_type: "partial",
+      from_date: "2026-01-15",
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/recalculate?force=true&max_age_days=3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from_date: "2026-01-15" }),
+    });
+    const res = await handleRequest(req, {
+      write: { recalculate: mockRecalculate, recalculateDryRun: mockRecalculateDryRun },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("recalculate");
+    expect(mockRecalculate).toHaveBeenCalledWith({
+      fromDateStr: "2026-01-15",
+      force: true,
+      maxAgeDays: 3,
+    });
+    expect(mockRecalculateDryRun).not.toHaveBeenCalled();
+  });
+
+  test("POST /recalculate dry-run routes to shared handler with aliases", async () => {
+    mockRecalculateDryRun.mockResolvedValue({
+      dry_run: true,
+      from_date: "beginning",
+      forced: false,
+      needs_recalc: false,
+      prices_stale: true,
+      stale_tickers: ["VTI"],
+    });
+
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/recalculate?dry-run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maxAgeDays: 5 }),
+    });
+    const res = await handleRequest(req, {
+      write: { recalculate: mockRecalculate, recalculateDryRun: mockRecalculateDryRun },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.command).toBe("recalculate");
+    expect(mockRecalculateDryRun).toHaveBeenCalledWith({
+      fromDateStr: undefined,
+      force: false,
+      maxAgeDays: 5,
+    });
+    expect(mockRecalculate).not.toHaveBeenCalled();
   });
 
   test("write validation errors return 400 envelope", async () => {
