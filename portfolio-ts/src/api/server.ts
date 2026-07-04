@@ -23,6 +23,8 @@ export interface ReadyRouteResult {
 
 const TRANSACTION_ID_ROUTE = /^\/transactions\/(\d+)$/;
 const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
+const MCP_PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource/mcp";
+const OAUTH_AUTHORIZATION_SERVER_PATH = "/.well-known/oauth-authorization-server";
 
 function argsFromSearchParams(p: URLSearchParams): Record<string, unknown> {
   const args: Record<string, unknown> = {};
@@ -130,6 +132,8 @@ function boolFlag(search: URLSearchParams, body: JsonObject, ...keys: string[]):
 }
 
 function allowedMethodsForPath(path: string): string[] | null {
+  if (path === MCP_PROTECTED_RESOURCE_PATH) return ["GET"];
+  if (path === OAUTH_AUTHORIZATION_SERVER_PATH) return ["GET"];
   if (path === "/ready") return ["GET"];
   if (path === "/withdrawal") return ["GET"];
   if (path === "/projection") return ["GET"];
@@ -164,6 +168,35 @@ function jsonResponse(body: unknown, status: number, corsOrigin?: string): Respo
       ...buildCorsHeaders(corsOrigin),
     },
   });
+}
+
+function originFromRequest(req: Request): string {
+  const url = new URL(req.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+function oauthProtectedResourceMetadata(req: Request): Record<string, unknown> {
+  const origin = originFromRequest(req);
+  return {
+    resource: `${origin}/mcp`,
+    authorization_servers: [origin],
+    bearer_methods_supported: ["header"],
+    scopes_supported: ["mcp:read", "mcp:write"],
+  };
+}
+
+function oauthAuthorizationServerMetadata(req: Request): Record<string, unknown> {
+  const origin = originFromRequest(req);
+  return {
+    issuer: origin,
+    authorization_endpoint: `${origin}/oauth/authorize`,
+    token_endpoint: `${origin}/oauth/token`,
+    registration_endpoint: `${origin}/oauth/register`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
+    token_endpoint_auth_methods_supported: ["none"],
+    code_challenge_methods_supported: ["S256"],
+  };
 }
 
 async function parseJsonBody(req: Request): Promise<JsonObject> {
@@ -268,6 +301,14 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
       status: 204,
       headers: buildCorsHeaders(corsOrigin),
     });
+  }
+
+  if (path === MCP_PROTECTED_RESOURCE_PATH && req.method === "GET") {
+    return respond(oauthProtectedResourceMetadata(req), 200);
+  }
+
+  if (path === OAUTH_AUTHORIZATION_SERVER_PATH && req.method === "GET") {
+    return respond(oauthAuthorizationServerMetadata(req), 200);
   }
 
   if (!allowedMethods.includes(req.method)) {

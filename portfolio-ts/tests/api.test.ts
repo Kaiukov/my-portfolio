@@ -978,6 +978,36 @@ describe("handleRequest", () => {
     expect(body.error).toBe("connection refused");
   });
 
+  test("GET /.well-known/oauth-protected-resource/mcp returns protected-resource metadata", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/.well-known/oauth-protected-resource/mcp");
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.resource).toBe("http://localhost/mcp");
+    expect(body.authorization_servers).toEqual(["http://localhost"]);
+    expect(body.bearer_methods_supported).toEqual(["header"]);
+    expect(body.scopes_supported).toEqual(["mcp:read", "mcp:write"]);
+  });
+
+  test("GET /.well-known/oauth-authorization-server returns authorization-server metadata", async () => {
+    const { handleRequest } = await import("../src/api/server.js");
+    const req = new Request("http://localhost/.well-known/oauth-authorization-server");
+    const res = await handleRequest(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.issuer).toBe("http://localhost");
+    expect(body.authorization_endpoint).toBe("http://localhost/oauth/authorize");
+    expect(body.token_endpoint).toBe("http://localhost/oauth/token");
+    expect(body.registration_endpoint).toBe("http://localhost/oauth/register");
+    expect(body.response_types_supported).toEqual(["code"]);
+    expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
+    expect(body.token_endpoint_auth_methods_supported).toEqual(["none"]);
+    expect(body.code_challenge_methods_supported).toEqual(["S256"]);
+  });
+
   test("GET /mcp returns an SSE stream for Cloudflare/OpenAI server URL mode", async () => {
     const { handleRequest } = await import("../src/api/server.js");
 
