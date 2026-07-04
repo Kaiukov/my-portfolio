@@ -76,6 +76,7 @@ export function validatePositiveInt(
 export const USER_ACTIONS = new Set([
   "BUY", "SELL", "DEPOSIT", "WITHDRAW", "TRANSFER",
   "DIVIDEND", "INTEREST", "FEE", "TAX", "SPLIT",
+  "STAKING_REWARD", "WRAP", "UNWRAP",
 ]);
 
 export const ALLOWED_CURRENCIES = new Set([

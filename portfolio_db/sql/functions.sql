@@ -573,7 +573,8 @@ $$;
 
 -- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.
 -- Processes BUY/SELL transactions in chronological order (date, then id).
--- BUY creates a lot with cost = qty*price + fees, converted to USD.
+-- BUY and STAKING_REWARD create lots; BUY includes fees, STAKING_REWARD has zero basis.
+-- WRAP transfers source lot basis into the target asset with no realized gain.
 -- SELL consumes oldest lots first (FIFO); realized gain = proceeds - cost of consumed units.
 -- All values in USD; trades in non-USD currencies are FX-converted via cash_amount_to_usd_sql.
 DROP FUNCTION IF EXISTS portfolio_fifo_metrics_sql(DATE);
@@ -592,6 +593,7 @@ DECLARE
     v_realized_gain    DOUBLE PRECISION := 0;
     v_market_value     DOUBLE PRECISION := 0;
     v_lot_cost         DOUBLE PRECISION;
+    v_transfer_cost    DOUBLE PRECISION;
     v_proceeds         DOUBLE PRECISION;
     v_sell_qty         DOUBLE PRECISION;
     v_consume          DOUBLE PRECISION;
@@ -611,22 +613,32 @@ BEGIN
         unit_cost_usd DOUBLE PRECISION NOT NULL
     ) ON COMMIT DROP;
 
+    DROP TABLE IF EXISTS fifo_wrap_lots;
+    CREATE TEMP TABLE fifo_wrap_lots (
+        exchange_group_id TEXT PRIMARY KEY,
+        transferred_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0
+    ) ON COMMIT DROP;
+
     CREATE INDEX IF NOT EXISTS idx_fifo_lots_asset ON fifo_lots (asset, id);
 
     FOR tx IN
         SELECT t.id, t.date, t.asset, upper(t.action) AS action,
                t.quantity, t.price, t.fees,
                COALESCE(NULLIF(t.currency, ''), 'USD') AS currency,
-               COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency
+               COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency,
+               t.exchange_group_id
         FROM transactions t
-        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT')
+        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT', 'STAKING_REWARD', 'WRAP', 'UNWRAP')
           AND NOT is_cash_like_sql(t.asset)
           AND t.date <= p_as_of_date
         ORDER BY t.date ASC, t.id ASC
     LOOP
-        IF tx.action = 'BUY' THEN
+        IF tx.action IN ('BUY', 'STAKING_REWARD') THEN
             v_lot_cost := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
-                        + cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
+                        + CASE WHEN tx.action = 'BUY'
+                               THEN cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date)
+                               ELSE 0
+                          END;
 
             INSERT INTO fifo_lots (asset, remaining_qty, unit_cost_usd)
             VALUES (tx.asset, tx.quantity,
@@ -656,6 +668,48 @@ BEGIN
 
                 v_sell_qty := v_sell_qty - v_consume;
             END LOOP;
+        ELSIF tx.action = 'WRAP' THEN
+            v_sell_qty := ABS(tx.quantity);
+            v_transfer_cost := 0;
+
+            FOR lot_rec IN
+                SELECT id, remaining_qty, unit_cost_usd
+                FROM fifo_lots
+                WHERE asset = tx.asset AND remaining_qty > 0
+                ORDER BY id ASC
+            LOOP
+                EXIT WHEN v_sell_qty <= 0;
+
+                v_consume := LEAST(lot_rec.remaining_qty, v_sell_qty);
+                v_cost_consumed := v_consume * lot_rec.unit_cost_usd;
+                v_transfer_cost := v_transfer_cost + v_cost_consumed;
+
+                UPDATE fifo_lots
+                SET remaining_qty = remaining_qty - v_consume
+                WHERE id = lot_rec.id;
+
+                v_sell_qty := v_sell_qty - v_consume;
+            END LOOP;
+
+            INSERT INTO fifo_wrap_lots (exchange_group_id, transferred_cost_usd)
+            VALUES (COALESCE(tx.exchange_group_id, tx.id::TEXT), v_transfer_cost)
+            ON CONFLICT (exchange_group_id)
+            DO UPDATE SET transferred_cost_usd = EXCLUDED.transferred_cost_usd;
+        ELSIF tx.action = 'UNWRAP' THEN
+            SELECT COALESCE(transferred_cost_usd, 0)
+            INTO v_transfer_cost
+            FROM fifo_wrap_lots
+            WHERE exchange_group_id = COALESCE(tx.exchange_group_id, tx.id::TEXT);
+
+            INSERT INTO fifo_lots (asset, remaining_qty, unit_cost_usd)
+            VALUES (
+                tx.asset,
+                ABS(tx.quantity),
+                CASE WHEN ABS(tx.quantity) > 0
+                     THEN COALESCE(v_transfer_cost, 0) / ABS(tx.quantity)
+                     ELSE 0
+                END
+            );
         ELSIF tx.action = 'SPLIT' THEN
             UPDATE fifo_lots
             SET remaining_qty = remaining_qty * tx.quantity,
@@ -913,7 +967,7 @@ AS $$
         SELECT
             f.asset,
             SUM(
-                (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+                (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP')  THEN f.quantity
                       WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
                       ELSE 0 END)
                 * COALESCE((
@@ -928,7 +982,7 @@ AS $$
         WHERE f.action <> 'SPLIT'
         GROUP BY f.asset
         HAVING SUM(
-            (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+            (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP')  THEN f.quantity
                   WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
                   ELSE 0 END)
             * COALESCE((
@@ -1020,7 +1074,7 @@ BEGIN
         SELECT
             f.asset,
             SUM(
-                (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+                (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP')  THEN f.quantity
                       WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
                       ELSE 0 END)
                 * COALESCE((
@@ -1035,7 +1089,7 @@ BEGIN
         WHERE f.action <> 'SPLIT'
         GROUP BY f.asset
         HAVING SUM(
-            (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO')  THEN f.quantity
+            (CASE WHEN f.action IN ('BUY', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP')  THEN f.quantity
                   WHEN f.action IN ('SELL', 'EXCHANGE_FROM') THEN -f.quantity
                   ELSE 0 END)
             * COALESCE((
@@ -1111,7 +1165,7 @@ AS $$
             SELECT asset FROM filtered
             GROUP BY asset
             HAVING SUM(CASE
-                WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
+                WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP') THEN quantity
                 WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX', 'EXCHANGE_FROM') THEN -quantity
                 ELSE 0
             END) <> 0
@@ -2019,7 +2073,9 @@ BEGIN
 END;
 $$;
 
--- Income report: aggregated DIVIDEND and INTEREST transactions with FX conversion
+-- Income report: aggregated DIVIDEND and INTEREST transactions with FX conversion.
+-- Staking rewards are excluded on purpose: they are non-cash asset acquisitions
+-- and are modeled through holdings/FIFO rather than this cash-income report.
 DROP FUNCTION IF EXISTS portfolio_income_sql(DATE, DATE, TEXT) CASCADE;
 CREATE OR REPLACE FUNCTION portfolio_income_sql(
     p_as_of_date DATE DEFAULT CURRENT_DATE,
@@ -2128,7 +2184,8 @@ $$;
 
 -- FIFO realized gains detail: one row per SELL↔BUY lot match.
 -- Reuses the same temp-table FIFO approach as portfolio_fifo_metrics_sql.
--- BUY creates lots; SELL consumes oldest lots first and emits a row per match.
+-- BUY and STAKING_REWARD create lots; SELL consumes oldest lots first and emits a row per match.
+-- WRAP transfers lot basis to the paired target asset (no taxable event, no emitted rows).
 -- SPLIT adjusts lots (no taxable event, no emitted rows).
 -- Holding days = sell_date - matched buy date.
 DROP FUNCTION IF EXISTS portfolio_realized_gains_sql(DATE, DATE, TEXT);
@@ -2154,6 +2211,7 @@ VOLATILE
 AS $$
 DECLARE
     v_lot_cost       DOUBLE PRECISION;
+    v_transfer_cost  DOUBLE PRECISION;
     v_proceeds       DOUBLE PRECISION;
     v_sell_qty       DOUBLE PRECISION;
     v_consume        DOUBLE PRECISION;
@@ -2173,23 +2231,32 @@ BEGIN
         buy_date DATE NOT NULL
     ) ON COMMIT DROP;
 
+    DROP TABLE IF EXISTS fifo_wrap_lots_detail;
+    CREATE TEMP TABLE fifo_wrap_lots_detail (
+        exchange_group_id TEXT PRIMARY KEY,
+        transferred_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0
+    ) ON COMMIT DROP;
+
     CREATE INDEX IF NOT EXISTS idx_fifo_lots_detail_asset ON fifo_lots_detail (asset, id);
 
     FOR tx IN
         SELECT t.id, t.date, t.asset, upper(t.action) AS action,
                t.quantity, t.price, t.fees,
                COALESCE(NULLIF(t.currency, ''), 'USD') AS currency,
-               COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency
+               COALESCE(NULLIF(t.fee_currency, ''), NULLIF(t.currency, ''), 'USD') AS fee_currency,
+               t.exchange_group_id
         FROM transactions t
-        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT')
+        WHERE upper(t.action) IN ('BUY', 'SELL', 'SPLIT', 'STAKING_REWARD', 'WRAP', 'UNWRAP')
           AND NOT is_cash_like_sql(t.asset)
           AND t.date <= p_to_date
-          AND (p_asset IS NULL OR upper(t.asset) = upper(p_asset))
         ORDER BY t.date ASC, t.id ASC
     LOOP
-        IF tx.action = 'BUY' THEN
+        IF tx.action IN ('BUY', 'STAKING_REWARD') THEN
             v_lot_cost := cash_amount_to_usd_sql(tx.currency, tx.quantity * COALESCE(tx.price, 0), tx.date)
-                        + cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date);
+                        + CASE WHEN tx.action = 'BUY'
+                               THEN cash_amount_to_usd_sql(fee_currency_ticker_sql(tx.fee_currency), COALESCE(tx.fees, 0), tx.date)
+                               ELSE 0
+                          END;
 
             INSERT INTO fifo_lots_detail (asset, remaining_qty, unit_cost_usd, buy_id, buy_date)
             VALUES (tx.asset, tx.quantity,
@@ -2224,7 +2291,8 @@ BEGIN
                 matched_buy_id   := lot_rec.buy_id;
                 matched_buy_date := lot_rec.buy_date;
 
-                IF p_from_date IS NULL OR tx.date >= p_from_date THEN
+                IF (p_asset IS NULL OR upper(tx.asset) = upper(p_asset))
+                   AND (p_from_date IS NULL OR tx.date >= p_from_date) THEN
                     RETURN NEXT;
                 END IF;
 
@@ -2234,6 +2302,50 @@ BEGIN
 
                 v_sell_qty := v_sell_qty - v_consume;
             END LOOP;
+        ELSIF tx.action = 'WRAP' THEN
+            v_sell_qty := ABS(tx.quantity);
+            v_transfer_cost := 0;
+
+            FOR lot_rec IN
+                SELECT f.id, f.remaining_qty, f.unit_cost_usd, f.buy_id, f.buy_date
+                FROM fifo_lots_detail f
+                WHERE f.asset = tx.asset AND f.remaining_qty > 0
+                ORDER BY f.id ASC
+            LOOP
+                EXIT WHEN v_sell_qty <= 0;
+
+                v_consume := LEAST(lot_rec.remaining_qty, v_sell_qty);
+                v_cost_consumed := v_consume * lot_rec.unit_cost_usd;
+                v_transfer_cost := v_transfer_cost + v_cost_consumed;
+
+                UPDATE fifo_lots_detail f
+                SET remaining_qty = f.remaining_qty - v_consume
+                WHERE f.id = lot_rec.id;
+
+                v_sell_qty := v_sell_qty - v_consume;
+            END LOOP;
+
+            INSERT INTO fifo_wrap_lots_detail (exchange_group_id, transferred_cost_usd)
+            VALUES (COALESCE(tx.exchange_group_id, tx.id::TEXT), v_transfer_cost)
+            ON CONFLICT (exchange_group_id)
+            DO UPDATE SET transferred_cost_usd = EXCLUDED.transferred_cost_usd;
+        ELSIF tx.action = 'UNWRAP' THEN
+            SELECT COALESCE(transferred_cost_usd, 0)
+            INTO v_transfer_cost
+            FROM fifo_wrap_lots_detail
+            WHERE exchange_group_id = COALESCE(tx.exchange_group_id, tx.id::TEXT);
+
+            INSERT INTO fifo_lots_detail (asset, remaining_qty, unit_cost_usd, buy_id, buy_date)
+            VALUES (
+                tx.asset,
+                ABS(tx.quantity),
+                CASE WHEN ABS(tx.quantity) > 0
+                     THEN COALESCE(v_transfer_cost, 0) / ABS(tx.quantity)
+                     ELSE 0
+                END,
+                tx.id,
+                tx.date
+            );
         ELSIF tx.action = 'SPLIT' THEN
             UPDATE fifo_lots_detail f
             SET remaining_qty = f.remaining_qty * tx.quantity,
@@ -2542,7 +2654,7 @@ BEGIN
         FROM (
             SELECT asset,
                    SUM(CASE
-                       WHEN action IN ('BUY','DEPOSIT','DIVIDEND','INTEREST','TRANSFER','EXCHANGE_TO') THEN quantity
+                       WHEN action IN ('BUY','DEPOSIT','DIVIDEND','INTEREST','TRANSFER','EXCHANGE_TO','STAKING_REWARD','WRAP','UNWRAP') THEN quantity
                        WHEN action IN ('SELL','WITHDRAW','FEE','TAX','EXCHANGE_FROM') THEN -quantity
                        ELSE 0
                    END) AS net_quantity

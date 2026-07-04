@@ -161,6 +161,24 @@ export async function mcpWrite(
       return success("exchange", result);
     }
 
+    if (toolName === "wrap" || toolName === "unwrap") {
+      const dateStr = strField(args, "date");
+      const fromAsset = strField(args, "fromAsset") ?? strField(args, "from_asset") ?? strField(args, "from");
+      const toAsset = strField(args, "toAsset") ?? strField(args, "to_asset") ?? strField(args, "to");
+      const fromQuantity = floatField(args, "fromQuantity", "from_quantity");
+      const toQuantity = floatField(args, "toQuantity", "to_quantity");
+
+      if (!dateStr || !fromAsset || !toAsset || fromQuantity === undefined || toQuantity === undefined) {
+        throw new ValidationError("Required: date, fromAsset, toAsset, fromQuantity, toQuantity");
+      }
+
+      const result =
+        toolName === "wrap"
+          ? await write.applyWrap({ dateStr, fromAsset, toAsset, fromQuantity, toQuantity })
+          : await write.applyUnwrap({ dateStr, fromAsset, toAsset, fromQuantity, toQuantity });
+      return success(toolName, result);
+    }
+
     if (toolName === "split") {
       const dateStr = strField(args, "date");
       const asset = strField(args, "asset");
@@ -192,6 +210,10 @@ export async function mcpWrite(
         ? "add"
         : toolName === "exchange_currency"
           ? "exchange"
+          : toolName === "wrap"
+            ? "wrap"
+            : toolName === "unwrap"
+              ? "unwrap"
           : toolName === "split"
             ? "split"
             : toolName === "delete_transaction"

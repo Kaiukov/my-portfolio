@@ -7,7 +7,7 @@ CREATE OR REPLACE VIEW current_holdings AS
 SELECT
     asset,
     SUM(CASE
-        WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
+        WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP') THEN quantity
         WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX') THEN -quantity
         WHEN action = 'EXCHANGE_FROM' THEN quantity
         ELSE 0
@@ -15,7 +15,7 @@ SELECT
 FROM transactions
 GROUP BY asset
 HAVING SUM(CASE
-    WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO') THEN quantity
+    WHEN action IN ('BUY', 'DEPOSIT', 'DIVIDEND', 'INTEREST', 'TRANSFER', 'EXCHANGE_TO', 'STAKING_REWARD', 'WRAP', 'UNWRAP') THEN quantity
     WHEN action IN ('SELL', 'WITHDRAW', 'FEE', 'TAX', 'EXCHANGE_FROM') THEN -quantity
     ELSE 0
 END) <> 0;

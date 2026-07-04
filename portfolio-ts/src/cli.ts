@@ -9,6 +9,7 @@ import { editTransaction, editDryRun } from "./commands/edit.js";
 import { deleteTransaction, deletePreview } from "./commands/delete.js";
 import { exchangeCurrency } from "./commands/exchange.js";
 import { applySplit } from "./commands/split.js";
+import { applyWrap, applyUnwrap } from "./commands/wrap.js";
 import { recalculate, recalculateDryRun } from "./commands/recalculate.js";
 import { verifyPrices } from "./commands/verify_prices.js";
 import { repairPrices, repairPricesDryRun, runDailyMaintenanceCheck } from "./commands/repair_prices.js";
@@ -50,6 +51,8 @@ Commands:
   edit            Edit an existing transaction and recalculate
   delete          Delete a transaction and recalculate
   exchange        Record a currency exchange (two linked transactions)
+  wrap            Record a crypto wrap conversion (two linked transactions)
+  unwrap          Record a crypto unwrap conversion (two linked transactions)
   split           Record a stock split (forward or reverse corporate action)
   recalculate     Rebuild daily_returns from cached prices
   verify_prices   Show price coverage diagnostics (read-only)
@@ -96,9 +99,12 @@ Examples:
   portfolio status
   portfolio transactions --limit 20 --offset 40
   portfolio add --date 2026-01-01 --asset AAPL --action BUY --quantity 10 --price 150 --exchange Interactive
+  portfolio add --date 2026-01-01 --asset BTC-USD --action STAKING_REWARD --quantity 0.0001 --exchange Binance
   portfolio edit --id 42 --price 155.50
   portfolio delete --id 42 --confirm
   portfolio exchange --date 2026-01-01 --from USD --to EURUSD=X --quantity 1000 --rate 0.92
+  portfolio wrap --date 2026-01-01 --from BTC-USD --to WBETH-USD --from-quantity 0.1 --to-quantity 0.12
+  portfolio unwrap --date 2026-01-01 --from WBETH-USD --to ETH-USD --from-quantity 0.12 --to-quantity 0.1
   portfolio schedule emit
   portfolio schedule install / schedule remove
   portfolio refresh
@@ -320,6 +326,33 @@ export async function dispatch(argv: string[]): Promise<void> {
 
       const result = await exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
       console.log(JSON.stringify(success("exchange", result), null, 2));
+      return;
+    }
+
+    case "wrap":
+    case "unwrap": {
+      const dateStr = str(flags, "date");
+      const fromAsset = str(flags, "from") ?? str(flags, "from-asset") ?? str(flags, "from_asset");
+      const toAsset = str(flags, "to") ?? str(flags, "to-asset") ?? str(flags, "to_asset");
+      const fromQuantity = float(flags, "from-quantity") ?? float(flags, "from_quantity");
+      const toQuantity = float(flags, "to-quantity") ?? float(flags, "to_quantity");
+
+      if (!dateStr || !fromAsset || !toAsset || fromQuantity === undefined || toQuantity === undefined) {
+        const env = error(
+          normalizedCommand,
+          "VALIDATION_ERROR",
+          "Required: --date YYYY-MM-DD --from ASSET --to ASSET --from-quantity N --to-quantity N",
+        );
+        console.log(JSON.stringify(env, null, 2));
+        process.exit(1);
+        return;
+      }
+
+      const result =
+        normalizedCommand === "wrap"
+          ? await applyWrap({ dateStr, fromAsset, toAsset, fromQuantity, toQuantity })
+          : await applyUnwrap({ dateStr, fromAsset, toAsset, fromQuantity, toQuantity });
+      console.log(JSON.stringify(success(normalizedCommand, result), null, 2));
       return;
     }
 

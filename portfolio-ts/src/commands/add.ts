@@ -10,6 +10,7 @@ import {
   validateCurrency,
   isStablecoin,
 } from "../validators.js";
+import { applyStakingReward } from "./reward.js";
 import { parseRow, type TransactionRow } from "./transactions.js";
 
 export interface AddResult {
@@ -90,6 +91,12 @@ async function prepareAdd(params: {
     throw new ValidationError(`--price is required for ${action} transactions`);
   }
 
+  const atRow = await querySingle<{ asset_type: string }>(
+    "SELECT get_asset_type_sql($1) AS asset_type",
+    [params.asset],
+  );
+  const assetType = atRow?.asset_type ?? "stock_usd";
+
   if (action === "FEE" || action === "TAX" || action === "DIVIDEND" || action === "INTEREST") {
     if (params.price !== undefined) {
       throw new ValidationError(`${action} does not accept a price`);
@@ -104,6 +111,28 @@ async function prepareAdd(params: {
           `${action} requires a cash asset, got ${params.asset}`,
         );
       }
+    }
+  }
+
+  if (action === "STAKING_REWARD") {
+    if (params.price !== undefined) {
+      throw new ValidationError("STAKING_REWARD does not accept a price");
+    }
+    if (params.fees !== undefined && params.fees !== 0) {
+      throw new ValidationError("STAKING_REWARD does not accept fees");
+    }
+    if (params.feeCurrency !== undefined) {
+      throw new ValidationError("STAKING_REWARD does not accept fee currency");
+    }
+
+    const cashRow = await querySingle<{ ok: boolean }>(
+      "SELECT is_cash_like_sql($1) AS ok",
+      [params.asset],
+    );
+    if (cashRow?.ok || assetType !== "crypto") {
+      throw new ValidationError(
+        `STAKING_REWARD requires a non-cash crypto asset, got ${params.asset}`,
+      );
     }
   }
 
@@ -123,13 +152,6 @@ async function prepareAdd(params: {
       );
     }
   }
-
-  // Get asset type
-  const atRow = await querySingle<{ asset_type: string }>(
-    "SELECT get_asset_type_sql($1) AS asset_type",
-    [params.asset],
-  );
-  const assetType = atRow?.asset_type ?? "stock_usd";
 
   return {
     date,
@@ -160,6 +182,20 @@ export async function addTransaction(params: {
 }): Promise<AddResult> {
   const normalized = await prepareAdd(params);
   const { date, asset, action, quantity, price, currency, fees, feeCurrency, exchange, account, assetType } = normalized;
+
+  if (action === "STAKING_REWARD") {
+    return applyStakingReward({
+      dateStr: date,
+      asset,
+      quantity,
+      price: price ?? undefined,
+      currency,
+      fees: fees ?? undefined,
+      feeCurrency: feeCurrency ?? undefined,
+      exchange,
+      account: account ?? undefined,
+    });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inserted = await runTx(async (tx: any) => {

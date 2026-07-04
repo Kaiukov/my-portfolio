@@ -68,6 +68,8 @@ function routeCommandForPath(path: string, method: string): string {
   if (path === "/transactions") return method === "GET" ? "transactions" : "add";
   if (path === "/report") return "report";
   if (path === "/exchange") return "exchange";
+  if (path === "/wrap") return "wrap";
+  if (path === "/unwrap") return "unwrap";
   if (path === "/split") return "split";
   if (TRANSACTION_ID_ROUTE.test(path)) return method === "DELETE" ? "delete" : "edit";
   if (MCP_HTTP_PATHS.has(path)) return "mcp";
@@ -134,6 +136,8 @@ function allowedMethodsForPath(path: string): string[] | null {
   if (path === "/transactions") return ["GET", "POST"];
   if (TRANSACTION_ID_ROUTE.test(path)) return ["PATCH", "PUT", "DELETE"];
   if (path === "/exchange") return ["POST"];
+  if (path === "/wrap") return ["POST"];
+  if (path === "/unwrap") return ["POST"];
   if (path === "/split") return ["POST"];
   if (MCP_HTTP_PATHS.has(path)) return ["GET", "POST", "DELETE"];
   if (ROUTES[path]) return ["GET"];
@@ -352,6 +356,27 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
 
       const result = await write.exchangeCurrency({ dateStr, fromAsset, toAsset, quantity, rate });
       return respond(success("exchange", result), 200);
+    }
+
+    if ((path === "/wrap" || path === "/unwrap") && req.method === "POST") {
+      const body = await parseJsonBody(req);
+      const dateStr = strField(body, "date");
+      const fromAsset = strField(body, "fromAsset") ?? strField(body, "from_asset") ?? strField(body, "from");
+      const toAsset = strField(body, "toAsset") ?? strField(body, "to_asset") ?? strField(body, "to");
+      const fromQuantity = floatField(body, "fromQuantity") ?? floatField(body, "from_quantity");
+      const toQuantity = floatField(body, "toQuantity") ?? floatField(body, "to_quantity");
+
+      if (!dateStr || !fromAsset || !toAsset || fromQuantity === undefined || toQuantity === undefined) {
+        throw new ValidationError(
+          "Required: date, fromAsset, toAsset, fromQuantity, toQuantity",
+        );
+      }
+
+      const result =
+        path === "/wrap"
+          ? await write.applyWrap({ dateStr, fromAsset, toAsset, fromQuantity, toQuantity })
+          : await write.applyUnwrap({ dateStr, fromAsset, toAsset, fromQuantity, toQuantity });
+      return respond(success(path === "/wrap" ? "wrap" : "unwrap", result), 200);
     }
 
     if (path === "/split" && req.method === "POST") {

@@ -93,6 +93,21 @@ mock.module("../src/commands/realized_gains.js", () => ({
   getRealizedGains: mock(() => Promise.resolve(MOCK_REALIZED_GAINS_RESULT)),
 }));
 
+const mockAddTransaction = mock();
+const mockAddDryRun = mock();
+const mockApplyWrap = mock();
+const mockApplyUnwrap = mock();
+
+mock.module("../src/commands/add.js", () => ({
+  addTransaction: mockAddTransaction,
+  addDryRun: mockAddDryRun,
+}));
+
+mock.module("../src/commands/wrap.js", () => ({
+  applyWrap: mockApplyWrap,
+  applyUnwrap: mockApplyUnwrap,
+}));
+
 describe("CLI parsing", () => {
   test("--help prints help text", async () => {
     const mod = await import("../src/cli.js");
@@ -109,6 +124,9 @@ describe("CLI parsing", () => {
     expect(output).toContain("realized-gains");
     expect(output).toContain("transactions");
     expect(output).toContain("currency_exposure");
+    expect(output).toContain("wrap");
+    expect(output).toContain("unwrap");
+    expect(output).toContain("STAKING_REWARD");
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
@@ -227,5 +245,86 @@ describe("CLI parsing", () => {
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  test("add STAKING_REWARD command emits JSON envelope", async () => {
+    mockAddTransaction.mockResolvedValue({
+      transaction: { id: 401, asset: "BTC-USD", action: "STAKING_REWARD" },
+      recalculated: true,
+    });
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    await mod.dispatch([
+      "bun", "src/cli.ts", "add",
+      "--date", "2026-01-02",
+      "--asset", "BTC-USD",
+      "--action", "STAKING_REWARD",
+      "--quantity", "0.00017429",
+      "--exchange", "Binance Earn",
+    ]);
+
+    expect(logSpy).toHaveBeenCalled();
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.command).toBe("add");
+    expect(output.data.transaction.action).toBe("STAKING_REWARD");
+
+    logSpy.mockRestore();
+  });
+
+  test("wrap and unwrap commands emit JSON envelopes", async () => {
+    mockApplyWrap.mockResolvedValue({
+      from: { asset: "ETH-USD", quantity: 1 },
+      to: { asset: "WBETH-USD", quantity: 1.05 },
+      ratio: 1.05,
+      date: "2026-01-02",
+      transaction_ids: [501, 502],
+      exchange_group_id: "wrap-1",
+    });
+    mockApplyUnwrap.mockResolvedValue({
+      from: { asset: "WBETH-USD", quantity: 1.05 },
+      to: { asset: "ETH-USD", quantity: 1 },
+      ratio: 0.9523809524,
+      date: "2026-01-03",
+      transaction_ids: [503, 504],
+      exchange_group_id: "unwrap-1",
+    });
+
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    await mod.dispatch([
+      "bun", "src/cli.ts", "wrap",
+      "--date", "2026-01-02",
+      "--from", "ETH-USD",
+      "--to", "WBETH-USD",
+      "--from-quantity", "1",
+      "--to-quantity", "1.05",
+    ]);
+
+    await mod.dispatch([
+      "bun", "src/cli.ts", "unwrap",
+      "--date", "2026-01-03",
+      "--from", "WBETH-USD",
+      "--to", "ETH-USD",
+      "--from-quantity", "1.05",
+      "--to-quantity", "1",
+    ]);
+
+    expect(logSpy).toHaveBeenCalledTimes(2);
+
+    const wrapOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(wrapOutput.ok).toBe(true);
+    expect(wrapOutput.command).toBe("wrap");
+    expect(wrapOutput.data.ratio).toBeCloseTo(1.05, 6);
+
+    const unwrapOutput = JSON.parse(logSpy.mock.calls[1][0]);
+    expect(unwrapOutput.ok).toBe(true);
+    expect(unwrapOutput.command).toBe("unwrap");
+    expect(unwrapOutput.data.ratio).toBeCloseTo(0.9523809524, 10);
+
+    logSpy.mockRestore();
   });
 });
