@@ -93,9 +93,9 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 
 ## Command classification
 
-- **Read-only** (never trigger network calls): `report`, `transactions`, `status`, `allocation`, `cash`, `summary`, `concentration`, `performance`, `mwr`, `verify_prices`, `health`, `widget`
-- **Mutating** (auto-recalculate after write): `add`, `edit`, `delete`, `exchange`
-- **Maintenance / file-level**: `repair_prices`, `recalculate`, `sync`, `refresh`, `backup`, `init`, `cron`, `schedule`
+- **Read-only** (never trigger network calls): `status`, `summary`, `transactions`, `report`, `cash`, `cash_drag`, `allocation`, `rebalance`, `concentration`, `diversification`, `decomposition`, `currency_exposure`, `performance`, `mwr`, `income`, `realized-gains`, `widget`, `verify_prices`, `health`, `asset_analysis`, `asset-metadata`, `projection`, `withdrawal`
+- **Mutating** (auto-recalculate after write): `add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`, `split`
+- **Maintenance / file-level**: `repair_prices`, `recalculate`, `sync`, `refresh`, `backup`, `init`, `cron`, `schedule`, `dashboard`, `cloudflare`
 
 ## Common traps
 

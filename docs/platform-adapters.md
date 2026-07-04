@@ -18,7 +18,7 @@
 Every adapter and utility in this document respects these invariants:
 
 1. **PostgreSQL is the financial source of truth.** PostgreSQL and `portfolio_db/sql/*` own financial data and calculations. TypeScript/Bun adapters only route, validate inputs, orchestrate commands, and emit JSON envelopes. No adapter duplicates or recomputes financial calculations. All metrics (TWR, CAGR, Sharpe, allocation %, cash balances, etc.) are computed by PostgreSQL functions and surfaced through the shared service layer.
-2. **Adapters never duplicate calculations.** The shared service/use-case layer (defined in `CLAUDE.md` → "Architecture layers") owns all business logic. Adapters format and route only.
+2. **Adapters never duplicate calculations.** The shared service/use-case layer (defined in `AGENTS.md` → "Architecture layers") owns all business logic. Adapters format and route only.
 3. **Read paths use cached prices only.** No adapter triggers a Yahoo Finance call during a read command. Price fetching belongs exclusively to `repair_prices` and `sync` (explicit maintenance commands). The stale-price max-age (`STALE_MAX_AGE_DAYS = 5`) is enforced before every `recalculate` (see `docs/crontab-schedule.md` and issue #84).
 4. **All adapters share one JSON envelope.** Every response follows `{"ok": true/false, "command": "...", "data": ..., "meta": {"generated_at": "...", "count": N}}` as defined in `docs/api-response-standardization-plan.md`. The TypeScript implementation lives in `portfolio-ts/src/response.ts`.
 5. **No hidden network on read paths.** `verify_prices` is diagnostic (reads DB only). `health` is diagnostic (reads DB only). Read commands (`status`, `cash`, `allocation`, `summary`, `performance`, `mwr`, `transactions`, `report`, `widget`) never call external price providers.
@@ -60,7 +60,6 @@ All commands are pure JSON. No plain text, no tables, no markdown output.
 | `edit` | Yes | No |
 | `delete` | Yes (preview) | Yes |
 | `exchange` | No | No |
-| `migrate` | No | No (destructive) |
 
 #### Maintenance / File-level
 
@@ -101,7 +100,7 @@ Errors:
 
 ### Anchoring
 
-- Architecture layers: See `CLAUDE.md` → "Architecture layers" — CLI is the adapter layer, calls shared service layer, never owns business logic.
+- Architecture layers: See `AGENTS.md` → "Architecture layers" — CLI is the adapter layer, calls shared service layer, never owns business logic.
 - JSON contract: See `docs/api-response-standardization-plan.md` for per-command payload shapes.
 - Date format: `YYYY-MM-DD` (ISO 8601) primary, legacy `DD-MM-YYYY` accepted with deprecation warning.
 
@@ -197,7 +196,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 
 ### Scope
 
-**Full read and write (28 инструментов).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write-операции доступны как MCP write tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
+**Full read and write (30 инструментов).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write-операции доступны как MCP write tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
 
 ### Read Tools (23)
 
@@ -229,7 +228,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 | `withdrawal` | `withdrawal` | — | `as_of`, `annual_withdrawal`, `withdrawal_rate`, `time_horizon_years`, `expected_return`, `inflation_rate` | — |
 | `asset_analysis` | `asset_analysis` | `ticker` или `asset` | `period`, `lookback_days`, `benchmark`, `as_of`, `risk_free_rate` | — |
 
-### Write Tools (5)
+### Write Tools (7)
 
 | Tool name | CLI equivalent | Required args | Optional args |
 |---|---|---|---|
@@ -237,6 +236,8 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 | `edit_transaction` | `edit` | `id` | `date`, `asset`, `action`, `quantity`, `price`, `currency`, `fees`, `feeCurrency`, `exchange`, `dataSource`, `account`, `dry_run` |
 | `delete_transaction` | `delete` | `id` | `dry_run`, `confirm` |
 | `exchange_currency` | `exchange` | `date`, `fromAsset`, `toAsset`, `quantity`, `rate` | — |
+| `wrap` | `wrap` | `date`, `fromAsset`, `toAsset`, `fromQuantity`, `toQuantity` | — |
+| `unwrap` | `unwrap` | `date`, `fromAsset`, `toAsset`, `fromQuantity`, `toQuantity` | — |
 | `split` | `split` | `date`, `asset`, `ratio`, `confirm` | — |
 
 ### Arg Aliases
@@ -262,7 +263,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 
 ### Rules
 
-- Единый `WriteHandlers` интерфейс с HTTP API — идентичное поведение add/edit/delete/exchange/split.
+- Единый `WriteHandlers` интерфейс с HTTP API — идентичное поведение add/edit/delete/exchange/wrap/unwrap/split.
 - Dry-run на `edit_transaction` и `delete_transaction`.
 - Delete требует `confirm: true` (кроме dry-run).
 - Split требует `confirm: true`.
@@ -678,7 +679,7 @@ Per issue #98, the suggested implementation order. Completed items are marked.
 
 | Document | Relation |
 |---|---|
-| `CLAUDE.md` | Architecture layers (persistence → service → adapters), command classification, financial correctness rules |
+| `AGENTS.md` | Architecture layers (persistence → service → adapters), command classification, financial correctness rules |
 | `docs/api-response-standardization-plan.md` | JSON envelope spec, per-command payload shapes, pagination |
 | `docs/widget-contract.md` | Existing widget JSON contract (issue #51, merged) |
 | `docs/crontab-schedule.md` | Existing cron schedule, log files, install instructions |

@@ -36,7 +36,7 @@ See [CLI Reference](cli-reference.md) for the full freshness meta field table.
 ## Manual Trigger
 
 ```bash
-uv run portfolio recalculate
-uv run portfolio recalculate --force
-uv run portfolio recalculate --dry-run
+portfolio recalculate
+portfolio recalculate --force
+portfolio recalculate --dry-run
 ```

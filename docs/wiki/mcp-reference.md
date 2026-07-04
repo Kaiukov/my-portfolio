@@ -21,7 +21,7 @@ Stdio-транспорт (`bun run mcp`) используется **только
 | File | Exports | Purpose |
 |---|---|---|
 | `read.ts` | `mcpRead(toolName, args)` | Read tools (23 tools) |
-| `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (5 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
+| `adapter.ts` | `mcpWrite(toolName, args, ctx)` | Write tools (7 tools) + arg helpers (`strField`, `floatField`, `intField`, `boolFlag`) |
 | `server.ts` | `createPortfolioMcpServer()` / `runPortfolioMcpServer()` | MCP server factory + stdio transport (для tunnel-client) |
 | `index.ts` | Re-exports `mcpRead`, `mcpWrite`, `McpWriteContext` | Package entry point |
 
@@ -40,8 +40,8 @@ Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/ada
 ## Tool Counts
 
 - **23 read tools** — full parity with CLI and REST API
-- **5 write tools** — full parity with CLI and REST API
-- **28 total tools** exposed via `tools/list`
+- **7 write tools** — full parity with CLI and REST API
+- **30 total tools** exposed via `tools/list`
 
 ## Transport
 
@@ -50,7 +50,7 @@ Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/ada
 | **Streamable HTTP** (канонический) | `http://<host>:8787/mcp` | Все внешние сервисы, AI-агенты, dashboard |
 | Stdio (внутренний) | `bun run mcp` | Только как дочерний процесс для OpenAI tunnel-client |
 
-Streamable HTTP endpoint обслуживается тем же `Bun.serve`, что и REST API — отдельный процесс не нужен. Все 28 инструментов доступны через оба транспорта с идентичным поведением.
+Streamable HTTP endpoint обслуживается тем же `Bun.serve`, что и REST API — отдельный процесс не нужен. Все 30 инструментов доступны через оба транспорта с идентичным поведением.
 
 ## Read Tools
 
@@ -94,6 +94,8 @@ Dispatched via `mcpWrite(toolName, args, ctx)`. Each tool mirrors its CLI/API co
 | `edit_transaction` | `edit` | `id` / `transactionId` / `transaction_id` / `transId` | `date`, `asset`, `action`, `quantity`, `price`, `currency`, `fees`, `feeCurrency` / `fee_currency`, `exchange`, `dataSource` / `data_source`, `account`, `dry_run` / `dryRun` / `dry-run` |
 | `delete_transaction` | `delete` | `id` / `transactionId` / `transaction_id` / `transId` | `dry_run` / `dryRun` / `dry-run`, `confirm` |
 | `exchange_currency` | `exchange` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `quantity`, `rate` | — |
+| `wrap` | `wrap` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `fromQuantity` / `from_quantity`, `toQuantity` / `to_quantity` | — |
+| `unwrap` | `unwrap` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `fromQuantity` / `from_quantity`, `toQuantity` / `to_quantity` | — |
 | `split` | `split` | `date`, `asset`, `ratio` | `confirm` |
 
 ### Arg Aliases
@@ -104,6 +106,7 @@ MCP tools accept multiple key aliases per arg:
 - `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
 - `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
 - `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
+- `wrap` / `unwrap`: `fromAsset`/`from_asset`/`from`; `toAsset`/`to_asset`/`to`; `fromQuantity`/`from_quantity`; `toQuantity`/`to_quantity`
 
 ## OpenAI Secure MCP Tunnel
 
@@ -134,7 +137,7 @@ Dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) exposes a separa
 | 8 | `widget` | KV snapshot |
 | 9 | `projection` | KV snapshot |
 
-Dashboard MCP — stateless, read-only. Write и maintenance операции (`add`, `edit`, `delete`, `exchange`, `split`, `recalculate`, `repair_prices`, `sync`) доступны **только** через основной portfolio MCP server (28 инструментов) по каноническому Streamable HTTP.
+Dashboard MCP — stateless, read-only. Write и maintenance операции (`add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`, `split`, `recalculate`, `repair_prices`, `sync`) доступны **только** через основной portfolio MCP server (30 инструментов) по каноническому Streamable HTTP.
 
 ## Error Handling
 

@@ -114,4 +114,4 @@ The echoed `data.request` also includes resolved `annualization_periods` so annu
 
 - **MCP (канонический):** Streamable HTTP `http://<host>:8787/mcp` — [Connection Spec](mcp-connect-spec.md)
 - **HTTP API:** RESTful endpoints на том же порту — [Platform Adapters](../platform-adapters.md)
-- **Инструменты:** 23 read + 5 write — [MCP Reference](mcp-reference.md)
+- **Инструменты:** 23 read + 7 write — [MCP Reference](mcp-reference.md)

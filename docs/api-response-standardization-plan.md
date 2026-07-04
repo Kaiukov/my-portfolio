@@ -19,7 +19,7 @@ The portfolio CLI currently outputs responses in inconsistent formats:
 - JSON output is opt-in; plain text / table is the default for most commands
 - JSON shape varies per command — no shared envelope, no consistent error structure
 - Assessments are mixed into numeric values as tuples `[float, string]`
-- Some commands produce no machine-readable output at all (`add`, `delete`, `exchange`, `migrate`, `recalculate`, `verify_prices`)
+- Some commands produce no machine-readable output at all (`add`, `delete`, `exchange`, `recalculate`, `verify_prices`)
 
 **Goals:**
 1. Every CLI command outputs **pure JSON always** — zero plain text, zero markdown, zero table output
@@ -214,15 +214,6 @@ portfolio report --start-date 2024-11-01 --end-date 2024-11-30
 ---
 
 ## 6. Per-Command Payload Specification
-
-### `migrate`
-```json
-{
-  "rows_imported": 142,
-  "source": "path/to/file.csv",
-  "db": "path/to/portfolio.db"
-}
-```
 
 ### `asset_analysis`
 
@@ -576,9 +567,9 @@ If FX data is unavailable for the snapshot date, the command should return an er
 | `add` | plain text confirmation | JSON always |
 | `delete` | plain text confirmation | JSON always |
 | `exchange` | plain text confirmation | JSON always |
-| `migrate` | plain text summary | JSON always |
 | `recalculate` | plain text summary | JSON always |
 | `verify_prices` | plain text table | JSON always |
+| `migrate` | **dropped** | Legacy CSV import — intentionally removed in TypeScript/Bun runtime |
 
 **Flags to remove:** `--format`, `--table`, `--md`, `--export` (CSV export is a separate concern, out of scope here).
 **Flags to add on `transactions` and `report`:** `--limit`, `--offset`, `--start-date`, `--end-date`.
@@ -600,19 +591,18 @@ If FX data is unavailable for the snapshot date, the command should return an er
 ### Phase 3 — Command-by-command implementation
 Wrap each command output with `success()` / `error()`:
 
-1. `migrate` (archived)
-2. `add`
-3. `delete`
-4. `exchange`
-5. `recalculate`
-6. `verify_prices`
-7. `transactions` — add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
-8. `report` — add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
-9. `status`
-10. `performance`
-11. `summary`
-12. `allocation`
-13. `cash`
+1. `add`
+2. `delete`
+3. `exchange`
+4. `recalculate`
+5. `verify_prices`
+6. `transactions` — add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
+7. `report` — add `--limit` (50), `--offset` (0), `--start-date`, `--end-date`; emit `meta.pagination`
+8. `status`
+9. `performance`
+10. `summary`
+11. `allocation`
+12. `cash`
 
 ### Phase 3a — Service layer pagination support
 - Update transaction listing in the service layer

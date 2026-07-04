@@ -10,7 +10,6 @@
 | `portfolio-dashboard/` | Single-file dashboard served by a Cloudflare Worker. |
 | `docs/` | Documentation — wiki, transaction spec, platform adapters, API response plan, migration notes, [SmartDCA strategy](smartdca-strategy.md), and this layout doc. |
 | `AGENTS.md` | Top-level agent instructions: architecture, invariants, command classification. |
-| `CLAUDE.md` | Agent instructions loaded by Claude Code. |
 | `scripts/` | Helper scripts for deployment, monitoring, CI. |
 | `bin/` | Standalone executables and shell wrappers. |
 | `examples/` | Sample configs, usage patterns, reference files. |
