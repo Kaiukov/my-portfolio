@@ -38,7 +38,7 @@ export async function getMwr(asOfDate?: string): Promise<MwrData> {
   }
 
   return {
-    mwr_pct: roundTo(mwrRaw * 100),
+    mwr_pct: roundTo(mwrRaw * 100, 4),
     as_of_date: actualDate,
     portfolio_value: summary.portfolio_value_usd,
     note: "Money-Weighted Return (XIRR) — accounts for deposit/withdrawal timing",
