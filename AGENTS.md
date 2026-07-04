@@ -94,13 +94,14 @@ Errors: `{"ok": false, "command": "...", "error": {"code": "X", "message": "..."
 ## Command classification
 
 - **Read-only** (never trigger network calls): `report`, `transactions`, `status`, `allocation`, `cash`, `summary`, `concentration`, `performance`, `mwr`, `verify_prices`, `health`, `widget`
-- **Mutating** (auto-recalculate after write): `add`, `edit`, `delete`, `exchange`
+- **Mutating** (auto-recalculate after write): `add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`
 - **Maintenance / file-level**: `repair_prices`, `recalculate`, `sync`, `refresh`, `backup`, `init`, `cron`, `schedule`
 
 ## Common traps
 
 - `add` requires `--exchange` (non-optional)
 - `delete` requires `--confirm` (unless `--dry-run`)
+- `wrap` / `unwrap` require sufficient source holdings on the as-of date
 - `edit`, `repair_prices`, `recalculate` support `--dry-run`
 - `process.exit(1)` makes code after it unreachable in `src/cli.ts`
 - The historical `migrate` command (legacy CSV import) is intentionally dropped in the Bun runtime

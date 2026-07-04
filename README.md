@@ -7,7 +7,7 @@ A TypeScript/Bun CLI for portfolio tracking, backed by PostgreSQL.
 - **Pure JSON Output**: All commands emit JSON envelopes, making the CLI ideal for scripting, automation, and downstream integrations.
 - **PostgreSQL Powered**: All financial data — transactions, daily returns, price cache, and FIFO cost basis — lives in PostgreSQL. The CLI never recomputes what the database already owns.
 - **Deterministic Valuation**: Time-Weighted Return (TWR) is the primary portfolio return metric. Read commands consume cached prices and FX only; they never trigger network calls.
-- **Comprehensive Tracking**: Supports standard trade actions (`BUY`, `SELL`), cash flows (`DEPOSIT`, `WITHDRAW`, `TRANSFER`), income (`DIVIDEND`, `INTEREST`), expenses (`FEE`, `TAX`), and currency exchanges.
+- **Comprehensive Tracking**: Supports standard trade actions (`BUY`, `SELL`), cash flows (`DEPOSIT`, `WITHDRAW`, `TRANSFER`), income (`DIVIDEND`, `INTEREST`, `STAKING_REWARD`), expenses (`FEE`, `TAX`), currency exchanges, and crypto wrap/unwrap conversions.
 - **Multi-Currency**: Base currency is USD, with FX-converted reporting and FIFO cost basis for international assets.
 
 ## Prerequisites
@@ -110,7 +110,7 @@ docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli
 docker compose -f portfolio-ts/docker-compose.yml exec portfolio bun run src/cli.ts cloudflare publish
 ```
 
-Read-only commands such as `summary`, `status`, `cash`, `allocation`, `performance`, `mwr`, `verify_prices`, and `health` are safe to run this way. Mutating commands such as `add`, `edit`, `delete`, `exchange`, `recalculate`, and `repair_prices` write to the live database.
+Read-only commands such as `summary`, `status`, `cash`, `allocation`, `performance`, `mwr`, `verify_prices`, and `health` are safe to run this way. Write commands such as `add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`, and `repair_prices` write to the live database. `recalculate` is a maintenance command that rebuilds derived daily returns from cached prices.
 
 The deployed Dockerized service already runs `refresh`, `cloudflare publish`, and `backup` on its own schedule, so you usually do not need to trigger those manually. For read-only checks, the service also exposes a local HTTP endpoint on `:8787`, so `curl localhost:8787/summary` is an alternative to `docker compose exec`.
 
@@ -191,7 +191,7 @@ portfolio report --limit 20 --offset 0
 
 ## Maintenance & price management
 
-Mutating commands auto-recalculate. Maintenance commands give you explicit control.
+Write commands auto-recalculate. `recalculate` and `repair_prices` are maintenance commands that give you explicit control over derived data and price repair.
 
 ```bash
 # Price coverage diagnostics (read-only, no network)
@@ -214,7 +214,7 @@ portfolio refresh
 portfolio refresh --dry-run
 ```
 
-Stale-price enforcement: `recalculate` and `sync` refuse to run when required tickers lack prices within `STALE_MAX_AGE_DAYS` (default 5) unless `--force` is passed. `sync` and `refresh` run the daily maintenance check first.
+`status`, `allocation`, `summary`, and `concentration` hide dust rows by default and accept `--include-dust` to show the raw set. Stale-price enforcement: `recalculate` and `sync` refuse to run when required tickers lack prices within `STALE_MAX_AGE_DAYS` (default 5) unless `--force` is passed. `sync` and `refresh` run the daily maintenance check first.
 
 ## Scheduling (OS crontab)
 
