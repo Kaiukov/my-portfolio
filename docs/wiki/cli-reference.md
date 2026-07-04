@@ -24,13 +24,15 @@ When `needs_recalc` is true, snapshot commands and `performance` may disagree fo
 
 Dates: ISO `YYYY-MM-DD` is the primary format on all commands. Legacy `DD-MM-YYYY` is still accepted on write commands (`--date`, `--from-date`) with a deprecation warning.
 
+Status, allocation, summary, and concentration hide dust rows by default. Pass `--include-dust` to return the full raw set instead of the filtered view.
+
 ## Read-Only Commands
 
 Never trigger network calls: `report`, `transactions`, `status`, `allocation`, `cash`, `summary`, `performance`, `mwr`, `verify_prices`, `health`.
 
 ## Mutating Commands
 
-Auto-recalculate after write: `add`, `edit`, `delete`, `exchange`. Maintenance commands `repair_prices` and `recalculate` also mutate state but belong to the maintenance group.
+Auto-recalculate after write: `add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`. Maintenance commands `repair_prices` and `recalculate` also mutate state but belong to the maintenance group, with `recalculate` classified as maintenance because it rebuilds derived daily returns from cached prices.
 
 ## File-Level Commands
 
@@ -67,7 +69,7 @@ The echoed `data.request` also includes resolved `annualization_periods` so annu
 ```
 --date TEXT         Transaction date in YYYY-MM-DD (required; legacy DD-MM-YYYY accepted, deprecated)
 --asset TEXT        Asset or cash ticker (required)
---action TEXT       buy/sell/deposit/withdraw/dividend/interest/fee/tax/transfer (required)
+--action TEXT       buy/sell/deposit/withdraw/dividend/interest/fee/tax/transfer/staking_reward (required)
 --quantity FLOAT    Positive quantity (required)
 --price FLOAT       Positive price (required for BUY/SELL)
 --currency TEXT     Currency code (default: USD)
@@ -76,6 +78,8 @@ The echoed `data.request` also includes resolved `annualization_periods` so annu
 --exchange TEXT     Broker or exchange label (required)
 --account TEXT      Account label (required for TRANSFER)
 ```
+
+`STAKING_REWARD` is a zero-price, zero-fee, non-cash crypto reward action. It requires a non-cash crypto asset and is accepted through `add` and `edit`.
 
 ### edit
 
@@ -100,6 +104,18 @@ The echoed `data.request` also includes resolved `annualization_periods` so annu
 --quantity FLOAT    Amount to exchange (required)
 --date TEXT         Date in YYYY-MM-DD (required; legacy DD-MM-YYYY accepted, deprecated)
 ```
+
+### wrap / unwrap
+
+```
+--from TEXT            Source crypto asset (required)
+--to TEXT              Target crypto asset (required)
+--from-quantity FLOAT  Quantity of the source asset (required)
+--to-quantity FLOAT    Quantity of the target asset (required)
+--date TEXT            Date in YYYY-MM-DD (required; legacy DD-MM-YYYY accepted, deprecated)
+```
+
+`wrap` and `unwrap` record grouped crypto conversions without a cash leg. They transfer basis between the paired rows and auto-recalculate like other write commands.
 
 ### repair_prices / recalculate
 

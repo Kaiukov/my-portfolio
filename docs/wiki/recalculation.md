@@ -1,6 +1,6 @@
 # Recalculation
 
-After any write operation (add, edit, delete, exchange), the system recalculates daily returns.
+After any write operation that changes holdings or basis (`add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`), the system recalculates daily returns.
 
 ## Flow
 
@@ -20,7 +20,7 @@ After any write operation (add, edit, delete, exchange), the system recalculates
 
 ## Mutation Safety
 
-If recalculation fails during add/edit/delete/exchange, state is restored to before the mutation.
+If recalculation fails during add/edit/delete/exchange/wrap/unwrap, state is restored to before the mutation.
 
 ## needs_recalc / recalc_warning
 

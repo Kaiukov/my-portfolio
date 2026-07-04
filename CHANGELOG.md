@@ -6,7 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-04
+
+### Added
+- **#334** — `STAKING_REWARD` transactions for non-cash crypto assets. Rewards now
+  increase holdings without inventing cash movement or normal purchase cost basis,
+  and the behavior is aligned across CLI, REST API, and MCP.
+- **#335** — `wrap` / `unwrap` crypto conversions for basis-preserving asset moves
+  such as `ETH-USD -> WBETH-USD`. The write path records the two-leg transaction
+  group, recalculates from the event date, and preserves cost-basis continuity.
+
+### Changed
+- **#336** — read views now hide dust positions below `1%` allocation by default
+  across allocation, summary, status, concentration, dashboard, and related adapter
+  surfaces while preserving an explicit escape hatch for full-detail views.
+
 ### Fixed
+- **#334/#335 integration follow-up** — wrap/unwrap now validates source holdings
+  before writing, preventing negative source balances on invalid wraps.
+- **#336 integration follow-up** — concentration metrics now derive from the same
+  visible holdings set as allocation/status, so HHI and totals stay aligned when
+  dust filtering hides tiny positions.
+- **CI isolation follow-up** — GitHub CI now uses the canonical isolated Bun test
+  script, matching the verified local/dev execution path and eliminating cross-file
+  mock leakage in parity-heavy suites.
+- **Live-DB parity follow-up** — diversification parity checks compare floating-point
+  live-query metrics with tolerance instead of exact equality, removing a flaky
+  `1e-15` class failure without weakening stable-field parity.
 - **#326** — corrected the prod deploy runbook safety notes so production recreates use plain `docker compose up` from `/opt/portfolio`, preserving `docker-compose.override.yml` auto-merge and the real prod DB password.
 
 ## [0.9.0] - 2026-06-16
@@ -60,5 +86,6 @@ and MCP-hardening bug-fix batch validated against the dev PostgreSQL instance.
   `Date` assertions, and gated fixture-dependent projection/withdrawal DB tests
   behind `PORTFOLIO_TEST_FIXTURE_DB` for a deterministic suite.
 
-[Unreleased]: https://github.com/Kaiukov/my-portfolio/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Kaiukov/my-portfolio/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Kaiukov/my-portfolio/compare/v0.8.0...v0.10.0
 [0.8.0]: https://github.com/Kaiukov/my-portfolio/releases/tag/v0.8.0
