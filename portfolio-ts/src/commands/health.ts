@@ -1,15 +1,17 @@
 import { querySingle, query } from "../db.js";
 
 export interface HealthResult {
-  status: "ok" | "degraded";
+  status: "ok" | "provisional" | "degraded";
   db_reachable: boolean;
   needs_recalc: boolean;
   last_successful_price_refresh: string | null;
   last_successful_recalc: string | null;
   price_coverage_issues: number;
   coverage_issue_tickers: string[];
+  current_day_missing_tickers: string[];
   stale_price_tickers: Array<{ ticker: string; last_price_date: string; age_days: number }>;
   stale_tickers: string[];
+  provisional_warning: string | null;
 }
 
 export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
@@ -28,8 +30,8 @@ export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
 
   // Coverage issues: tickers with missing required price checkpoints
   const today = new Date().toISOString().split("T")[0];
-  const checkpointRows = await query<{ ticker: string }>(
-    `SELECT DISTINCT c.ticker
+  const checkpointRows = await query<{ ticker: string; checkpoint_date: string }>(
+    `SELECT c.ticker, c.checkpoint_date::text AS checkpoint_date
      FROM get_required_price_checkpoints_sql($1::date) c
      WHERE NOT EXISTS (
        SELECT 1 FROM prices p
@@ -37,7 +39,19 @@ export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
      )`,
     [today],
   );
+
+  // Split coverage issues: current-day missing vs historical missing
+  const currentDayMissing = new Set<string>();
+  const historicalMissing = new Set<string>();
+  for (const row of checkpointRows) {
+    if (row.checkpoint_date === today) {
+      currentDayMissing.add(row.ticker);
+    } else {
+      historicalMissing.add(row.ticker);
+    }
+  }
   const coverageIssueTickers = [...new Set(checkpointRows.map((r) => r.ticker))].sort();
+  const currentDayMissingTickers = [...currentDayMissing].sort();
 
   // Stale-price detection via SQL (per-ticker staleness, no masking)
   let stalePriceTickers: Array<{ ticker: string; last_price_date: string; age_days: number }> = [];
@@ -53,24 +67,42 @@ export async function getHealth(maxAgeDays?: number): Promise<HealthResult> {
     }));
   }
 
-  // stale_tickers is the union of both sets (maintained for backward compat)
+  // stale_tickers is the union of historical missing and genuinely stale prices
   const allStaleTickers = new Set([
-    ...coverageIssueTickers,
+    ...historicalMissing,
     ...stalePriceTickers.map((s) => s.ticker),
   ]);
   const staleTickers = [...allStaleTickers].sort();
 
-  const ok = !needsRecalc && staleTickers.length === 0;
+  // Determine status: degraded only for real issues, provisional for today-only gaps
+  const hasHistoricalIssues = historicalMissing.size > 0;
+  const hasStaleTickers = stalePriceTickers.length > 0;
+  const hasCurrentDayOnlyMissing = currentDayMissing.size > 0 && historicalMissing.size === 0;
+
+  let status: HealthResult["status"];
+  let provisionalWarning: string | null = null;
+
+  if (needsRecalc || hasHistoricalIssues || hasStaleTickers) {
+    status = "degraded";
+  } else if (hasCurrentDayOnlyMissing) {
+    status = "provisional";
+    provisionalWarning =
+      "Some current-day quotes are not available yet. Portfolio value is calculated using the latest available prices.";
+  } else {
+    status = "ok";
+  }
 
   return {
-    status: ok ? "ok" : "degraded",
+    status,
     db_reachable: true,
     needs_recalc: needsRecalc,
     last_successful_price_refresh: state["last_successful_price_refresh"] ?? null,
     last_successful_recalc: state["last_successful_recalc"] ?? null,
     price_coverage_issues: coverageIssueTickers.length,
     coverage_issue_tickers: coverageIssueTickers,
+    current_day_missing_tickers: currentDayMissingTickers,
     stale_price_tickers: stalePriceTickers,
     stale_tickers: staleTickers,
+    provisional_warning: provisionalWarning,
   };
 }

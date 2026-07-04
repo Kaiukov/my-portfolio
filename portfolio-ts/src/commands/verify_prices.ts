@@ -6,6 +6,8 @@ export interface VerifyPricesResult {
   date_range: { start: string | null; end: string | null };
   required_tickers: string[];
   coverage_issues: Array<{ ticker: string; issues: string[] }>;
+  historical_coverage_issues: Array<{ ticker: string; issues: string[] }>;
+  current_day_missing: Array<{ ticker: string; issues: string[] }>;
   stale_tickers: Array<{ ticker: string; last_price_date: string; age_days: number }>;
   needs_recalc: boolean;
 }
@@ -48,6 +50,9 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
 
   // Check which required checkpoint dates are missing from prices
   const coverageIssues: Array<{ ticker: string; issues: string[] }> = [];
+  const historicalCoverageIssues: Array<{ ticker: string; issues: string[] }> = [];
+  const currentDayMissing: Array<{ ticker: string; issues: string[] }> = [];
+
   for (const [ticker, dates] of checkpointMap) {
     if (dates.length === 0) continue;
     const dateList = dates.map((d) => `('${d}'::date)`).join(", ");
@@ -59,10 +64,29 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
       [ticker],
     );
     if (missingRows.length > 0) {
+      const missingDates = missingRows.map((r) => r.d);
+      const historicalMissing = missingDates.filter((d) => d !== today);
+      const currentDayMissingDates = missingDates.filter((d) => d === today);
+
+      // Full coverage issues (backward compat — includes all missing)
       coverageIssues.push({
         ticker,
-        issues: [`missing_dates: ${missingRows.map((r) => r.d).join(", ")}`],
+        issues: [`missing_dates: ${missingDates.join(", ")}`],
       });
+
+      // Split for granular reporting
+      if (historicalMissing.length > 0) {
+        historicalCoverageIssues.push({
+          ticker,
+          issues: [`missing_dates: ${historicalMissing.join(", ")}`],
+        });
+      }
+      if (currentDayMissingDates.length > 0) {
+        currentDayMissing.push({
+          ticker,
+          issues: [`missing_dates: ${currentDayMissingDates.join(", ")}`],
+        });
+      }
     }
   }
 
@@ -93,6 +117,8 @@ export async function verifyPrices(maxAgeDays?: number): Promise<VerifyPricesRes
     },
     required_tickers: requiredTickers,
     coverage_issues: coverageIssues,
+    historical_coverage_issues: historicalCoverageIssues,
+    current_day_missing: currentDayMissing,
     stale_tickers: staleTickers,
     needs_recalc: needsRecalcRow?.needs_recalc ?? false,
   };

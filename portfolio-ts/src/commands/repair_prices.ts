@@ -217,11 +217,15 @@ export async function repairPrices(
 
   const coverage = await verifyPrices(params.maxAgeDays);
   const missing = coverage.coverage_issues;
+  const historicalMissing = coverage.historical_coverage_issues;
   const stale = params.maxAgeDays !== undefined && params.maxAgeDays > 0
     ? coverage.stale_tickers
     : [];
-  const status: "ok" | "degraded" =
-    missing.length > 0 || stale.length > 0 ? "degraded" : "ok";
+  // Only historical missing prices or stale tickers warrant 'degraded'.
+  // Current-day-only missing prices are not degraded — they are expected
+  // before market close / delayed data providers catch up.
+  const status: RepairPricesResult["status"] =
+    historicalMissing.length > 0 || stale.length > 0 ? "degraded" : "ok";
 
   return {
     tickers: targetTickers,

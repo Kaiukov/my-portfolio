@@ -133,6 +133,11 @@ describe("verify_prices coverage output", () => {
         { ticker: "EURUSD=X", issues: ["missing_dates: 2026-02-05"] },
         { ticker: "QQQ", issues: ["missing_dates: 2026-06-17"] },
       ],
+      historical_coverage_issues: [
+        { ticker: "EURUSD=X", issues: ["missing_dates: 2026-02-05"] },
+        { ticker: "QQQ", issues: ["missing_dates: 2026-06-17"] },
+      ],
+      current_day_missing: [],
       stale_tickers: [],
       needs_recalc: false,
     });
