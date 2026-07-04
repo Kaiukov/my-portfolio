@@ -106,7 +106,8 @@ MCP tools accept multiple key aliases per arg:
 - `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
 - `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
 - `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
-- `wrap` and `unwrap`: same `from`/`to` aliases as `exchange_currency`, plus `fromQuantity`/`from_quantity` and `toQuantity`/`to_quantity`
+<<<<<<< HEAD
+- `wrap` / `unwrap`: `fromAsset`/`from_asset`/`from`; `toAsset`/`to_asset`/`to`; `fromQuantity`/`from_quantity`; `toQuantity`/`to_quantity`
 
 ## OpenAI Secure MCP Tunnel
 

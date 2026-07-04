@@ -13,10 +13,17 @@
 | INTEREST | INCOME | Cash | Forbidden | > 0 |
 | FEE | EXPENSE | Cash | Forbidden | > 0 |
 | TAX | EXPENSE | Cash | Forbidden | > 0 |
+| SPLIT | CORPORATE_ACTION | Non-cash | Forbidden | ratio |
+| STAKING_REWARD | CRYPTO | Non-cash | Forbidden | > 0 |
+| WRAP | CRYPTO | Non-cash | Forbidden | > 0 |
+| UNWRAP | CRYPTO | Non-cash | Forbidden | > 0 |
 | EXCHANGE_FROM | SYSTEM | Cash | Forbidden | < 0 |
 | EXCHANGE_TO | SYSTEM | Cash | Forbidden | > 0 |
 
 EXCHANGE_FROM/TO are created automatically by the `exchange` command.
+WRAP/UNWRAP are created automatically by the `wrap`/`unwrap` commands.
+SPLIT is created by the `split` command.
+STAKING_REWARD is a zero-price, zero-basis non-cash crypto acquisition.
 
 ## Validation
 
@@ -25,6 +32,9 @@ EXCHANGE_FROM/TO are created automatically by the `exchange` command.
 - TRANSFER: cash asset, no price, quantity > 0, account required
 - DIVIDEND/INTEREST: cash asset, no price, quantity > 0
 - FEE/TAX: cash asset, no price, quantity > 0
+- SPLIT: non-cash asset, no price, quantity = ratio, --confirm required
+- STAKING_REWARD: non-cash asset, no price, quantity > 0
+- WRAP/UNWRAP: crypto assets, no price, from-quantity and to-quantity required
 - BUY/SELL: a 3-letter symbol is rejected only when it matches `ALLOWED_CURRENCIES` (`USD`, `EUR`, `GBP`, `UAH`, `JPY`, `CHF`, `CAD`, `AUD`, `HKD`, `SGD`) — use FX pair format (`EURUSD=X`) instead. Any other 3-letter ticker (IWM, SPY, QQQ, etc.) is accepted as a normal asset symbol.
 
 ## Date Format Trap

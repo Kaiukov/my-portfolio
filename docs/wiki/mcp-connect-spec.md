@@ -134,7 +134,7 @@ curl -X POST http://localhost:8787/mcp \
 }
 ```
 
-## Полный список инструментов (28 tools)
+## Полный список инструментов (30 tools)
 
 ### Read tools (23) — GET-семантика, без побочных эффектов
 
@@ -164,7 +164,7 @@ curl -X POST http://localhost:8787/mcp \
 | 22 | `withdrawal` | — | `as_of`, `annual_withdrawal`, `withdrawal_rate`, `time_horizon_years`, `expected_return`, `inflation_rate` |
 | 23 | `asset_analysis` | `ticker` или `asset` | `period`, `lookback_days`, `benchmark`, `as_of`, `risk_free_rate` |
 
-### Write tools (5) — мутируют данные
+### Write tools (7) — мутируют данные
 
 | # | Tool | Обязательные | Опциональные |
 |---|------|-------------|-------------|
@@ -172,7 +172,9 @@ curl -X POST http://localhost:8787/mcp \
 | 25 | `edit_transaction` | `id` | `date`, `asset`, `action`, `quantity`, `price`, `currency`, `fees`, `feeCurrency`, `exchange`, `dataSource`, `account`, `dry_run` |
 | 26 | `delete_transaction` | `id` | `dry_run`, `confirm` |
 | 27 | `exchange_currency` | `date`, `fromAsset`, `toAsset`, `quantity`, `rate` | — |
-| 28 | `split` | `date`, `asset`, `ratio`, `confirm` | — |
+| 28 | `wrap` | `date`, `fromAsset`, `toAsset`, `fromQuantity`, `toQuantity` | — |
+| 29 | `unwrap` | `date`, `fromAsset`, `toAsset`, `fromQuantity`, `toQuantity` | — |
+| 30 | `split` | `date`, `asset`, `ratio`, `confirm` | — |
 
 ## Алиасы параметров
 
@@ -274,7 +276,7 @@ curl http://localhost:8787/ready
 curl -X POST http://localhost:8787/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-# → список всех 28 инструментов
+# → список всех 30 инструментов
 
 # MCP tools/call — вызов конкретного инструмента
 curl -X POST http://localhost:8787/mcp \
@@ -291,7 +293,7 @@ curl -X POST http://localhost:8787/mcp \
 | **URL** | `http://<host>:8787/mcp` |
 | **Протокол** | JSON-RPC 2.0 поверх HTTP |
 | **Транспорт** | POST для вызовов, GET для SSE, DELETE для закрытия сессии |
-| **Инструментов** | 28 (23 read + 5 write) |
+| **Инструментов** | 30 (23 read + 7 write) |
 | **Аутентификация** | Не требуется (доверенная сеть) |
 | **Формат ответа** | JSON-конверт `{ok, command, data, meta}` |
 | **Зависимости клиента** | Любой MCP-клиент с поддержкой Streamable HTTP |

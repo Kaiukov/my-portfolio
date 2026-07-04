@@ -3,7 +3,7 @@
 ## Currency Exchange
 
 ```bash
-uv run portfolio exchange --from USD --to EURUSD=X --quantity 1000 --date 15-03-2026
+portfolio exchange --from USD --to EURUSD=X --quantity 1000 --date 2026-03-15
 ```
 
 Creates two system transactions:
