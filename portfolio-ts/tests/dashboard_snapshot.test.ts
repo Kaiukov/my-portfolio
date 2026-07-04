@@ -156,7 +156,7 @@ describe("buildDashboardSnapshot", () => {
       getPriceFreshness: mockGetPriceFreshness,
     });
 
-    expect(snapshot.summary.holding_count).toBe(5);
+    expect(snapshot.summary.holding_count).toBe(4);
     expect(snapshot.summary.total_cash_usd).toBe(2500.75);
     expect(snapshot.summary.portfolio_value_usd).toBe(42500.12);
     expect(snapshot.summary.last_transaction_date).toBe("2026-06-01");

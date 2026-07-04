@@ -97,6 +97,9 @@ describe("handleRequest", () => {
       if (isFreshnessPriceQuery(sql)) {
         return Promise.resolve({ prices_as_of: freshness.prices_as_of });
       }
+      if (sql.includes("needs_recalc()")) {
+        return Promise.resolve({ needs_recalc: false });
+      }
       return Promise.resolve({
         holding_count: 5,
         total_cash_usd: 5000,
@@ -106,12 +109,16 @@ describe("handleRequest", () => {
         as_of_date: "2026-01-15",
       });
     });
-    mockQuery.mockImplementation((sql: string) => {
-      if (isFreshnessCoverageQuery(sql)) {
-        return Promise.resolve([]);
-      }
-      return Promise.resolve([]);
-    });
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { asset: "AAPL", asset_type: "stock", asset_kind: "equity", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+        { asset: "MSFT", asset_type: "stock", asset_kind: "equity", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+        { asset: "GOOGL", asset_type: "stock", asset_kind: "equity", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+        { asset: "BND", asset_type: "etf", asset_kind: "fixed_income", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+        { asset: "VXUS", asset_type: "etf", asset_kind: "equity", net_quantity: 0, value_usd: 5000, allocation_pct: 20 },
+      ]);
 
     const { handleRequest } = await import("../src/api/server.js");
     const req = new Request("http://localhost/summary?as_of=2026-01-15");
@@ -124,6 +131,7 @@ describe("handleRequest", () => {
     expect(body.command).toBe("summary");
     expect(body.data.holding_count).toBe(5);
     expect(body.data.portfolio_value_usd).toBe(25000);
+    expect(body.meta.dust_filter.hidden_count).toBe(0);
   });
 
   test("GET /status returns 200 with success envelope", async () => {
@@ -151,6 +159,8 @@ describe("handleRequest", () => {
     expect(body.command).toBe("status");
     expect(body.data.transactions).toBe(42);
     expect(body.data.portfolio_value).toBe(100000);
+    expect(body.meta.dust_filter.hidden_count).toBe(0);
+    expect(body.meta.dust_filter.threshold_pct).toBe(1);
   });
 
   test("GET /allocation returns 200 with success envelope", async () => {

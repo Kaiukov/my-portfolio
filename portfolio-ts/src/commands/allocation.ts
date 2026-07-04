@@ -1,6 +1,7 @@
 import { query, getAssetMetadata } from "../db.js";
 import type { AssetMetadataRow } from "../db.js";
 import { getAssetMetadataFallback } from "../asset_metadata_fallback.js";
+import { filterDustHoldings, type DustFilterMeta } from "../dust.js";
 
 export interface SectorWeight {
   sector: string;
@@ -24,6 +25,7 @@ export interface AllocationResult {
   as_of_date: string;
   portfolio_value: number;
   rows: AllocationRow[];
+  dust_filter?: DustFilterMeta;
 }
 
 function num(val: unknown): number {
@@ -70,15 +72,18 @@ function hasSectorMetadata(
   return Boolean(sector) || Boolean(sectorWeights && sectorWeights.length > 0);
 }
 
-export async function getAllocation(asOfDate?: string): Promise<AllocationResult> {
+export async function getAllocation(
+  asOfDate?: string,
+  includeDust = false,
+): Promise<AllocationResult> {
   const actualDate = asOfDate ?? new Date().toISOString().split("T")[0];
 
-  const rows = await query<Record<string, unknown>>(
+  const rawRows = await query<Record<string, unknown>>(
     "SELECT asset, asset_type, asset_kind, net_quantity, value_usd, allocation_pct FROM portfolio_allocation_sql($1)",
     [actualDate],
   );
 
-  const assetNames = [...new Set(rows.map((r) => str(r["asset"])).filter(Boolean))];
+  const assetNames = [...new Set(rawRows.map((r) => str(r["asset"])).filter(Boolean))];
 
   let metaMap = new Map<string, AssetMetadataRow>();
   if (assetNames.length > 0) {
@@ -94,7 +99,7 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
     }
   }
 
-  const allocRows: AllocationRow[] = rows.map((r) => {
+  const allocRows: AllocationRow[] = rawRows.map((r) => {
     const asset = str(r["asset"]);
     const meta = metaMap.get(asset);
     const parsedSectorWeights = parseSectorWeights(meta?.sector_weights);
@@ -112,6 +117,8 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
       sector_weights: parsedSectorWeights ?? fallback?.sector_weights,
     };
   });
+
+  const { rows: filteredRows, meta: dustFilter } = filterDustHoldings(allocRows, includeDust);
 
   // Fetch last prices and previous close for day-change calculation.
   // Prices are capped at actualDate so historical snapshots stay aligned.
@@ -180,5 +187,5 @@ export async function getAllocation(asOfDate?: string): Promise<AllocationResult
 
   const portfolio_value = allocRows.reduce((sum, r) => sum + r.value_usd, 0);
 
-  return { as_of_date: actualDate, portfolio_value, rows: allocRows };
+  return { as_of_date: actualDate, portfolio_value, rows: filteredRows, dust_filter: dustFilter };
 }

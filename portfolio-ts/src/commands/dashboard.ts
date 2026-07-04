@@ -97,7 +97,7 @@ export async function buildDashboardSnapshotFromContext(
   ]);
 
   const summary: DashboardSnapshot["summary"] = {
-    holding_count: context.summary.holding_count,
+    holding_count: allocation.rows.length,
     total_cash_usd: context.summary.total_cash_usd,
     portfolio_value_usd: context.summary.portfolio_value_usd,
     last_transaction_date: context.summary.last_transaction_date ?? "",

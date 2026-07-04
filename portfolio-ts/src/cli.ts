@@ -45,7 +45,7 @@ Usage:
   portfolio <command> [options]
 
 Commands:
-  status          Current portfolio status snapshot (--as-of-date YYYY-MM-DD)
+  status          Current portfolio status snapshot (--as-of-date YYYY-MM-DD, --include-dust)
   transactions    Paginated transaction list
   add             Add a transaction and recalculate
   edit            Edit an existing transaction and recalculate
@@ -61,10 +61,10 @@ Commands:
   cash            Cash balances by currency with USD values
   cash_drag       Opportunity cost of idle cash vs being invested (--as-of-date, --from-date, --benchmark-return-rate, --cash-return-rate)
   projection      Portfolio future-value projection (--monthly-contribution, --annual-return-rate, --target-value, --projection-years, --inflation-rate, --as-of-date)
-  allocation      Portfolio allocation breakdown by asset
+  allocation      Portfolio allocation breakdown by asset (--include-dust)
   rebalance       Target-vs-actual drift report with suggested trades (--target "VTI=50,VXUS=20,BND=30", --as-of-date)
-  summary         High-level portfolio summary metrics
-  concentration   Portfolio concentration metrics (HHI + top holdings)
+  summary         High-level portfolio summary metrics (holding_count is visible holdings by default; dust hidden unless --include-dust)
+  concentration   Portfolio concentration metrics (HHI + top holdings, --include-dust)
   decomposition   Split portfolio growth into contributions vs market returns (--as-of-date)
   currency_exposure  Portfolio exposure broken down by currency
   performance     Performance metrics: TWR, CAGR, Calmar, Sharpe, max drawdown, benchmark-relative (beta, alpha, IR), real (inflation-adjusted) return. Includes period_returns (1M,3M,6M,YTD,1Y,SII) and rolling_12m_returns. Use --benchmark SPY (default) for full risk-adjusted suite; --inflation-rate 0.025 for real return.
@@ -188,6 +188,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      if (bool(flags, "include-dust") || bool(flags, "include_dust")) args["include_dust"] = true;
       const env = await dispatchRead("status", args);
       console.log(JSON.stringify(env, null, 2));
       return;
@@ -817,6 +818,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      if (bool(flags, "include-dust") || bool(flags, "include_dust")) args["include_dust"] = true;
       const env = await dispatchRead("allocation", args);
       console.log(JSON.stringify(env, null, 2));
       return;
@@ -841,6 +843,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      if (bool(flags, "include-dust") || bool(flags, "include_dust")) args["include_dust"] = true;
       const env = await dispatchRead("summary", args);
       console.log(JSON.stringify(env, null, 2));
       return;
@@ -850,6 +853,7 @@ export async function dispatch(argv: string[]): Promise<void> {
       const args: Record<string, unknown> = {};
       const asOfDate = str(flags, "as-of-date") ?? str(flags, "as_of_date");
       if (asOfDate !== undefined) args["as_of"] = asOfDate;
+      if (bool(flags, "include-dust") || bool(flags, "include_dust")) args["include_dust"] = true;
       const topN = int(flags, "top-n") ?? int(flags, "top_n") ?? 5;
       args["top_n"] = topN;
       const env = await dispatchRead("concentration", args);

@@ -120,6 +120,21 @@ describe("portfolio.json template", () => {
 });
 
 describe("auth detection — explicit env (no global mutation)", () => {
+  let spawnSyncSpy: ReturnType<typeof jest.spyOn> | null = null;
+
+  beforeEach(() => {
+    spawnSyncSpy = jest.spyOn(Bun, "spawnSync").mockReturnValue({
+      exitCode: 1,
+      stdout: new Uint8Array(),
+      stderr: new Uint8Array(),
+    } as ReturnType<typeof Bun.spawnSync>);
+  });
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore();
+    spawnSyncSpy = null;
+  });
+
   test("detects auth via env token with account_id", async () => {
     const mod = require("../src/cloudflare/auth.js");
     const result = await mod.detectAuth({

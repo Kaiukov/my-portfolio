@@ -1,4 +1,5 @@
 export const STALE_MAX_AGE_DAYS = 5;
+export const DUST_ALLOCATION_THRESHOLD_PCT = 1;
 
 export const STABLECOINS = new Set([
   "USDT", "USDC", "DAI", "TUSD", "USDP", "FDUSD", "PYUSD", "USDE", "GUSD",

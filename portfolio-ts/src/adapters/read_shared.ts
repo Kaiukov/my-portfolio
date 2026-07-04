@@ -32,6 +32,25 @@ function asOfVal(args: JsonObject): string | undefined {
   return strField(args, "as_of") ?? strField(args, "asOf");
 }
 
+function boolField(args: JsonObject, ...keys: string[]): boolean {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(args, key)) continue;
+    const raw = args[key];
+    if (typeof raw === "boolean") return raw;
+    if (typeof raw === "number") {
+      if (raw === 1) return true;
+      if (raw === 0) return false;
+      continue;
+    }
+    if (typeof raw === "string") {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === "true" || normalized === "1") return true;
+      if (normalized === "false" || normalized === "0") return false;
+    }
+  }
+  return false;
+}
+
 /**
  * Shared read dispatcher — single source of truth for CLI, API, and MCP.
  * Takes a command name and JSON args object, returns a full envelope.
@@ -44,16 +63,47 @@ export async function dispatchRead(
   try {
     if (toolName === "status") {
       const asOf = asOfVal(args);
+      const includeDust = boolField(args, "include_dust", "includeDust", "include-dust");
       const freshnessMeta = await getPriceFreshness(asOf);
-      const data = await getStatus(asOf);
-      return success("status", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+      const [status, allocation] = await Promise.all([
+        getStatus(asOf),
+        getAllocation(asOf, includeDust),
+      ]);
+      return success(
+        "status",
+        status,
+        null,
+        undefined,
+        {
+          ...(freshnessMeta as unknown as Record<string, unknown>),
+          dust_filter: allocation.dust_filter,
+        },
+      );
     }
 
     if (toolName === "summary") {
       const asOf = asOfVal(args);
+      const includeDust = boolField(args, "include_dust", "includeDust", "include-dust");
       const freshnessMeta = await getPriceFreshness(asOf);
-      const data = await getSummary(asOf);
-      return success("summary", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+      const [summary, allocation] = await Promise.all([
+        getSummary(asOf),
+        getAllocation(asOf, includeDust),
+      ]);
+      // Summary.holding_count is a presentation count: visible holdings only unless dust is included.
+      const data = {
+        ...summary,
+        holding_count: includeDust ? summary.holding_count : allocation.rows.length,
+      };
+      return success(
+        "summary",
+        data,
+        null,
+        undefined,
+        {
+          ...(freshnessMeta as unknown as Record<string, unknown>),
+          dust_filter: allocation.dust_filter,
+        },
+      );
     }
 
     if (toolName === "cash") {
@@ -99,9 +149,20 @@ export async function dispatchRead(
 
     if (toolName === "allocation") {
       const asOf = asOfVal(args);
+      const includeDust = boolField(args, "include_dust", "includeDust", "include-dust");
       const freshnessMeta = await getPriceFreshness(asOf);
-      const data = await getAllocation(asOf);
-      return success("allocation", data, data.rows.length, undefined, freshnessMeta as unknown as Record<string, unknown>);
+      const data = await getAllocation(asOf, includeDust);
+      const { dust_filter, ...visibleData } = data;
+      return success(
+        "allocation",
+        visibleData,
+        visibleData.rows.length,
+        undefined,
+        {
+          ...(freshnessMeta as unknown as Record<string, unknown>),
+          dust_filter,
+        },
+      );
     }
 
     if (toolName === "rebalance") {
@@ -116,10 +177,21 @@ export async function dispatchRead(
 
     if (toolName === "concentration") {
       const asOf = asOfVal(args);
+      const includeDust = boolField(args, "include_dust", "includeDust", "include-dust");
       const topN = intField(args, "top_n", "topN");
       const freshnessMeta = await getPriceFreshness(asOf);
-      const data = await getConcentration(asOf, topN);
-      return success("concentration", data, null, undefined, freshnessMeta as unknown as Record<string, unknown>);
+      const data = await getConcentration(asOf, topN, includeDust);
+      const { dust_filter, ...visibleData } = data;
+      return success(
+        "concentration",
+        visibleData,
+        null,
+        undefined,
+        {
+          ...(freshnessMeta as unknown as Record<string, unknown>),
+          dust_filter,
+        },
+      );
     }
 
     if (toolName === "diversification") {
