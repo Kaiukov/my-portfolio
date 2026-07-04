@@ -1,5 +1,6 @@
 import { querySingle } from "../db.js";
 import { runTx } from "../tx.js";
+import { roundTo } from "../util.js";
 import {
   ValidationError,
   parseDate,
@@ -132,7 +133,7 @@ export async function exchangeCurrency(params: {
 
   return {
     from: { asset: params.fromAsset, quantity: params.quantity },
-    to: { asset: params.toAsset, quantity: Math.round(targetAmount * 1e6) / 1e6 },
+    to: { asset: params.toAsset, quantity: roundTo(targetAmount, 6) },
     rate: params.rate,
     date,
     transaction_ids: [result.fromId, result.toId],

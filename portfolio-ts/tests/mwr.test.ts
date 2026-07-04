@@ -100,6 +100,18 @@ describe("getMwr", () => {
     expect(result.mwr_pct).toBe(8.5);
     expect(result.as_of_date).toBe("2026-03-15");
   });
+
+  test("preserves four decimal places for mwr_pct", async () => {
+    mockQuerySingle.mockClear();
+
+    mockQuerySingle.mockResolvedValueOnce({ mwr: 0.123456 });
+    mockQuerySingle.mockResolvedValueOnce(summaryRow(19120.12));
+
+    const { getMwr } = await import("../src/commands/mwr.js");
+    const result = await getMwr("2026-03-15");
+
+    expect(result.mwr_pct).toBe(12.3456);
+  });
 });
 
 describe("getMwr — CLI integration", () => {

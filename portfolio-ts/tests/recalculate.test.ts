@@ -1,4 +1,4 @@
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test, mock, jest } from "bun:test";
 import { ValidationError, STALE_MAX_AGE_DAYS } from "../src/validators.js";
 
 const mockQuery = mock();
@@ -158,5 +158,22 @@ describe("recalculate", () => {
     const result = await recalculate({ fromDateStr: "01-01-2026", force: false });
     expect(result.recalc_type).toBe("partial");
     expect(result.from_date).toBe("2026-01-01");
+  });
+});
+
+describe("recalculate CLI boolean parsing", () => {
+  test("rejects invalid --force values instead of silently enabling force", async () => {
+    const mod = await import("../src/cli.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await expect(
+      mod.dispatch(["bun", "src/cli.ts", "recalculate", "--force", "bogus"]),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(logSpy).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });

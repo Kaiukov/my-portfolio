@@ -35,6 +35,7 @@ import { publishToKv } from "./cloudflare/publish.js";
 import { publishDashboardToKv } from "./cloudflare/dashboard_publish.js";
 import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
 import { createApiServer } from "./api/server.js";
+import { parseBooleanFlag } from "./adapters/shared.js";
 import { ValidationError, NotFoundError } from "./validators.js";
 import { close } from "./db.js";
 
@@ -166,7 +167,9 @@ function int(flags: Map<string, FlagValue>, key: string): number | undefined {
 }
 
 function bool(flags: Map<string, FlagValue>, key: string): boolean {
-  return flags.has(key);
+  const value = flags.get(key);
+  if (value === undefined) return false;
+  return parseBooleanFlag(value === true ? "" : value, key);
 }
 
 export async function dispatch(argv: string[]): Promise<void> {

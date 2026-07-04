@@ -1,4 +1,5 @@
 import { query } from "../db.js";
+import { roundTo } from "../util.js";
 
 export interface PeriodReturns {
   "1M": number;
@@ -67,7 +68,7 @@ function str(val: unknown): string | null {
 
 function intVal(val: unknown): number {
   const n = Number(val);
-  return Number.isFinite(n) ? Math.round(n) : 0;
+  return Number.isFinite(n) ? roundTo(n, 0) : 0;
 }
 
 export interface PerformanceOptions {
