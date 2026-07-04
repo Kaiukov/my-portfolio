@@ -1,6 +1,11 @@
 import { success, error, type Envelope } from "../response.js";
 import { ValidationError } from "../validators.js";
-import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
+import {
+  parseBooleanFlag,
+  resolveWriteHandlers,
+  toWriteErrorEnvelope,
+  type WriteHandlers,
+} from "../adapters/shared.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -42,29 +47,10 @@ export function intField(body: JsonObject, ...keys: string[]): number | undefine
   return undefined;
 }
 
-function parseBoolValue(raw: unknown): boolean | undefined {
-  if (typeof raw === "boolean") return raw;
-  if (typeof raw === "number") {
-    if (raw === 1) return true;
-    if (raw === 0) return false;
-    return undefined;
-  }
-  if (typeof raw === "string") {
-    const normalized = raw.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1") return true;
-    if (normalized === "false" || normalized === "0") return false;
-    return undefined;
-  }
-  return undefined;
-}
-
 function boolFlag(body: JsonObject, ...keys: string[]): boolean {
   for (const key of keys) {
     if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
-    const raw = body[key];
-    if (raw === "" || raw === null) return true;
-    const parsed = parseBoolValue(raw);
-    return parsed ?? false;
+    return parseBooleanFlag(body[key], key);
   }
   return false;
 }
@@ -203,6 +189,22 @@ export async function mcpWrite(
       return success("split", result);
     }
 
+    if (toolName === "recalculate") {
+      const params = {
+        fromDateStr: strField(args, "fromDate") ?? strField(args, "from_date") ?? strField(args, "from-date"),
+        force: boolFlag(args, "force"),
+        maxAgeDays: intField(args, "maxAgeDays", "max_age_days", "max-age-days"),
+      };
+
+      if (boolFlag(args, "dryRun", "dry_run", "dry-run")) {
+        const result = await write.recalculateDryRun(params);
+        return success("recalculate", result);
+      }
+
+      const result = await write.recalculate(params);
+      return success("recalculate", result);
+    }
+
     return error("mcp", "NOT_FOUND", `Unsupported MCP write tool: ${toolName}`);
   } catch (err) {
     const command =
@@ -214,13 +216,15 @@ export async function mcpWrite(
             ? "wrap"
             : toolName === "unwrap"
               ? "unwrap"
-          : toolName === "split"
-            ? "split"
-            : toolName === "delete_transaction"
-              ? "delete"
-              : toolName === "edit_transaction"
-                ? "edit"
-                : "mcp";
+              : toolName === "split"
+                ? "split"
+                : toolName === "recalculate"
+                  ? "recalculate"
+                  : toolName === "delete_transaction"
+                    ? "delete"
+                    : toolName === "edit_transaction"
+                      ? "edit"
+                      : "mcp";
     return toWriteErrorEnvelope(command, err).body;
   }
 }

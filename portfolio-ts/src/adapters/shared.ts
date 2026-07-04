@@ -5,6 +5,7 @@ import { deleteTransaction, deletePreview } from "../commands/delete.js";
 import { exchangeCurrency } from "../commands/exchange.js";
 import { applySplit } from "../commands/split.js";
 import { applyWrap, applyUnwrap } from "../commands/wrap.js";
+import { recalculate, recalculateDryRun } from "../commands/recalculate.js";
 import { NotFoundError, ValidationError } from "../validators.js";
 
 export type WriteHandlers = {
@@ -18,6 +19,8 @@ export type WriteHandlers = {
   applySplit: typeof applySplit;
   applyWrap: typeof applyWrap;
   applyUnwrap: typeof applyUnwrap;
+  recalculate: typeof recalculate;
+  recalculateDryRun: typeof recalculateDryRun;
 };
 
 const defaultWriteHandlers: WriteHandlers = {
@@ -31,6 +34,8 @@ const defaultWriteHandlers: WriteHandlers = {
   applySplit,
   applyWrap,
   applyUnwrap,
+  recalculate,
+  recalculateDryRun,
 };
 
 export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): WriteHandlers {
@@ -45,7 +50,25 @@ export function resolveWriteHandlers(overrides: Partial<WriteHandlers> = {}): Wr
     applySplit: overrides.applySplit ?? defaultWriteHandlers.applySplit,
     applyWrap: overrides.applyWrap ?? defaultWriteHandlers.applyWrap,
     applyUnwrap: overrides.applyUnwrap ?? defaultWriteHandlers.applyUnwrap,
+    recalculate: overrides.recalculate ?? defaultWriteHandlers.recalculate,
+    recalculateDryRun: overrides.recalculateDryRun ?? defaultWriteHandlers.recalculateDryRun,
   };
+}
+
+export function parseBooleanFlag(raw: unknown, fieldName: string): boolean {
+  if (raw === "" || raw === null) return true;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") {
+    if (raw === 1) return true;
+    if (raw === 0) return false;
+  }
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+  }
+
+  throw new ValidationError(`Invalid boolean value for ${fieldName}`);
 }
 
 export function toWriteErrorEnvelope(

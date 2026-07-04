@@ -9,6 +9,8 @@ const mockDeletePreview = mock();
 const mockExchangeCurrency = mock();
 const mockApplyWrap = mock();
 const mockApplyUnwrap = mock();
+const mockRecalculate = mock();
+const mockRecalculateDryRun = mock();
 
 const mockDbQuery = mock();
 const mockDbQuerySingle = mock();
@@ -47,6 +49,8 @@ beforeEach(() => {
   mockExchangeCurrency.mockReset();
   mockApplyWrap.mockReset();
   mockApplyUnwrap.mockReset();
+  mockRecalculate.mockReset();
+  mockRecalculateDryRun.mockReset();
   mockDbQuery.mockReset();
   mockDbQuerySingle.mockReset();
   mockGetAssetMetadata.mockReset();
@@ -64,6 +68,8 @@ function writeCtx() {
       exchangeCurrency: mockExchangeCurrency,
       applyWrap: mockApplyWrap,
       applyUnwrap: mockApplyUnwrap,
+      recalculate: mockRecalculate,
+      recalculateDryRun: mockRecalculateDryRun,
     },
   };
 }
@@ -272,6 +278,65 @@ describe("mcpWrite", () => {
     expect(result.ok).toBe(false);
     expect(result.command).toBe("delete");
     expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  test("recalculate routes force execution to the shared handler", async () => {
+    mockRecalculate.mockResolvedValue({ rows_affected: 7, recalc_type: "partial", from_date: "2026-01-15" });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite(
+      "recalculate",
+      { from_date: "2026-01-15", force: true, max_age_days: 3 },
+      writeCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.command).toBe("recalculate");
+    expect(mockRecalculate).toHaveBeenCalledWith({
+      fromDateStr: "2026-01-15",
+      force: true,
+      maxAgeDays: 3,
+    });
+    expect(mockRecalculateDryRun).not.toHaveBeenCalled();
+  });
+
+  test("recalculate routes non-force dry-run to the shared handler", async () => {
+    mockRecalculateDryRun.mockResolvedValue({
+      dry_run: true,
+      from_date: "beginning",
+      forced: false,
+      needs_recalc: true,
+      prices_stale: false,
+      stale_tickers: [],
+    });
+
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite(
+      "recalculate",
+      { dryRun: true, "max-age-days": 5 },
+      writeCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.command).toBe("recalculate");
+    expect(mockRecalculateDryRun).toHaveBeenCalledWith({
+      fromDateStr: undefined,
+      force: false,
+      maxAgeDays: 5,
+    });
+    expect(mockRecalculate).not.toHaveBeenCalled();
+  });
+
+  test("recalculate rejects invalid boolean flags", async () => {
+    const { mcpWrite } = await import("../src/mcp/adapter.js");
+    const result = await mcpWrite("recalculate", { force: "bogus" }, writeCtx());
+
+    if (result.ok) throw new Error("Expected error envelope");
+    expect(result.command).toBe("recalculate");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.message).toContain("Invalid boolean value for force");
+    expect(mockRecalculate).not.toHaveBeenCalled();
+    expect(mockRecalculateDryRun).not.toHaveBeenCalled();
   });
 
   test("edit_transaction maps not-found errors", async () => {

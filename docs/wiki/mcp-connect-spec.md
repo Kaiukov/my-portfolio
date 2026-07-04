@@ -276,7 +276,7 @@ curl http://localhost:8787/ready
 curl -X POST http://localhost:8787/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-# → список всех 30 инструментов
+# → список всех 31 инструментов
 
 # MCP tools/call — вызов конкретного инструмента
 curl -X POST http://localhost:8787/mcp \

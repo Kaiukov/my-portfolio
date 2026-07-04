@@ -153,7 +153,7 @@ Common parameters mapped from CLI flags:
 
 ### Write Endpoints
 
-Write operations reuse the same shared command functions (`src/adapters/shared.ts`) and are dispatched through `WriteHandlers` (addTransaction, editTransaction, editDryRun, deleteTransaction, deletePreview, exchangeCurrency). Dry-run is supported on edit and delete via `?dry_run=true` / `{"dry_run": true}`. Delete requires `?confirm=true` / `{"confirm": true}`.
+Write operations reuse the same shared command functions (`src/adapters/shared.ts`) and are dispatched through `WriteHandlers` (addTransaction, editTransaction, editDryRun, deleteTransaction, deletePreview, exchangeCurrency, recalculate, recalculateDryRun). Dry-run is supported on edit, delete, and recalculate via `?dry_run=true` / `{"dry_run": true}`. Delete requires `?confirm=true` / `{"confirm": true}`.
 
 | Method | Endpoint | CLI equivalent | Required body fields |
 |---|---|---|---|
@@ -162,6 +162,7 @@ Write operations reuse the same shared command functions (`src/adapters/shared.t
 | PUT | `/transactions/:id` | `edit` | Same as PATCH (both route through editTransaction) |
 | DELETE | `/transactions/:id` | `delete` | id (in path); confirm required unless dry-run |
 | POST | `/exchange` | `exchange` | date, fromAsset/by from_asset/by from, toAsset/by to_asset/by to, quantity, rate |
+| POST | `/recalculate` | `recalculate` | none; optional `fromDate`/`from_date`/`from-date`, `force`, `maxAgeDays`/`max_age_days`/`max-age-days`, `dryRun`/`dry_run`/`dry-run` |
 
 Optional fields for POST/PATCH/PUT bodies: price, currency, fees, feeCurrency (or fee_currency), account, dataSource (or data_source). See `portfolio-ts/src/api/server.ts` for the canonical field resolution logic.
 
@@ -196,7 +197,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 
 ### Scope
 
-**Full read and write (30 инструментов).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write-операции доступны как MCP write tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
+**Full read, write, and maintenance (31 инструмент).** Все read-only CLI-команды доступны как MCP read tools (`mcpRead` в `src/mcp/read.ts`). Write-операции доступны как MCP write tools (`mcpWrite` в `src/mcp/adapter.ts`) с теми же `WriteHandlers` из `src/adapters/shared.ts`, что и HTTP API.
 
 ### Read Tools (23)
 
@@ -228,7 +229,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 | `withdrawal` | `withdrawal` | — | `as_of`, `annual_withdrawal`, `withdrawal_rate`, `time_horizon_years`, `expected_return`, `inflation_rate` | — |
 | `asset_analysis` | `asset_analysis` | `ticker` или `asset` | `period`, `lookback_days`, `benchmark`, `as_of`, `risk_free_rate` | — |
 
-### Write Tools (7)
+### Write Tools (8)
 
 | Tool name | CLI equivalent | Required args | Optional args |
 |---|---|---|---|
@@ -239,6 +240,7 @@ Stdio-транспорт (`bun run mcp`) — только для OpenAI tunnel-c
 | `wrap` | `wrap` | `date`, `fromAsset`, `toAsset`, `fromQuantity`, `toQuantity` | — |
 | `unwrap` | `unwrap` | `date`, `fromAsset`, `toAsset`, `fromQuantity`, `toQuantity` | — |
 | `split` | `split` | `date`, `asset`, `ratio`, `confirm` | — |
+| `recalculate` | `recalculate` | — | `fromDate` / `from_date` / `from-date`, `force`, `maxAgeDays` / `max_age_days` / `max-age-days`, `dryRun` / `dry_run` / `dry-run` |
 
 ### Arg Aliases
 

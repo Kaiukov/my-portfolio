@@ -50,7 +50,7 @@ Error codes use the same `toWriteErrorEnvelope` mapper as the HTTP API (`src/ada
 | **Streamable HTTP** (канонический) | `http://<host>:8787/mcp` | Все внешние сервисы, AI-агенты, dashboard |
 | Stdio (внутренний) | `bun run mcp` | Только как дочерний процесс для OpenAI tunnel-client |
 
-Streamable HTTP endpoint обслуживается тем же `Bun.serve`, что и REST API — отдельный процесс не нужен. Все 30 инструментов доступны через оба транспорта с идентичным поведением.
+Streamable HTTP endpoint обслуживается тем же `Bun.serve`, что и REST API — отдельный процесс не нужен. Все 31 инструмент доступны через оба транспорта с идентичным поведением.
 
 ## Read Tools
 
@@ -97,6 +97,7 @@ Dispatched via `mcpWrite(toolName, args, ctx)`. Each tool mirrors its CLI/API co
 | `wrap` | `wrap` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `fromQuantity` / `from_quantity`, `toQuantity` / `to_quantity` | — |
 | `unwrap` | `unwrap` | `date`, `fromAsset` / `from_asset` / `from`, `toAsset` / `to_asset` / `to`, `fromQuantity` / `from_quantity`, `toQuantity` / `to_quantity` | — |
 | `split` | `split` | `date`, `asset`, `ratio` | `confirm` |
+| `recalculate` | `recalculate` | — | `fromDate` / `from_date` / `from-date`, `force`, `maxAgeDays` / `max_age_days` / `max-age-days`, `dryRun` / `dry_run` / `dry-run` |
 
 ### Arg Aliases
 
@@ -106,8 +107,8 @@ MCP tools accept multiple key aliases per arg:
 - `edit_transaction`: `id`, `transactionId`, `transaction_id`, or `transId`; `feeCurrency` or `fee_currency`; `dataSource` or `data_source`; `dry_run`, `dryRun`, or `dry-run`
 - `delete_transaction`: same id aliases as edit; `dry_run`, `dryRun`, or `dry-run`
 - `exchange_currency`: `fromAsset`, `from_asset`, or `from`; `toAsset`, `to_asset`, or `to`
-<<<<<<< HEAD
 - `wrap` / `unwrap`: `fromAsset`/`from_asset`/`from`; `toAsset`/`to_asset`/`to`; `fromQuantity`/`from_quantity`; `toQuantity`/`to_quantity`
+- `recalculate`: `fromDate`, `from_date`, or `from-date`; `maxAgeDays`, `max_age_days`, or `max-age-days`; `dryRun`, `dry_run`, or `dry-run`
 
 ## OpenAI Secure MCP Tunnel
 
@@ -138,7 +139,7 @@ Dashboard (<https://github.com/Kaiukov/my-portfolio-dashboard>) exposes a separa
 | 8 | `widget` | KV snapshot |
 | 9 | `projection` | KV snapshot |
 
-Dashboard MCP — stateless, read-only. Write и maintenance операции (`add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`, `split`, `recalculate`, `repair_prices`, `sync`) доступны **только** через основной portfolio MCP server (30 инструментов) по каноническому Streamable HTTP.
+Dashboard MCP — stateless, read-only. Write и maintenance операции (`add`, `edit`, `delete`, `exchange`, `wrap`, `unwrap`, `split`, `recalculate`, `repair_prices`, `sync`) доступны **только** через основной portfolio MCP server (31 инструмент) по каноническому Streamable HTTP.
 
 ## Error Handling
 

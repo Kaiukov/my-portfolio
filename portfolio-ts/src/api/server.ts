@@ -4,7 +4,12 @@ import { createPortfolioMcpServer } from "../mcp/server.js";
 import { mcpSessionRegistry } from "./mcp_session_registry.js";
 import { dispatchRead } from "../adapters/read_shared.js";
 import { ValidationError } from "../validators.js";
-import { resolveWriteHandlers, toWriteErrorEnvelope, type WriteHandlers } from "../adapters/shared.js";
+import {
+  parseBooleanFlag,
+  resolveWriteHandlers,
+  toWriteErrorEnvelope,
+  type WriteHandlers,
+} from "../adapters/shared.js";
 
 type RequestContext = {
   ready?: () => Promise<ReadyRouteResult> | ReadyRouteResult;
@@ -73,6 +78,7 @@ function routeCommandForPath(path: string, method: string): string {
   if (path === "/wrap") return "wrap";
   if (path === "/unwrap") return "unwrap";
   if (path === "/split") return "split";
+  if (path === "/recalculate") return "recalculate";
   if (TRANSACTION_ID_ROUTE.test(path)) return method === "DELETE" ? "delete" : "edit";
   if (MCP_HTTP_PATHS.has(path)) return "mcp";
   return "api";
@@ -81,6 +87,36 @@ function routeCommandForPath(path: string, method: string): string {
 function strField(body: JsonObject, key: string): string | undefined {
   const val = body[key];
   return typeof val === "string" ? val : undefined;
+}
+
+function strValue(search: URLSearchParams, body: JsonObject, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const queryVal = search.get(key);
+    if (queryVal !== null) return queryVal;
+  }
+  for (const key of keys) {
+    const bodyVal = strField(body, key);
+    if (bodyVal !== undefined) return bodyVal;
+  }
+  return undefined;
+}
+
+function intValue(search: URLSearchParams, body: JsonObject, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const queryVal = search.get(key);
+    if (queryVal === null) continue;
+    const parsed = parseInt(queryVal, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  for (const key of keys) {
+    const raw = body[key];
+    if (typeof raw === "number" && Number.isInteger(raw)) return raw;
+    if (typeof raw === "string") {
+      const parsed = parseInt(raw, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
 }
 
 function floatField(body: JsonObject, key: string): number | undefined {
@@ -95,36 +131,16 @@ function floatField(body: JsonObject, key: string): number | undefined {
   return undefined;
 }
 
-function parseBoolValue(raw: unknown): boolean | undefined {
-  if (typeof raw === "boolean") return raw;
-  if (typeof raw === "number") {
-    if (raw === 1) return true;
-    if (raw === 0) return false;
-    return undefined;
-  }
-  if (typeof raw === "string") {
-    const normalized = raw.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1") return true;
-    if (normalized === "false" || normalized === "0") return false;
-    return undefined;
-  }
-  return undefined;
-}
-
 function boolFlag(search: URLSearchParams, body: JsonObject, ...keys: string[]): boolean {
   for (const key of keys) {
     if (search.has(key)) {
-      const queryVal = search.get(key);
-      if (queryVal === "" || queryVal === null) return true;
-      const parsed = parseBoolValue(queryVal);
-      return parsed ?? true;
+      return parseBooleanFlag(search.get(key), key);
     }
   }
 
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(body, key)) {
-      const parsed = parseBoolValue(body[key]);
-      return parsed ?? false;
+      return parseBooleanFlag(body[key], key);
     }
   }
 
@@ -143,6 +159,7 @@ function allowedMethodsForPath(path: string): string[] | null {
   if (path === "/wrap") return ["POST"];
   if (path === "/unwrap") return ["POST"];
   if (path === "/split") return ["POST"];
+  if (path === "/recalculate") return ["POST"];
   if (MCP_HTTP_PATHS.has(path)) return ["GET", "POST", "DELETE"];
   if (ROUTES[path]) return ["GET"];
   return null;
@@ -443,6 +460,23 @@ export async function handleRequest(req: Request, ctx: RequestContext = {}): Pro
         account: strField(body, "account"),
       });
       return respond(success("split", result), 200);
+    }
+
+    if (path === "/recalculate" && req.method === "POST") {
+      const body = await parseJsonBody(req);
+      const params = {
+        fromDateStr: strValue(url.searchParams, body, "fromDate", "from_date", "from-date"),
+        force: boolFlag(url.searchParams, body, "force"),
+        maxAgeDays: intValue(url.searchParams, body, "maxAgeDays", "max_age_days", "max-age-days"),
+      };
+
+      if (boolFlag(url.searchParams, body, "dryRun", "dry_run", "dry-run")) {
+        const result = await write.recalculateDryRun(params);
+        return respond(success("recalculate", result), 200);
+      }
+
+      const result = await write.recalculate(params);
+      return respond(success("recalculate", result), 200);
     }
 
     const transMatch = TRANSACTION_ID_ROUTE.exec(path);
