@@ -13,7 +13,7 @@ describe("portfolio MCP server", () => {
     expect(mod.MCP_WRITE_TOOLS.length).toBe(7);
   });
 
-  test("tools/list returns exactly 28 tools (23 read + 5 write)", async () => {
+  test("tools/list returns exactly 30 tools (23 read + 7 write)", async () => {
     const mod = await import("../src/mcp/server.js");
 
     const total = mod.MCP_READ_TOOLS.length + mod.MCP_WRITE_TOOLS.length;
