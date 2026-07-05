@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-05
+
+### Fixed
+- **#333 adapter parity** — `recalculate force` is now wired consistently across
+  CLI, REST API, and MCP. The REST API exposes `POST /recalculate`, MCP exposes
+  the `recalculate` write tool, and both adapters delegate to the shared
+  recalculate write path instead of duplicating service logic.
+- **Boolean flag validation parity** — invalid boolean values such as
+  `force=bogus` no longer silently enable force on the CLI/API/MCP path; all
+  adapters now return the same `VALIDATION_ERROR` envelope/message.
+- **#346 follow-up** — the shared `roundTo()` consolidation no longer changes MWR
+  precision; `mwr_pct` keeps its 4-decimal public contract.
+- **#347 docs follow-up** — the health/price-coverage docs now match the real
+  `provisional` status behavior and the split `historical_coverage_issues` /
+  `current_day_missing` diagnostics.
+- **Live dev verification harness** — DB-gated `projection` / `withdrawal`
+  coverage was moved out of module-mocked files, and live diversification parity
+  checks now compare floating-point results with tolerance. This is the change
+  set that allowed the full dev suite to run green on the prod-cloned fixture DB.
+- **Dev transaction smoke workflow** — added `scripts/dev-transaction-smoke.sh`,
+  a disposable-database smoke run that exercises `BUY`, `SELL`, `DEPOSIT`,
+  `WITHDRAW`, `TRANSFER`, `DIVIDEND`, `INTEREST`, `FEE`, `TAX`, `SPLIT`,
+  `STAKING_REWARD`, `WRAP`, and `UNWRAP`, checking summary/cash/allocation/history
+  after each step without mutating the long-lived dev database.
+
 ## [0.10.0] - 2026-07-04
 
 ### Added
@@ -86,6 +111,7 @@ and MCP-hardening bug-fix batch validated against the dev PostgreSQL instance.
   `Date` assertions, and gated fixture-dependent projection/withdrawal DB tests
   behind `PORTFOLIO_TEST_FIXTURE_DB` for a deterministic suite.
 
-[Unreleased]: https://github.com/Kaiukov/my-portfolio/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Kaiukov/my-portfolio/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/Kaiukov/my-portfolio/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Kaiukov/my-portfolio/compare/v0.8.0...v0.10.0
 [0.8.0]: https://github.com/Kaiukov/my-portfolio/releases/tag/v0.8.0
