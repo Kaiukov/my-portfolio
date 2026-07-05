@@ -120,7 +120,12 @@ The deployed Dockerized service already runs `refresh`, `cloudflare publish`, an
 portfolio health
 ```
 
-`health` checks DB reachability and price coverage. It returns a JSON envelope and exits non-zero on any problem. If you see `ok: true`, you are ready to go.
+`health` checks DB reachability and price coverage. The envelope `data.status` is:
+- `ok` when DB state, recalculation state, and price checkpoints are healthy
+- `provisional` when only current-day quotes are still missing
+- `degraded` when historical checkpoints are missing, prices are stale, or recalculation is required
+
+`verify_prices` now separates `historical_coverage_issues` from `current_day_missing` while keeping `coverage_issues` as the backward-compatible union of both.
 
 ## Initialization & setup
 
