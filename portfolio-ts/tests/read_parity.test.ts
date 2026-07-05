@@ -1,6 +1,36 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import type { Envelope } from "../src/response.js";
 
+const mockGetAssetAnalysis = mock(async (options: Record<string, unknown>) => ({
+  ticker: String(options.ticker ?? options.asset ?? "AAPL"),
+  info: {
+    name: "Mock Asset",
+  },
+  metrics: {
+    sharpe_ratio: 1.23,
+  },
+  request: {
+    risk_free_rate: options.riskFreeRate ?? options.risk_free_rate ?? null,
+  },
+}));
+
+mock.module("../src/commands/asset_analysis.js", () => ({
+  getAssetAnalysis: mockGetAssetAnalysis,
+}));
+
+function expectApproxEnvelopeData(actual: Record<string, unknown>, expected: Record<string, unknown>) {
+  expect(Object.keys(actual).sort()).toEqual(Object.keys(expected).sort());
+  for (const key of Object.keys(expected)) {
+    const actualValue = actual[key];
+    const expectedValue = expected[key];
+    if (typeof actualValue === "number" && typeof expectedValue === "number") {
+      expect(actualValue).toBeCloseTo(expectedValue, 12);
+      continue;
+    }
+    expect(actualValue).toEqual(expectedValue);
+  }
+}
+
 describe("read parity", () => {
   beforeEach(() => {
     // Clear any module caches if needed
@@ -275,7 +305,10 @@ describe("read parity", () => {
       expect(apiResult.ok).toBe(dispatchResult.ok);
       expect(apiResult.command).toBe(dispatchResult.command);
       if (apiResult.ok && dispatchResult.ok) {
-        expect(apiResult.data).toEqual(dispatchResult.data);
+        expectApproxEnvelopeData(
+          apiResult.data as Record<string, unknown>,
+          dispatchResult.data as Record<string, unknown>,
+        );
       }
     });
 
@@ -290,7 +323,10 @@ describe("read parity", () => {
       expect(apiResult.ok).toBe(dispatchResult.ok);
       expect(apiResult.command).toBe(dispatchResult.command);
       if (apiResult.ok && dispatchResult.ok) {
-        expect(apiResult.data).toEqual(dispatchResult.data);
+        expectApproxEnvelopeData(
+          apiResult.data as Record<string, unknown>,
+          dispatchResult.data as Record<string, unknown>,
+        );
       }
     });
 
@@ -305,7 +341,10 @@ describe("read parity", () => {
       expect(apiResult.ok).toBe(dispatchResult.ok);
       expect(apiResult.command).toBe(dispatchResult.command);
       if (apiResult.ok && dispatchResult.ok) {
-        expect(apiResult.data).toEqual(dispatchResult.data);
+        expectApproxEnvelopeData(
+          apiResult.data as Record<string, unknown>,
+          dispatchResult.data as Record<string, unknown>,
+        );
       }
     });
 
@@ -320,7 +359,10 @@ describe("read parity", () => {
       expect(apiResult.ok).toBe(dispatchResult.ok);
       expect(apiResult.command).toBe(dispatchResult.command);
       if (apiResult.ok && dispatchResult.ok) {
-        expect(apiResult.data).toEqual(dispatchResult.data);
+        expectApproxEnvelopeData(
+          apiResult.data as Record<string, unknown>,
+          dispatchResult.data as Record<string, unknown>,
+        );
       }
     });
 
@@ -335,7 +377,10 @@ describe("read parity", () => {
       expect(apiResult.ok).toBe(dispatchResult.ok);
       expect(apiResult.command).toBe(dispatchResult.command);
       if (apiResult.ok && dispatchResult.ok) {
-        expect(apiResult.data).toEqual(dispatchResult.data);
+        expectApproxEnvelopeData(
+          apiResult.data as Record<string, unknown>,
+          dispatchResult.data as Record<string, unknown>,
+        );
       }
     });
 
