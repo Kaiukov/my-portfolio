@@ -120,14 +120,14 @@ Each returns the same JSON envelope as the CLI, reusing the same PostgreSQL-owne
 
 | Method | Endpoint | CLI equivalent | Description |
 |---|---|---|---|
-| GET | `/health` | `health` | DB reachability, stale data, price coverage |
+| GET | `/health` | `health` | DB reachability, recalculation state, and price coverage (`ok`, `provisional`, `degraded`) |
 | GET | `/status` | `status` | Portfolio value, total gain, net contributions |
 | GET | `/summary` | `summary` | Per-position summary (shares, cost basis, gain) |
 | GET | `/allocation` | `allocation` | Asset allocation with percentages |
 | GET | `/cash` | `cash` | Cash balances by currency with USD values |
 | GET | `/performance` | `performance` | TWR, CAGR, Sharpe, MDD, benchmark comparison |
 | GET | `/mwr` | `mwr` | Money-weighted return (XIRR) |
-| GET | `/verify_prices` | `verify_prices` | Price coverage diagnostics (read-only) |
+| GET | `/verify_prices` | `verify_prices` | Price coverage diagnostics with split historical vs current-day gaps (read-only) |
 | GET | `/asset_analysis` | `asset_analysis` | Yahoo-backed asset analytics for arbitrary tickers |
 
 Note: the read-only `transactions` command currently has no GET endpoint in server.ts — use the CLI for transaction listing. The `/ready` endpoint (GET) is a health-check probe, not a CLI command mapping.
@@ -169,6 +169,11 @@ Optional fields for POST/PATCH/PUT bodies: price, currency, fees, feeCurrency (o
 ### Rules
 
 - Return the same JSON envelope shape as the CLI (`response.ts` / `docs/api-response-standardization-plan.md`).
+- `health` surfaces a tri-state diagnostic:
+  - `ok`: no stale prices, no historical checkpoint gaps, no recalculation needed
+  - `provisional`: only current-day checkpoint gaps remain
+  - `degraded`: stale prices, historical gaps, or recalculation needed
+- `verify_prices` keeps `coverage_issues` for backward compatibility and also returns `historical_coverage_issues` plus `current_day_missing` for clients that need to distinguish today-only gaps from true historical problems.
 - Reuse the shared service layer + `src/adapters/shared.ts` `WriteHandlers`. No calculation in the API adapter.
 - Write routes delegate to the same `WriteHandlers` as the MCP adapter and the underlying `commands/*` modules.
 - Authentication (API keys, JWT) is a deployment concern — the adapter must accept configurable middleware.
