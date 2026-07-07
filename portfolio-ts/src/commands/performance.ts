@@ -20,7 +20,7 @@ export interface PerformanceResult {
   end_date: string | null;
   start_value: number;
   end_value: number;
-  total_gain: number;
+  twr_gain_equivalent_usd: number;
   avg_daily_return: number;
   avg_investment_return: number;
   std_dev: number;
@@ -120,7 +120,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
         end_date: null,
         start_value: 0,
         end_value: 0,
-        total_gain: 0,
+        twr_gain_equivalent_usd: 0,
         avg_daily_return: 0,
         avg_investment_return: 0,
         std_dev: 0,
@@ -185,7 +185,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
       end_date: str(r["end_date"]),
       start_value: num(r["start_value"]),
       end_value: num(r["end_value"]),
-      total_gain: num(r["total_gain"]),
+      twr_gain_equivalent_usd: num(r["total_gain"]),
       avg_daily_return: num(r["avg_daily_return"]),
       avg_investment_return: num(r["avg_investment_return"]),
       std_dev: num(r["std_dev"]),

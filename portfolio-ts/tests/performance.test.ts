@@ -81,7 +81,7 @@ describe("getPerformance", () => {
     expect(result.end_date).toBe("2026-05-30");
     expect(result.start_value).toBe(10000);
     expect(result.end_value).toBe(11500);
-    expect(result.total_gain).toBe(1500);
+    expect(result.twr_gain_equivalent_usd).toBe(1500);
     expect(result.time_weighted_return_pct).toBe(15);
     expect(result.total_return_pct).toBe(15);
     expect(result.median_monthly_return).toBe(2.8);
@@ -96,14 +96,14 @@ describe("getPerformance", () => {
     expect(benchmark).toBe("SPY");
   });
 
-  test("total_gain reconciles with TWR: total_gain ≈ start_value * twr_pct / 100", async () => {
+  test("twr_gain_equivalent_usd reconciles with TWR: gain ≈ start_value * twr_pct / 100", async () => {
     setupMocks();
 
     const { getPerformance } = await import("../src/commands/performance.js");
     const { data: result } = await getPerformance();
 
     const expected = result.start_value * result.time_weighted_return_pct / 100;
-    const diff = Math.abs(result.total_gain - expected);
+    const diff = Math.abs(result.twr_gain_equivalent_usd - expected);
     expect(diff).toBeLessThan(0.01);
   });
 
@@ -304,6 +304,7 @@ describe("getPerformance — CLI integration", () => {
     expect(output.ok).toBe(true);
     expect(output.command).toBe("performance");
     expect(output.data.time_weighted_return_pct).toBe(15);
+    expect(output.data.twr_gain_equivalent_usd).toBe(1500);
     expect(output.data.cagr).toBe(32.5);
     expect(output.data.sharpe_ratio).toBe(1.35);
     expect(output.data.median_monthly_return).toBe(2.8);
@@ -314,6 +315,7 @@ describe("getPerformance — CLI integration", () => {
     expect(output.data.period_returns).toBeDefined();
     expect(output.data.rolling_12m_returns).toBeDefined();
     expect(Array.isArray(output.data.rolling_12m_returns)).toBe(true);
+    expect("total_gain" in output.data).toBe(false);
     expect(output.meta.benchmark).toBe("SPY");
 
     logSpy.mockRestore();

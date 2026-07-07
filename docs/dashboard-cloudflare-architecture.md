@@ -194,6 +194,7 @@ interface DashboardSnapshot {
   // ── performance (performance.ts:3-37) ──
   performance: {
     total_days: number;
+    twr_gain_equivalent_usd: number;
     total_return_pct: number;
     cagr: number;
     sharpe_ratio: number;

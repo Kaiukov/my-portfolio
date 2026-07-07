@@ -91,7 +91,7 @@ const performanceFixture = {
     end_date: "2026-06-03",
     start_value: 38000.0,
     end_value: 42500.12,
-    total_gain: 4500.12,
+    twr_gain_equivalent_usd: 4500.12,
     avg_daily_return: 0.023,
     avg_investment_return: 0.018,
     std_dev: 0.85,

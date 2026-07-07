@@ -402,7 +402,7 @@ Rows ordered **ascending by date** within the page.
   "values": {
     "start_value": 20000.0,
     "end_value": 54320.80,
-    "total_gain": 34320.80,
+    "twr_gain_equivalent_usd": 34320.80,
     "net_gain": 31820.80,
     "deposits": 50000.0,
     "withdrawals": 2000.0,
@@ -448,7 +448,8 @@ Rows ordered **ascending by date** within the page.
 }
 ```
 
-`total_return_pct` is a backward-compatible alias of `time_weighted_return_pct`.
+`twr_gain_equivalent_usd` is the TWR-derived USD gain equivalent for the selected period, not the accounting P&L metric from `status.total_gain`.
+Use `status.total_gain` for accounting gain and `time_weighted_return_pct` for investment performance.
 `total_invested` is a backward-compatible alias of `net_contributions` on the service layer.
 
 ### `summary`
