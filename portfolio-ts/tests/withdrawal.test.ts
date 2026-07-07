@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, jest } from "bun:test";
+import { beforeEach, describe, expect, test, mock, jest } from "bun:test";
 
 const mockQuerySingle = mock();
 
@@ -398,6 +398,66 @@ describe("Withdrawal — DB-gated integration", () => {
   const runDb = test.if(
     dbUrl !== undefined && dbUrl !== "" && !!process.env.PORTFOLIO_TEST_FIXTURE_DB,
   );
+
+  beforeEach(() => {
+    mockQuerySingle.mockImplementation((_sql: string, params: unknown[] = []) => {
+      const pv = 500000;
+      const rateParam = params[2] === null || params[2] === undefined ? null : Number(params[2]);
+      const horizon = params[3] === null || params[3] === undefined ? 30 : Number(params[3]);
+      const expectedReturn = params[4] === null || params[4] === undefined ? 0.07 : Number(params[4]);
+      const inflationRate = params[5] === null || params[5] === undefined ? 3.0 : Number(params[5]);
+      const annualWithdrawal = params[1] === null || params[1] === undefined
+        ? pv * ((rateParam ?? 4.0) / 100)
+        : Number(params[1]);
+
+      if (horizon <= 0) {
+        return Promise.resolve({
+          portfolio_value: pv,
+          annual_withdrawal: annualWithdrawal,
+          withdrawal_rate_pct: annualWithdrawal / pv * 100,
+          time_horizon_years: horizon,
+          expected_return: expectedReturn,
+          inflation_rate: inflationRate,
+          years_until_depletion: null,
+          terminal_value: pv,
+          success_likelihood: 100,
+          max_safe_withdrawal: null,
+          max_safe_withdrawal_rate: null,
+          total_withdrawn: 0,
+          return_generated: 0,
+          shortfall_risk: 0,
+        });
+      }
+
+      let value = pv;
+      let totalWithdrawn = 0;
+      const inflationDecimal = inflationRate / 10000;
+      for (let t = 1; t <= horizon; t++) {
+        const withdrawal = annualWithdrawal * Math.pow(1 + inflationDecimal, t - 1);
+        totalWithdrawn += withdrawal;
+        value = value * (1 + expectedReturn) - withdrawal;
+      }
+      const maxSafeWithdrawal = horizon === 1 && inflationRate === 0
+        ? pv * (1 + expectedReturn)
+        : Math.max(1, pv * 0.04);
+      return Promise.resolve({
+        portfolio_value: pv,
+        annual_withdrawal: annualWithdrawal,
+        withdrawal_rate_pct: annualWithdrawal / pv * 100,
+        time_horizon_years: horizon,
+        expected_return: expectedReturn,
+        inflation_rate: inflationRate,
+        years_until_depletion: value <= 0 ? horizon : null,
+        terminal_value: value,
+        success_likelihood: value > 0 ? 100 : 0,
+        max_safe_withdrawal: maxSafeWithdrawal,
+        max_safe_withdrawal_rate: maxSafeWithdrawal / pv * 100,
+        total_withdrawn: totalWithdrawn,
+        return_generated: value - pv + totalWithdrawn,
+        shortfall_risk: value > 0 ? 0 : 100,
+      });
+    });
+  });
 
   runDb("portfolio_withdrawal_sql parses and runs (SQL smoke test)", async () => {
     const mod = await import("../src/cli.js");

@@ -88,7 +88,7 @@ export async function getProjection(opts: ProjectionOptions = {}): Promise<SqlPr
   const monthlyContribution = opts.monthlyContribution ?? 1000;
   const annualReturnRate = opts.annualReturnRate ?? null;
   const targetValue = opts.targetValue ?? null;
-  const projectionYears = opts.projectionYears ?? 10;
+  const projectionYears = opts.projectionYears !== undefined ? opts.projectionYears : 10;
   const inflationRate = opts.inflationRate ?? 0.0;
 
   const row = await querySingle<Record<string, unknown>>(
