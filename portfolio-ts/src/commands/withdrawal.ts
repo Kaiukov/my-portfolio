@@ -54,11 +54,11 @@ export interface WithdrawalOptions {
 
 export async function getWithdrawal(opts: WithdrawalOptions = {}): Promise<WithdrawalResult> {
   const asOfDate = opts.asOfDate ?? new Date().toISOString().split("T")[0];
-  const annualWithdrawal = opts.annualWithdrawal ?? null;
-  const withdrawalRate = opts.withdrawalRate ?? null;
-  const timeHorizonYears = opts.timeHorizonYears ?? null;
-  const expectedReturn = opts.expectedReturn ?? null;
-  const inflationRate = opts.inflationRate ?? null;
+  const annualWithdrawal = opts.annualWithdrawal !== undefined ? opts.annualWithdrawal : null;
+  const withdrawalRate = opts.withdrawalRate !== undefined ? opts.withdrawalRate : null;
+  const timeHorizonYears = opts.timeHorizonYears !== undefined ? opts.timeHorizonYears : null;
+  const expectedReturn = opts.expectedReturn !== undefined ? opts.expectedReturn : null;
+  const inflationRate = opts.inflationRate !== undefined ? opts.inflationRate : null;
 
   const row = await querySingle<Record<string, unknown>>(
     `SELECT * FROM portfolio_withdrawal_sql(
