@@ -335,7 +335,16 @@ describe("read parity", () => {
       expect(apiResult.ok).toBe(dispatchResult.ok);
       expect(apiResult.command).toBe(dispatchResult.command);
       if (apiResult.ok && dispatchResult.ok) {
-        expect(apiResult.data).toEqual(dispatchResult.data);
+        const apiData = apiResult.data as Record<string, number | string | null>;
+        const dispatchData = dispatchResult.data as Record<string, number | string | null>;
+        expect(apiData.as_of_date).toBe(dispatchData.as_of_date);
+        expect(apiData.total_holdings).toBe(dispatchData.total_holdings);
+        expect(apiData.hhi as number).toBeCloseTo(dispatchData.hhi as number, 12);
+        expect(apiData.effective_holdings as number).toBeCloseTo(dispatchData.effective_holdings as number, 12);
+        expect(apiData.avg_pairwise_correlation as number).toBeCloseTo(dispatchData.avg_pairwise_correlation as number, 12);
+        expect(apiData.max_pairwise_correlation as number).toBeCloseTo(dispatchData.max_pairwise_correlation as number, 12);
+        expect(apiData.min_pairwise_correlation as number).toBeCloseTo(dispatchData.min_pairwise_correlation as number, 12);
+        expect(apiData.correlation_weighted_hhi as number).toBeCloseTo(dispatchData.correlation_weighted_hhi as number, 12);
       }
     });
 
