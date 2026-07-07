@@ -281,7 +281,9 @@ describe("handleRequest", () => {
     expect(body.ok).toBe(true);
     expect(body.command).toBe("performance");
     expect(body.data.time_weighted_return_pct).toBe(25);
+    expect(body.data.portfolio_growth_pct).toBe(25);
     expect(body.data.sharpe_ratio).toBe(1.5);
+    expect("total_return_pct" in body.data).toBe(false);
   });
 
   test("GET /mwr returns 200 with success envelope", async () => {

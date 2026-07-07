@@ -503,6 +503,8 @@ describe("mcpRead", () => {
     const data = result.data as Record<string, unknown>;
     expect(data.total_days).toBe(100);
     expect(data.time_weighted_return_pct).toBe(15);
+    expect(data.portfolio_growth_pct).toBe(15);
+    expect("total_return_pct" in data).toBe(false);
     expect(result.meta.count).toBeNull();
     expect(result.meta).toHaveProperty("prices_as_of", "2026-01-20");
   });

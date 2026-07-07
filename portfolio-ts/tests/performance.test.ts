@@ -83,7 +83,7 @@ describe("getPerformance", () => {
     expect(result.end_value).toBe(11500);
     expect(result.total_gain).toBe(1500);
     expect(result.time_weighted_return_pct).toBe(15);
-    expect(result.total_return_pct).toBe(15);
+    expect(result.portfolio_growth_pct).toBe(15);
     expect(result.median_monthly_return).toBe(2.8);
     expect(result.cagr).toBe(32.5);
     expect(result.sharpe_ratio).toBe(1.35);
@@ -92,7 +92,7 @@ describe("getPerformance", () => {
     expect(result.beta).toBe(0.95);
     expect(result.calmar_ratio).toBe(3.8235);
     expect(result.real_cagr).toBe(29.2683);
-    expect(result.real_total_return_pct).toBe(12.0731);
+    expect(result.real_portfolio_growth_pct).toBe(12.0731);
     expect(benchmark).toBe("SPY");
   });
 
@@ -175,7 +175,7 @@ describe("getPerformance", () => {
     expect(result.sharpe_ratio).toBe(0);
     expect(result.calmar_ratio).toBe(0);
     expect(result.real_cagr).toBe(0);
-    expect(result.real_total_return_pct).toBe(0);
+    expect(result.real_portfolio_growth_pct).toBe(0);
     expect(result.period_returns.SII).toBe(0);
     expect(result.rolling_12m_returns).toEqual([]);
     expect(benchmark).toBe("SPY");
@@ -310,7 +310,10 @@ describe("getPerformance — CLI integration", () => {
     expect(output.data.max_drawdown).toBe(8.5);
     expect(output.data.calmar_ratio).toBe(3.8235);
     expect(output.data.real_cagr).toBe(29.2683);
-    expect(output.data.real_total_return_pct).toBe(12.0731);
+    expect(output.data.portfolio_growth_pct).toBe(15);
+    expect(output.data.real_portfolio_growth_pct).toBe(12.0731);
+    expect("total_return_pct" in output.data).toBe(false);
+    expect("real_total_return_pct" in output.data).toBe(false);
     expect(output.data.period_returns).toBeDefined();
     expect(output.data.rolling_12m_returns).toBeDefined();
     expect(Array.isArray(output.data.rolling_12m_returns)).toBe(true);

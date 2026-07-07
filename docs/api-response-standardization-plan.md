@@ -412,7 +412,7 @@ Rows ordered **ascending by date** within the page.
   },
   "returns": {
     "time_weighted_return_pct": { "value": 171.6,  "assessment": "Excellent" },
-    "total_return_pct":      { "value": 171.6,  "assessment": "Excellent" },
+    "portfolio_growth_pct":  { "value": 171.6,  "assessment": "Cash-flow inclusive; not investment return" },
     "cagr_pct":              { "value": 89.4,   "assessment": "Excellent" },
     "avg_daily_return_pct":  { "value": 0.24,   "assessment": "Good" },
     "avg_monthly_return_pct":{ "value": 7.2,    "assessment": "Good" }
@@ -448,7 +448,8 @@ Rows ordered **ascending by date** within the page.
 }
 ```
 
-`total_return_pct` is a backward-compatible alias of `time_weighted_return_pct`.
+`portfolio_growth_pct` is the cash-flow-inclusive growth of start-to-end portfolio value.
+Use `time_weighted_return_pct` for actual investment performance.
 `total_invested` is a backward-compatible alias of `net_contributions` on the service layer.
 
 ### `summary`
