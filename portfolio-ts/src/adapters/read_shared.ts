@@ -277,11 +277,11 @@ export async function dispatchRead(
 
     if (toolName === "projection") {
       const asOfDate = asOfVal(args);
-      const monthlyContribution = floatField(args, "monthly_contribution", "monthlyContribution");
-      const annualReturnRate = floatField(args, "annual_return_rate", "annualReturnRate");
-      const targetValue = floatField(args, "target_value", "targetValue");
-      const projectionYears = intField(args, "projection_years", "projectionYears");
-      const inflationRate = floatField(args, "inflation_rate", "inflationRate");
+      const monthlyContribution = floatField(args, "monthly_contribution", "monthlyContribution", "monthly-contribution");
+      const annualReturnRate = floatField(args, "annual_return_rate", "annualReturnRate", "annual-return-rate");
+      const targetValue = floatField(args, "target_value", "targetValue", "target-value");
+      const projectionYears = intField(args, "projection_years", "projectionYears", "projection-years");
+      const inflationRate = floatField(args, "inflation_rate", "inflationRate", "inflation-rate");
       const data = await getProjection({
         asOfDate,
         monthlyContribution,
@@ -295,11 +295,11 @@ export async function dispatchRead(
 
     if (toolName === "withdrawal") {
       const asOfDate = asOfVal(args);
-      const annualWithdrawal = floatField(args, "annual_withdrawal", "annualWithdrawal");
-      const withdrawalRate = floatField(args, "withdrawal_rate", "withdrawalRate");
-      const timeHorizonYears = intField(args, "time_horizon_years", "timeHorizonYears");
-      const expectedReturn = floatField(args, "expected_return", "expectedReturn");
-      const inflationRate = floatField(args, "inflation_rate", "inflationRate");
+      const annualWithdrawal = floatField(args, "annual_withdrawal", "annualWithdrawal", "annual-withdrawal");
+      const withdrawalRate = floatField(args, "withdrawal_rate", "withdrawalRate", "withdrawal-rate");
+      const timeHorizonYears = intField(args, "time_horizon_years", "timeHorizonYears", "time-horizon-years");
+      const expectedReturn = floatField(args, "expected_return", "expectedReturn", "expected-return");
+      const inflationRate = floatField(args, "inflation_rate", "inflationRate", "inflation-rate");
       const data = await getWithdrawal({
         asOfDate,
         annualWithdrawal,
