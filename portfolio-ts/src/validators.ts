@@ -1,5 +1,12 @@
 export const STALE_MAX_AGE_DAYS = 5;
-export const DUST_ALLOCATION_THRESHOLD_PCT = 1;
+
+export function getDustAllocationThresholdPct(): number {
+  const raw = process.env.PORTFOLIO_DUST_THRESHOLD_PCT;
+  if (raw === undefined || raw === null) return 1;
+  const val = parseFloat(raw);
+  if (!Number.isFinite(val) || val < 0) return 1;
+  return val;
+}
 
 export const STABLECOINS = new Set([
   "USDT", "USDC", "DAI", "TUSD", "USDP", "FDUSD", "PYUSD", "USDE", "GUSD",
