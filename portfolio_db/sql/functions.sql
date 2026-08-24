@@ -840,7 +840,6 @@ $$;
 -- Cash balances snapshot: FX-converted cash balances as of a given date.
 -- Returns cash per bucket with native currency balance and USD value.
 -- All financial calculations are owned by PostgreSQL.
-DROP FUNCTION IF EXISTS portfolio_cash_sql(DATE);
 CREATE OR REPLACE FUNCTION portfolio_cash_sql(p_as_of_date DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (
     cash_key       TEXT,
