@@ -384,7 +384,7 @@ const negpct=(v,d=2)=>'<span class="neg">'+(v!=null?v.toFixed(d)+'%':'—')+'</s
 // returns
 setp('p_twr',p.time_weighted_return_pct,true);
 setp('p_mwr',MWR_PCT,true);
-setp('p_tot',p.total_return_pct,true);
+setp('p_tot',p.portfolio_growth_pct,true);
 setp('p_mm',p.median_monthly_return,true);
 // risk
 el('p_vol').textContent=(p.hist_volatility!=null?p.hist_volatility.toFixed(1)+'%':'—');

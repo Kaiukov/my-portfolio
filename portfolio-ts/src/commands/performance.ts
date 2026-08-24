@@ -20,7 +20,7 @@ export interface PerformanceResult {
   end_date: string | null;
   start_value: number;
   end_value: number;
-  total_gain: number;
+  twr_gain_equivalent_usd: number;
   avg_daily_return: number;
   avg_investment_return: number;
   std_dev: number;
@@ -33,7 +33,7 @@ export interface PerformanceResult {
   avg_drawdown: number;
   avg_drawdown_duration: number;
   time_weighted_return_pct: number;
-  total_return_pct: number;
+  portfolio_growth_pct: number;
   median_monthly_return: number;
   cagr: number;
   beta: number;
@@ -50,7 +50,7 @@ export interface PerformanceResult {
   down_capture_ratio: number;
   calmar_ratio: number;
   real_cagr: number;
-  real_total_return_pct: number;
+  real_portfolio_growth_pct: number;
   period_returns: PeriodReturns;
   rolling_12m_returns: RollingReturnsEntry[];
 }
@@ -120,7 +120,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
         end_date: null,
         start_value: 0,
         end_value: 0,
-        total_gain: 0,
+        twr_gain_equivalent_usd: 0,
         avg_daily_return: 0,
         avg_investment_return: 0,
         std_dev: 0,
@@ -133,7 +133,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
         avg_drawdown: 0,
         avg_drawdown_duration: 0,
         time_weighted_return_pct: 0,
-        total_return_pct: 0,
+        portfolio_growth_pct: 0,
         median_monthly_return: 0,
         cagr: 0,
         beta: 0,
@@ -150,7 +150,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
         down_capture_ratio: 0,
         calmar_ratio: 0,
         real_cagr: 0,
-        real_total_return_pct: 0,
+        real_portfolio_growth_pct: 0,
         period_returns: { "1M": 0, "3M": 0, "6M": 0, YTD: 0, "1Y": 0, SII: 0 },
         rolling_12m_returns: [],
       },
@@ -185,7 +185,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
       end_date: str(r["end_date"]),
       start_value: num(r["start_value"]),
       end_value: num(r["end_value"]),
-      total_gain: num(r["total_gain"]),
+      twr_gain_equivalent_usd: num(r["total_gain"]),
       avg_daily_return: num(r["avg_daily_return"]),
       avg_investment_return: num(r["avg_investment_return"]),
       std_dev: num(r["std_dev"]),
@@ -198,7 +198,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
       avg_drawdown: num(r["avg_drawdown"]),
       avg_drawdown_duration: num(r["avg_drawdown_duration"]),
       time_weighted_return_pct: num(r["time_weighted_return_pct"]),
-      total_return_pct: num(r["total_return_pct"]),
+      portfolio_growth_pct: num(r["total_return_pct"]),
       median_monthly_return: num(r["median_monthly_return"]),
       cagr: num(r["cagr"]),
       beta: num(r["beta"]),
@@ -215,7 +215,7 @@ export async function getPerformance(opts: PerformanceOptions = {}): Promise<{ d
       down_capture_ratio: num(r["down_capture_ratio"]),
       calmar_ratio: num(r["calmar_ratio"]),
       real_cagr: num(r["real_cagr"]),
-      real_total_return_pct: num(r["real_total_return_pct"]),
+      real_portfolio_growth_pct: num(r["real_total_return_pct"]),
       period_returns: periodReturns as unknown as PeriodReturns,
       rolling_12m_returns: rolling12m,
     },
