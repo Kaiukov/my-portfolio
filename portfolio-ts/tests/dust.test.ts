@@ -50,4 +50,11 @@ describe("filterDustHoldings", () => {
     expect(result.meta.threshold_pct).toBe(1);
     expect(result.rows.map((row) => row.asset)).toEqual(["AAPL"]);
   });
+
+  test("falls back to 1.0 for malformed env values", () => {
+    for (const value of ["0.5junk", "   "]) {
+      process.env.PORTFOLIO_DUST_THRESHOLD_PCT = value;
+      expect(filterDustHoldings([]).meta.threshold_pct).toBe(1);
+    }
+  });
 });
