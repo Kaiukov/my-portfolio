@@ -34,6 +34,72 @@ const TEMP_TABLES = `
 
 MAYBE_SKIP("integration: stablecoin cash support (#211)", () => {
   test(
+    "BTC/USDT BUY deducts exact notional and fees from USDT, leaving USD unchanged (#361)",
+    async () => {
+      const sql = new SQL(DB_URL!, { max: 1 });
+      try {
+        await sql.begin(async (tx: any) => {
+          await tx.unsafe(TEMP_TABLES);
+          await tx.unsafe(`
+            INSERT INTO transactions (date, asset, action, quantity, price, fees, currency, fee_currency, exchange)
+            VALUES
+              ('2026-07-01', 'USD',     'DEPOSIT', 1000,       NULL,  0,    'USD',  NULL, 'bank'),
+              ('2026-07-01', 'USDT',    'DEPOSIT', 500,        NULL,  0,    'USD',  NULL, 'Binance'),
+              ('2026-07-08', 'BTC-USD', 'BUY',     0.00161,    62096, 0.03, 'USDT', NULL, 'Binance'),
+              ('2026-08-21', 'BTC-USD', 'BUY',     0.00129,    76996, 0,    'USDT', NULL, 'Binance'),
+              ('2026-08-21', 'USDT',    'FEE',     0.09932484, NULL,  NULL, 'USD',  NULL, 'Binance')
+          `);
+          await tx.unsafe(`
+            INSERT INTO prices (date, ticker, price)
+            VALUES ('2026-08-21', 'BTC-USD', 80000)
+          `);
+
+          const cash = await tx.unsafe(
+            `SELECT * FROM portfolio_cash_sql($1) ORDER BY cash_key`,
+            ["2026-08-21"],
+          ) as any[];
+          const usd = cash.find((row: any) => row.cash_key === "USD");
+          const usdt = cash.find((row: any) => row.cash_key === "USDT");
+
+          expect(Number(usd.balance)).toBe(1000);
+          expect(Number(usdt.balance)).toBeCloseTo(300.57127516, 8);
+          expect(500 - Number(usdt.balance)).toBeCloseTo(199.42872484, 8);
+          const [summary] = await tx.unsafe(
+            `SELECT portfolio_value_usd FROM portfolio_summary`,
+          ) as any[];
+          // Hand calc: USD 1000 + USDT 300.57127516 + BTC (0.0029 * 80000).
+          expect(Number(summary.portfolio_value_usd)).toBeCloseTo(1532.57127516, 8);
+          expect(await tx.unsafe(
+            `SELECT count(*)::int AS count FROM transactions WHERE action LIKE 'EXCHANGE_%'`,
+          )).toEqual([{ count: 0 }]);
+        });
+      } finally {
+        await sql.end();
+      }
+    },
+    { timeout: 15000 },
+  );
+
+  test(
+    "cash and summary views reuse portfolio_cash_sql instead of duplicating cash logic (#361)",
+    async () => {
+      const sql = new SQL(DB_URL!, { max: 1 });
+      try {
+        const [views] = await sql.unsafe(`
+          SELECT pg_get_viewdef('cash_balances'::regclass) AS cash,
+                 pg_get_viewdef('portfolio_summary'::regclass) AS summary
+        `) as any[];
+        expect(views.cash).toContain("portfolio_cash_sql(CURRENT_DATE)");
+        expect(views.summary).toContain("portfolio_cash_sql(CURRENT_DATE)");
+        expect(views.summary).toContain("sum(portfolio_cash_sql.usd_value)");
+      } finally {
+        await sql.end();
+      }
+    },
+    { timeout: 15000 },
+  );
+
+  test(
     "hand-calc fixture: USDT 500 + USDC 250 → separate CASH USDT/CASH USDC buckets, 1:1 value",
     async () => {
       const sql = new SQL(DB_URL!, { max: 1 });
