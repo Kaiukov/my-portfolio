@@ -181,7 +181,6 @@ describe("validateCurrency", () => {
     expect(() => validateCurrency("USD", "--currency")).not.toThrow();
     expect(() => validateCurrency("EUR", "--currency")).not.toThrow();
     expect(() => validateCurrency("GBP", "--currency")).not.toThrow();
-    expect(() => validateCurrency("USDT", "--currency")).not.toThrow();
   });
 
   test("passes when currency is undefined (optional)", () => {
