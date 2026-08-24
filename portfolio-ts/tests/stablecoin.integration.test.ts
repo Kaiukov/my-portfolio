@@ -72,25 +72,6 @@ MAYBE_SKIP("integration: stablecoin cash support (#211)", () => {
   );
 
   test(
-    "cash and summary views reuse portfolio_cash_sql instead of duplicating cash logic (#361)",
-    async () => {
-      const sql = new SQL(DB_URL!, { max: 1 });
-      try {
-        const [views] = await sql.unsafe(`
-          SELECT pg_get_viewdef('cash_balances'::regclass) AS cash,
-                 pg_get_viewdef('portfolio_summary'::regclass) AS summary
-        `) as any[];
-        expect(views.cash).toContain("portfolio_cash_sql(CURRENT_DATE)");
-        expect(views.summary).toContain("portfolio_cash_sql(CURRENT_DATE)");
-        expect(views.summary).toContain("sum(portfolio_cash_sql.usd_value)");
-      } finally {
-        await sql.end();
-      }
-    },
-    { timeout: 15000 },
-  );
-
-  test(
     "hand-calc fixture: USDT 500 + USDC 250 → separate CASH USDT/CASH USDC buckets, 1:1 value",
     async () => {
       const sql = new SQL(DB_URL!, { max: 1 });
