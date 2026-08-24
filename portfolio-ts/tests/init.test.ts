@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const mockQuery = mock(async (_sqlText: string, _params?: unknown[]) => []);
@@ -42,6 +42,16 @@ describe("initDb (#140) — unit tests with mocked db", () => {
     mockQuery.mockImplementation(async () => []);
     mockQuerySingle.mockReset();
     mockQuerySingle.mockImplementation(async () => ({ count: 4 }));
+  });
+
+  test("keeps portfolio_cash_sql replaceable while dependent views exist", async () => {
+    const { resolveSqlDir } = await import("../src/sql_apply.js");
+    const functionsSql = readFileSync(
+      join(resolveSqlDir(), "functions.sql"),
+      "utf-8",
+    );
+    expect(functionsSql).not.toContain("DROP FUNCTION IF EXISTS portfolio_cash_sql(DATE)");
+    expect(functionsSql).toContain("CREATE OR REPLACE FUNCTION portfolio_cash_sql(");
   });
 
   test("applies 5 SQL files in the required order and reports ready when 4 tables exist", async () => {
