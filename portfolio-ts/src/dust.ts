@@ -1,4 +1,4 @@
-import { DUST_ALLOCATION_THRESHOLD_PCT } from "./validators.js";
+import { getDustAllocationThresholdPct } from "./validators.js";
 
 export interface DustFilterMeta {
   threshold_pct: number;
@@ -20,23 +20,24 @@ export interface DustFilterResult<T extends DustHolding> {
   meta: DustFilterMeta;
 }
 
-function isDust(allocationPct: number): boolean {
-  return Math.abs(allocationPct) < DUST_ALLOCATION_THRESHOLD_PCT;
+function isDust(allocationPct: number, thresholdPct: number): boolean {
+  return Math.abs(allocationPct) < thresholdPct;
 }
 
 export function filterDustHoldings<T extends DustHolding>(
   rows: T[],
   includeDust = false,
 ): DustFilterResult<T> {
+  const thresholdPct = getDustAllocationThresholdPct();
   const hiddenAssets = rows
-    .filter((row) => isDust(Number(row.allocation_pct)))
+    .filter((row) => isDust(Number(row.allocation_pct), thresholdPct))
     .map((row) => row.asset);
-  const visibleRows = includeDust ? rows : rows.filter((row) => !isDust(Number(row.allocation_pct)));
+  const visibleRows = includeDust ? rows : rows.filter((row) => !isDust(Number(row.allocation_pct), thresholdPct));
 
   return {
     rows: visibleRows,
     meta: {
-      threshold_pct: DUST_ALLOCATION_THRESHOLD_PCT,
+      threshold_pct: thresholdPct,
       include_dust: includeDust,
       filtered: !includeDust,
       raw_count: rows.length,
