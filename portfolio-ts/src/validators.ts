@@ -122,10 +122,10 @@ export function validateAction(action: string): string {
 export function validateCurrency(currency: string | undefined, flagName: string): void {
   if (currency === undefined || currency === null) return;
   const upper = currency.toUpperCase();
-  if (!ALLOWED_CURRENCIES.has(upper)) {
+  if (!ALLOWED_CURRENCIES.has(upper) && !isStablecoin(upper)) {
     throw new ValidationError(
       `${flagName}: unknown currency ${JSON.stringify(currency)}. ` +
-      `Valid: ${[...ALLOWED_CURRENCIES].join(", ")}`,
+      `Valid: ${[...ALLOWED_CURRENCIES, ...STABLECOINS].join(", ")}`,
     );
   }
 }
