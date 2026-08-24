@@ -393,6 +393,10 @@ describe("handleRequest", () => {
     expect(perfRes.status).toBe(200);
     expect(perfBody.ok).toBe(true);
     expect(perfBody.command).toBe("performance");
+    expect(perfBody.data.twr_gain_equivalent_usd).toBe(20000);
+    expect(perfBody.data.portfolio_growth_pct).toBe(25);
+    expect(perfBody.data).not.toHaveProperty("total_gain");
+    expect(perfBody.data).not.toHaveProperty("total_return_pct");
     expect(perfBody.meta).toHaveProperty("prices_as_of", "2026-01-14");
     expect(perfBody.meta).toHaveProperty("price_age_days", 1);
     expect(perfBody.meta).toHaveProperty("stale", false);
