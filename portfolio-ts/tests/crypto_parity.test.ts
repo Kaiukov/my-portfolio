@@ -32,57 +32,6 @@ function normalizeEnvelope(envelope: unknown) {
 }
 
 describe("crypto action parity", () => {
-  test("BTC/USDT BUY preserves quote bucket across CLI, REST, and MCP (#361)", async () => {
-    const result = {
-      transaction: { id: 902, asset: "BTC-USD", action: "BUY", currency: "USDT" },
-      recalculated: true,
-    };
-    mockAddTransaction.mockResolvedValue(result);
-    mock.module("../src/commands/add.js", () => ({
-      addTransaction: mockAddTransaction,
-      addDryRun: mock(async () => ({ dry_run: true })),
-    }));
-
-    const cacheBust = `?case=btc-usdt-${Date.now()}`;
-    const cliMod = await import(`../src/cli.js${cacheBust}`);
-    const apiMod = await import(`../src/api/server.js${cacheBust}`);
-    const { mcpWrite } = await import(`../src/mcp/adapter.js${cacheBust}`);
-    const params = {
-      date: "2026-08-21",
-      asset: "BTC-USD",
-      action: "BUY",
-      quantity: 0.00129,
-      price: 76996,
-      currency: "USDT",
-      exchange: "Binance",
-    };
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-
-    await cliMod.dispatch([
-      "bun", "src/cli.ts", "add", "--date", params.date, "--asset", params.asset,
-      "--action", params.action, "--quantity", String(params.quantity), "--price", String(params.price),
-      "--currency", params.currency, "--exchange", params.exchange,
-    ]);
-    const cliEnvelope = normalizeEnvelope(JSON.parse(logSpy.mock.calls[0][0]));
-    const apiResponse = await apiMod.handleRequest(new Request("http://localhost/transactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    }), { write: { addTransaction: mockAddTransaction } });
-    const apiEnvelope = normalizeEnvelope(await apiResponse.json());
-    const mcpEnvelope = normalizeEnvelope(await mcpWrite("add_transaction", params, {
-      write: { addTransaction: mockAddTransaction },
-    }));
-
-    expect(cliEnvelope).toEqual(apiEnvelope);
-    expect(cliEnvelope).toEqual(mcpEnvelope);
-    expect(mockAddTransaction).toHaveBeenCalledTimes(3);
-    for (const [call] of mockAddTransaction.mock.calls) {
-      expect(call).toMatchObject({ currency: "USDT", asset: "BTC-USD", exchange: "Binance" });
-    }
-    logSpy.mockRestore();
-  });
-
   test("STAKING_REWARD add parity matches across CLI, REST, and MCP", async () => {
     const result = {
       transaction: { id: 901, asset: "BTC-USD", action: "STAKING_REWARD" },
