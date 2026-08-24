@@ -853,18 +853,25 @@ LANGUAGE sql
 STABLE
 AS $$
     WITH base_txns AS (
-        SELECT * FROM transactions WHERE date <= p_as_of_date
+        SELECT t.*,
+            CASE
+                WHEN upper(t.action) IN ('BUY', 'SELL') AND NOT is_cash_like_sql(t.asset)
+                    THEN COALESCE(NULLIF(t.currency, ''), t.asset)
+                ELSE t.asset
+            END AS cash_asset
+        FROM transactions t
+        WHERE t.date <= p_as_of_date
     ),
     trade_cash AS (
         SELECT
-            get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset)) AS cash_key,
-            cash_display_currency_sql(get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset))) AS currency,
+            get_cash_key_for_asset_sql(t.cash_asset, get_asset_type_sql(t.cash_asset)) AS cash_key,
+            cash_display_currency_sql(get_cash_key_for_asset_sql(t.cash_asset, get_asset_type_sql(t.cash_asset))) AS currency,
             CASE
-                WHEN t.asset LIKE 'CASH %' THEN t.asset
-                WHEN get_asset_type_sql(t.asset) = 'cash_base' THEN 'CASH USD'
-                WHEN get_asset_type_sql(t.asset) = 'cash_stable' THEN 'CASH ' || upper(t.asset)
-                WHEN get_asset_type_sql(t.asset) = 'cash_fx'
-                    THEN 'CASH ' || cash_display_currency_sql(get_cash_key_for_asset_sql(t.asset, get_asset_type_sql(t.asset)))
+                WHEN t.cash_asset LIKE 'CASH %' THEN t.cash_asset
+                WHEN get_asset_type_sql(t.cash_asset) = 'cash_base' THEN 'CASH USD'
+                WHEN get_asset_type_sql(t.cash_asset) = 'cash_stable' THEN 'CASH ' || upper(t.cash_asset)
+                WHEN get_asset_type_sql(t.cash_asset) = 'cash_fx'
+                    THEN 'CASH ' || cash_display_currency_sql(get_cash_key_for_asset_sql(t.cash_asset, get_asset_type_sql(t.cash_asset)))
                 ELSE NULL
             END AS display_bucket,
             CASE
