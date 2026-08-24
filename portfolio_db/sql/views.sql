@@ -67,7 +67,7 @@ CREATE OR REPLACE VIEW portfolio_summary AS
 SELECT
     (SELECT COUNT(DISTINCT asset) FROM current_holdings) AS holding_count,
     (SELECT SUM(usd_value) FROM portfolio_cash_sql(CURRENT_DATE)) AS total_cash_usd,
-    (SELECT SUM(value_usd) FROM portfolio_allocation) AS portfolio_value_usd,
+    portfolio_value_asof_sql(CURRENT_DATE) AS portfolio_value_usd,
     (SELECT MAX(date) FROM transactions) AS last_transaction_date,
     (SELECT COUNT(*) FROM transactions) AS transaction_count,
     CURRENT_TIMESTAMP AS generated_at;

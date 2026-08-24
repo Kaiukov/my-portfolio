@@ -49,6 +49,10 @@ MAYBE_SKIP("integration: stablecoin cash support (#211)", () => {
               ('2026-08-21', 'BTC-USD', 'BUY',     0.00129,    76996, 0,    'USDT', NULL, 'Binance'),
               ('2026-08-21', 'USDT',    'FEE',     0.09932484, NULL,  NULL, 'USD',  NULL, 'Binance')
           `);
+          await tx.unsafe(`
+            INSERT INTO prices (date, ticker, price)
+            VALUES ('2026-08-21', 'BTC-USD', 80000)
+          `);
 
           const cash = await tx.unsafe(
             `SELECT * FROM portfolio_cash_sql($1) ORDER BY cash_key`,
@@ -60,6 +64,11 @@ MAYBE_SKIP("integration: stablecoin cash support (#211)", () => {
           expect(Number(usd.balance)).toBe(1000);
           expect(Number(usdt.balance)).toBeCloseTo(300.57127516, 8);
           expect(500 - Number(usdt.balance)).toBeCloseTo(199.42872484, 8);
+          const [summary] = await tx.unsafe(
+            `SELECT portfolio_value_usd FROM portfolio_summary`,
+          ) as any[];
+          // Hand calc: USD 1000 + USDT 300.57127516 + BTC (0.0029 * 80000).
+          expect(Number(summary.portfolio_value_usd)).toBeCloseTo(1532.57127516, 8);
           expect(await tx.unsafe(
             `SELECT count(*)::int AS count FROM transactions WHERE action LIKE 'EXCHANGE_%'`,
           )).toEqual([{ count: 0 }]);
