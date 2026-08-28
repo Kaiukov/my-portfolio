@@ -1544,9 +1544,10 @@ AS $$
             LAG(p.price) OVER (ORDER BY p.date) AS prev_price
         FROM prices p
         CROSS JOIN params prm
+        CROSS JOIN dr_bounds b
         WHERE p.ticker = prm.benchmark_ticker
           AND (prm.as_of_date IS NULL OR p.date <= prm.as_of_date)
-          AND (prm.from_date IS NULL OR p.date >= prm.from_date)
+          AND p.date >= b.start_date::DATE
         ORDER BY p.date
     ),
     bench_returns AS (
