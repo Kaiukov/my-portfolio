@@ -144,6 +144,28 @@ exchange reconciliation-20260911-usdt-fix
   already 5 cents below the documents — the two residuals are coupled. Value ≈ $0.7
   (0.004 % of the portfolio) and below the configured dust threshold (#336).
 
+### Income-line tie-out (why the last cents cannot be closed from these documents)
+
+Bucket-level cash ties to within 6 cents, but the ledger's income lines are short of the
+broker's aggregates, so the two together cannot be localised from a **grouped** report:
+
+| Line | Ledger (2026, USD) | Broker reports | Diff |
+|---|---|---|---|
+| Gross dividends | 112.86 | 115.33 (78.41 + 36.92) | −2.47 |
+| Withheld tax | 12.00 | 13.69 (8.15 + 5.54) | −1.69 |
+| Net dividends | 100.86 | 101.64 | **−0.78** |
+| EUR dividends | 13.48 (2.54 + 10.94) | 15.83 | **−2.35** |
+
+≈ $3.5 (€ + $) of income is missing from the ledger, absorbed elsewhere so the buckets still
+tie to 6 cents. Both broker reports list every income/trade line as `Grouped` with no
+per-transaction detail and the Binance balances come from screenshots, so the exact rows
+cannot be identified from the available documents. Closing this needs:
+
+1. a **non-grouped Freedom24 statement** (per-dividend / per-trade lines) for both accounts;
+2. a **Binance transaction-history export** (CSV), which would also replace the labelled USDT
+   correction with the real row;
+3. a **Revolut statement** for the USD balance (currently taken from a screenshot).
+
 ## Rollout
 
 DEV/practice copy first (`pg_dump` → migrate → verify the five cash buckets), then PROD on
