@@ -10,6 +10,7 @@ import {
   validateAssetSymbol,
   validateAction,
   validateCurrency,
+  warnOnQuoteCurrencyMismatch,
   isStablecoin,
 } from "../validators.js";
 import { parseRow, type TransactionRow } from "./transactions.js";
@@ -116,6 +117,10 @@ export async function editTransaction(
     [newAsset],
   );
   const newAssetType = assetRow?.asset_type ?? existing.asset_type;
+
+  if (newAction === "BUY" || newAction === "SELL") {
+    warnOnQuoteCurrencyMismatch(newAsset, changes.currency ?? existing.currency ?? undefined);
+  }
 
   if (newAction === "FEE" || newAction === "TAX" || newAction === "DIVIDEND" || newAction === "INTEREST") {
     const finalPrice = changes.price !== undefined ? changes.price : existing.price;

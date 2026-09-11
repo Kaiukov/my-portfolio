@@ -8,6 +8,7 @@ import {
   validateAssetSymbol,
   validateAction,
   validateCurrency,
+  warnOnQuoteCurrencyMismatch,
   isStablecoin,
 } from "../validators.js";
 import { applyStakingReward } from "./reward.js";
@@ -66,6 +67,7 @@ async function prepareAdd(params: {
 
   validateAssetSymbol(params.asset, action);
   validateCurrency(params.currency, "--currency");
+  warnOnQuoteCurrencyMismatch(params.asset, params.currency);
 
   if (!params.exchange || !params.exchange.trim()) {
     throw new ValidationError(
