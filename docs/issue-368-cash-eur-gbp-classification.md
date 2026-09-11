@@ -101,6 +101,49 @@ traded in EUR.
 - Pre-existing and unrelated: `portfolio_correlation_matrix_sql()` raises
   `structure of query does not match function result type` — tracked separately (#369).
 
+## Post-fix reconciliation (local practice copy, 2026-09-11)
+
+After `migration_004` the local copy was reconciled item by item against the three
+external sources:
+
+| Asset | Portfolio | External | Diff | Status |
+|---|---|---|---|---|
+| USD | 183.11000000 | 183.16000000 | −0.05 | ROUNDING (0.03 %) |
+| EUR | 18.83000000 | 18.84000000 | −0.01 | ROUNDING (0.05 %) |
+| GBP | 2.65000000 | 2.65000000 | 0 | OK |
+| USDC | 289.28500635 | 289.28500635 | 0 | OK |
+| USDT | 2291.91551688 | 2291.91551688 | 0 | OK |
+| SCHD / SPYM / SPCX / SGOV / XLU / VGIT / VGEU.DE / VWRP.L / IGLN.L | exact | exact | 0 | OK |
+| ETH | 0.19404725 | 0.19404725 | 0 | OK |
+| BTC | 0.02302429 | 0.02302620 | −0.00000191 | DUST (≈ $0.19) |
+| WBETH | 0.05750268 | 0.05750285 | −0.00000017 | DUST |
+| BNB / PAXG | not tracked | 0.00053641 / 0.00007691 | — | DUST (≈ $0.53) |
+
+`portfolio_value` after the fix and the USDT correction: **19 613.29 USD**, total cash
+**2 789.82 USD** (external 2 789.87).
+
+### USDT balance correction
+
+The ledger's USDT bucket was **+0.87067516** above the exchange (spot 2291.15977282 +
+funding 0.75574406 = 2291.91551688). The drift cannot be attributed to a specific ledger
+row — it needs a Binance transaction-history export. It is therefore recorded as an
+explicitly labelled correction, never as a silent balancing entry:
+
+```
+date 2026-09-11 | asset USDT | action WITHDRAW | quantity 0.87067516 | currency USD
+exchange reconciliation-20260911-usdt-fix
+```
+
+### Residuals that are deliberately not "corrected"
+
+- **EUR −0.01 / USD −0.05**: every external line item is rounded to two decimals, and the
+  broker's own per-account arithmetic closes on those rounded numbers; the ledger carries
+  the underlying fills. Forcing parity would require inventing cent-level rows.
+- **BNB / PAXG / BTC / WBETH dust**: leftovers from rounded sells. Adding them to the
+  ledger without also moving the corresponding cash would break the USD bucket, which is
+  already 5 cents below the documents — the two residuals are coupled. Value ≈ $0.7
+  (0.004 % of the portfolio) and below the configured dust threshold (#336).
+
 ## Rollout
 
 DEV/practice copy first (`pg_dump` → migrate → verify the five cash buckets), then PROD on
