@@ -166,6 +166,29 @@ cannot be identified from the available documents. Closing this needs:
    correction with the real row;
 3. a **Revolut statement** for the USD balance (currently taken from a screenshot).
 
+### Income lines — what the Freedom24 e-mails proved
+
+The broker's *reports* only print grouped lines, but its notification e-mails (Gmail) carry the
+individual credits. Cross-check against the ledger:
+
+- **7 dividends for CY 1575211 in Jun–Sep 2026 tie to the cent**: VGIT 3.68 (record 2026-06-01),
+  SPYM 5.25 (06-12), SCHD 1.52 (06-24), VGIT 3.70 + SGOV 7.67 (08-03), VGIT 3.92 + SGOV 7.68
+  (09-01) — all present with identical amounts.
+- **Account attribution confirmed**: the two large SCHD rows 17.73 (2026-03-31) + 19.19
+  (2026-06-24) = **36.92** = exactly the broker's CY 1575609 dividend total for the period,
+  so the remaining USD dividend rows (75.94) belong to CY 1575211 against a documented **78.41**.
+- **Applied, cash-neutral — €2.35 dividend restored.** VGEU.EU 2.35 EUR (record date 2025-12-19,
+  paid 2026-01-07, 0.167559 EUR × 14 shares) was missing from the ledger. It is now recorded and
+  the same 2.35 EUR is re-attributed out of the unexplained `reconciliation-20260704` deposit
+  (id 2298), so **no cash bucket moves**: EUR dividend income 2026 is now **15.83 = the broker's
+  figure exactly** (was 13.48).
+- **Open — USD.** The e-mails document two VGIT credits absent from the ledger: **2.87 USD**
+  (record date 2026-02-02) and **3.32 USD** (2026-03-02). But the CY 1575211 dividend rows are only
+  **2.47 USD** short of the broker's aggregate (75.94 vs 78.41), so adding both would overshoot by
+  3.72 — one of them (or another row) must already be represented under a different label.
+  Splitting this requires the non-grouped statement, so **no USD income row was added**; forcing it
+  from the current evidence would break the aggregate tie.
+
 ## Rollout
 
 DEV/practice copy first (`pg_dump` → migrate → verify the five cash buckets), then PROD on
