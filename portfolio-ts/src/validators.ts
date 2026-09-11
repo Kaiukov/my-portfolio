@@ -137,3 +137,69 @@ export function validateCurrency(currency: string | undefined, flagName: string)
     );
   }
 }
+
+/**
+ * Quote (market) currency implied by a Yahoo-style exchange suffix.
+ * Mirrors the suffix handling of `get_asset_type_sql()` /
+ * `get_cash_key_for_asset_sql()` in `portfolio_db/sql/functions.sql` — keep in sync.
+ */
+export const MARKET_CURRENCY_BY_SUFFIX: Record<string, string> = {
+  ".DE": "EUR",
+  ".L": "GBP",
+  ".T": "JPY",
+  ".SW": "CHF",
+  ".TO": "CAD",
+  ".AX": "AUD",
+  ".HK": "HKD",
+  ".SG": "SGD",
+};
+
+/**
+ * Market quote currency for a listed instrument, or `null` when the suffix
+ * carries no currency information (US listings, FX pairs, crypto, stablecoins).
+ */
+export function instrumentQuoteCurrency(asset: string): string | null {
+  const upper = (asset ?? "").toUpperCase().trim();
+  for (const [suffix, currency] of Object.entries(MARKET_CURRENCY_BY_SUFFIX)) {
+    if (upper.endsWith(suffix)) return currency;
+  }
+  return null;
+}
+
+/**
+ * Warn when a transaction records a currency that contradicts the instrument's
+ * market currency. `portfolio_cash_sql()` books the cash leg of a BUY/SELL into
+ * the bucket named by the transaction `currency` (see #362/#365), so a wrong
+ * value silently inflates one cash bucket and deflates another — the failure mode
+ * behind #368 (EUR/GBP phantom). Warning only: a trade in a foreign listing can
+ * legitimately settle in another currency, so this must not block a write.
+ *
+ * Returns the warning message (also emitted via `console.warn`, matching the
+ * deprecated-date warning above) or `null` when there is nothing to flag.
+ */
+export function warnOnQuoteCurrencyMismatch(
+  asset: string,
+  currency: string | undefined,
+): string | null {
+  if (!asset || !asset.trim()) return null;
+  if (currency === undefined || currency === null || !String(currency).trim()) return null;
+
+  const upper = asset.toUpperCase().trim();
+  if (isStablecoin(upper)) return null;
+  if (upper.endsWith("USD=X") || upper.endsWith("-USD")) return null;
+  if (ALLOWED_CURRENCIES.has(upper)) return null;
+
+  const expected = instrumentQuoteCurrency(upper);
+  if (expected === null) return null;
+
+  const provided = String(currency).toUpperCase().trim();
+  if (provided === expected || isStablecoin(provided)) return null;
+
+  const message =
+    `${asset} is a ${expected}-denominated listing but --currency is ${provided}. ` +
+    `The cash leg of this transaction will be booked into the ${provided} bucket ` +
+    `(portfolio_cash_sql), inflating it. Use --currency ${expected} unless the trade ` +
+    `really settled in ${provided}.`;
+  console.warn(`[warning] ${message}`);
+  return message;
+}

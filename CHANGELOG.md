@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-11
+
+### Added
+- **#368** — write-time guard for the instrument quote currency. `add` and `edit` now warn
+  when a `BUY`/`SELL` records a `--currency` that contradicts the instrument's market
+  suffix (`.DE` → EUR, `.L` → GBP, `.T` → JPY, `.SW` → CHF, `.TO` → CAD, `.AX` → AUD,
+  `.HK` → HKD, `.SG` → SGD). Warning only — a foreign listing can legitimately settle in
+  another currency (e.g. crypto settled in USDT, the #361 case), so valid writes are not
+  blocked. Closes the class of silent cash-bucket misrouting behind #368.
+
+### Fixed
+- **#368** — phantom `+€599.43` / `+£55.44` in `portfolio_cash_sql()`.
+  `migration_004_fix_eur_gbp_cash_classification.sql` (idempotent) reclassifies the six
+  legacy rows whose instrument is EUR/GBP-listed but recorded with `currency = 'USD'`
+  (ids 286, 308 → EUR; 296, 315, 328, 605 → GBP) and removes the two synthetic USD
+  reconciliation inflows (2351, 2321) that only compensated that drift. Cash and
+  `portfolio_value` fall by ≈ $772 on the affected portfolio; holdings are unchanged.
+
+### Documentation
+- **#368** — `docs/issue-368-cash-eur-gbp-classification.md` documents the root cause, the
+  broker evidence, the ledger simulation, the regression battery and the rollout procedure.
+
 ## [0.10.0] - 2026-07-04
 
 ### Added
