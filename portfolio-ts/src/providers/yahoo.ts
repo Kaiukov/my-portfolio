@@ -1,5 +1,5 @@
 import YahooFinance from "yahoo-finance2";
-import { STABLECOINS, ALLOWED_CURRENCIES } from "../validators.js";
+import { STABLECOINS, ALLOWED_CURRENCIES, normalizeSymbol } from "../validators.js";
 
 const yahooFinance = new YahooFinance();
 
@@ -116,7 +116,8 @@ const INTERNAL_TO_YAHOO: Record<string, string> = {
 };
 
 function toYahooTicker(internalTicker: string): string {
-  return INTERNAL_TO_YAHOO[internalTicker] ?? internalTicker;
+  const ticker = normalizeSymbol(internalTicker);
+  return INTERNAL_TO_YAHOO[ticker] ?? ticker;
 }
 
 function isoDate(d: Date): string {
@@ -150,9 +151,13 @@ export async function fetchPrices(
   const extStart = new Date(startDate);
   extStart.setUTCDate(extStart.getUTCDate() - 10);
 
+  // Yahoo's period2 is exclusive, while this function's endDate is inclusive.
+  const period2 = new Date(endDate);
+  period2.setUTCDate(period2.getUTCDate() + 1);
+
   const result = await yahooFinance.chart(yahooTicker, {
     period1: extStart,
-    period2: new Date(endDate),
+    period2,
     interval: "1d",
   });
   const data = (result?.quotes ?? []) as Array<{ date: Date; close: number | null }>;

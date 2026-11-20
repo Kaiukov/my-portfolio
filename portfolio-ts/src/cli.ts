@@ -35,7 +35,7 @@ import { publishToKv } from "./cloudflare/publish.js";
 import { publishDashboardToKv } from "./cloudflare/dashboard_publish.js";
 import { syncOnce, syncLoop, parseInterval, DEFAULT_SYNC_INTERVAL_MS } from "./cloudflare/sync.js";
 import { createApiServer } from "./api/server.js";
-import { ValidationError, NotFoundError } from "./validators.js";
+import { ValidationError, NotFoundError, PriceUnavailableError } from "./validators.js";
 import { close } from "./db.js";
 
 const HELP_TEXT = `
@@ -1289,6 +1289,8 @@ if (import.meta.main) {
         console.log(JSON.stringify(error(cmd, "VALIDATION_ERROR", err.message), null, 2));
       } else if (err instanceof NotFoundError) {
         console.log(JSON.stringify(error(cmd, "NOT_FOUND", err.message), null, 2));
+      } else if (err instanceof PriceUnavailableError) {
+        console.log(JSON.stringify(error(cmd, "PRICE_UNAVAILABLE", err.message), null, 2));
       } else {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(JSON.stringify(error(cmd, "INTERNAL_ERROR", msg), null, 2));
