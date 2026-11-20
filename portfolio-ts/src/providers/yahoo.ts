@@ -151,9 +151,13 @@ export async function fetchPrices(
   const extStart = new Date(startDate);
   extStart.setUTCDate(extStart.getUTCDate() - 10);
 
+  // Yahoo's period2 is exclusive, while this function's endDate is inclusive.
+  const period2 = new Date(endDate);
+  period2.setUTCDate(period2.getUTCDate() + 1);
+
   const result = await yahooFinance.chart(yahooTicker, {
     period1: extStart,
-    period2: new Date(endDate),
+    period2,
     interval: "1d",
   });
   const data = (result?.quotes ?? []) as Array<{ date: Date; close: number | null }>;
