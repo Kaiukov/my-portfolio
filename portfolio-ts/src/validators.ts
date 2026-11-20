@@ -33,6 +33,28 @@ export class NotFoundError extends Error {
   }
 }
 
+/**
+ * A price is required to value the position and to recalculate daily returns.
+ * This is a client-actionable condition (fetch/bootstrap the price), not an
+ * internal failure.
+ */
+export class PriceUnavailableError extends Error {
+  readonly code = "PRICE_UNAVAILABLE" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "PriceUnavailableError";
+  }
+}
+
+/**
+ * Strip a broker venue suffix that Yahoo Finance does not understand.
+ * Freedom24 reports US listings as `ANT.US`; Yahoo expects `ANT`.
+ * Only a terminal `.US` is removed, so `BRK.B` (a real symbol) is untouched.
+ */
+export function normalizeSymbol(asset: string): string {
+  return asset.trim().replace(/\.US$/i, "");
+}
+
 export function parseDate(dateStr: string, flagName: string): string {
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   if (iso) {

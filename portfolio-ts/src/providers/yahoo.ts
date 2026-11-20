@@ -1,5 +1,5 @@
 import YahooFinance from "yahoo-finance2";
-import { STABLECOINS, ALLOWED_CURRENCIES } from "../validators.js";
+import { STABLECOINS, ALLOWED_CURRENCIES, normalizeSymbol } from "../validators.js";
 
 const yahooFinance = new YahooFinance();
 
@@ -116,7 +116,8 @@ const INTERNAL_TO_YAHOO: Record<string, string> = {
 };
 
 function toYahooTicker(internalTicker: string): string {
-  return INTERNAL_TO_YAHOO[internalTicker] ?? internalTicker;
+  const ticker = normalizeSymbol(internalTicker);
+  return INTERNAL_TO_YAHOO[ticker] ?? ticker;
 }
 
 function isoDate(d: Date): string {

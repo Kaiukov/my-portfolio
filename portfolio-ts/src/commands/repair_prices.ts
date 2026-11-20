@@ -61,7 +61,7 @@ async function getDateRange(): Promise<{ start: string | null; end: string | nul
   return { start: row?.start_date ?? null, end: row?.end_date ?? null };
 }
 
-async function upsertPrices(rows: PriceRow[]): Promise<number> {
+export async function upsertPrices(rows: PriceRow[]): Promise<number> {
   if (rows.length === 0) return 0;
   let count = 0;
   for (const row of rows) {

@@ -5,7 +5,7 @@ import { deleteTransaction, deletePreview } from "../commands/delete.js";
 import { exchangeCurrency } from "../commands/exchange.js";
 import { applySplit } from "../commands/split.js";
 import { applyWrap, applyUnwrap } from "../commands/wrap.js";
-import { NotFoundError, ValidationError } from "../validators.js";
+import { NotFoundError, PriceUnavailableError, ValidationError } from "../validators.js";
 
 export type WriteHandlers = {
   addTransaction: typeof addTransaction;
@@ -60,6 +60,10 @@ export function toWriteErrorEnvelope(
 
   if (err instanceof NotFoundError) {
     return { body: error(command, err.code, msg), status: 404 };
+  }
+
+  if (err instanceof PriceUnavailableError) {
+    return { body: error(command, err.code, msg), status: 400 };
   }
 
   return { body: error(command, "INTERNAL_ERROR", msg), status: 500 };
