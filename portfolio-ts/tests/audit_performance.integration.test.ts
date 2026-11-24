@@ -331,4 +331,99 @@ MAYBE_SKIP("integration: hard performance audit fixture (#226)", () => {
     },
     { timeout: 15000 },
   );
+
+  test(
+    "benchmark metrics match the resolved portfolio window with and without explicit from-date (#350)",
+    async () => {
+      // Issue #350: a NULL p_from_date must slice the benchmark price series to the
+      // same resolved portfolio window as the explicit from-date call. Fixture shape:
+      // a single DEPOSIT/BUY on 2026-01-05 resolves the window to 2026-01-05..2026-01-09,
+      // while SPY carries pre-window history back to 2025-06-02 that must be excluded.
+      const sql = new SQL(DB_URL!, { max: 1 });
+      try {
+        await sql.begin(async (tx: any) => {
+          await createTempTables(tx);
+          await tx.unsafe(`
+            INSERT INTO transactions (date, asset, action, quantity, price, fees, currency)
+            VALUES
+              ('2026-01-05', 'USD', 'DEPOSIT', 1000, NULL, 0, 'USD'),
+              ('2026-01-05', 'TESTX', 'BUY', 10, 100, 0, 'USD')
+          `);
+          await tx.unsafe(`
+            INSERT INTO prices (date, ticker, price)
+            VALUES
+              ('2026-01-05', 'TESTX', 100),
+              ('2026-01-06', 'TESTX', 110),
+              ('2026-01-07', 'TESTX', 121),
+              ('2026-01-08', 'TESTX', 120),
+              ('2026-01-09', 'TESTX', 124),
+              ('2025-06-02', 'SPY', 100),
+              ('2025-12-01', 'SPY', 110),
+              ('2026-01-03', 'SPY', 115),
+              ('2026-01-05', 'SPY', 120),
+              ('2026-01-06', 'SPY', 121),
+              ('2026-01-07', 'SPY', 122),
+              ('2026-01-08', 'SPY', 123),
+              ('2026-01-09', 'SPY', 124)
+          `);
+          await tx.unsafe(`SELECT refresh_daily_returns_sql()`);
+
+          const [window] = await tx.unsafe(
+            `SELECT MIN(date)::TEXT AS start_date, MAX(date)::TEXT AS end_date
+             FROM daily_returns WHERE date <= '2026-01-09'::DATE`,
+          ) as any[];
+          expect(dateKey(window.start_date)).toBe("2026-01-05");
+          expect(dateKey(window.end_date)).toBe("2026-01-09");
+
+          const [earliestSpy] = await tx.unsafe(
+            `SELECT MIN(date)::TEXT AS d FROM prices WHERE ticker = 'SPY'`,
+          ) as any[];
+          expect(dateKey(earliestSpy.d)).toBe("2025-06-02");
+          expect(dateKey(earliestSpy.d) < dateKey(window.start_date)).toBe(true);
+
+          const [preWindow] = await tx.unsafe(
+            `SELECT COUNT(*)::INTEGER AS n FROM prices WHERE ticker = 'SPY' AND date < $1`,
+            [window.start_date],
+          ) as any[];
+          expect(Number(preWindow.n)).toBeGreaterThanOrEqual(3);
+
+          const [defaultPerf] = await tx.unsafe(
+            `SELECT * FROM portfolio_performance_sql('2026-01-09'::DATE)`,
+          ) as any[];
+          const [explicitPerf] = await tx.unsafe(
+            `SELECT * FROM portfolio_performance_sql('2026-01-09'::DATE, 'SPY', $1::DATE, 0.02, 0.025)`,
+            [window.start_date],
+          ) as any[];
+
+          for (const metric of ["spy_twr_pct", "spy_cagr_pct", "relative_return", "jensens_alpha"]) {
+            const defaultValue = Number(defaultPerf[metric]);
+            const explicitValue = Number(explicitPerf[metric]);
+            expect(Number(defaultValue)).toBeFinite();
+            expect(Number(explicitValue)).toBeFinite();
+            expect(Math.abs(defaultValue - explicitValue)).toBeLessThanOrEqual(
+              1e-9 * Math.max(1, Math.abs(explicitValue)),
+            );
+          }
+
+          expect(dateKey(defaultPerf.start_date)).toBe(dateKey(explicitPerf.start_date));
+          expect(dateKey(defaultPerf.end_date)).toBe(dateKey(explicitPerf.end_date));
+          expect(Number(defaultPerf.total_days)).toBe(Number(explicitPerf.total_days));
+          for (const metric of ["time_weighted_return_pct", "total_return_pct", "cagr"]) {
+            const defaultValue = Number(defaultPerf[metric]);
+            const explicitValue = Number(explicitPerf[metric]);
+            expect(Number(defaultValue)).toBeFinite();
+            expect(Number(explicitValue)).toBeFinite();
+            expect(Math.abs(defaultValue - explicitValue)).toBeLessThanOrEqual(
+              1e-9 * Math.max(1, Math.abs(explicitValue)),
+            );
+          }
+
+          expect(Number(explicitPerf.spy_twr_pct)).toBeCloseTo(3.3333333, 6);
+        });
+      } finally {
+        await sql.end();
+      }
+    },
+    { timeout: 20000 },
+  );
 });
