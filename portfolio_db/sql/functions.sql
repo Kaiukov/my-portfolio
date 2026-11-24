@@ -557,10 +557,26 @@ AS $$
                 ELSE market_last_price_date_sql(asset_type, p_end_date)
             END
         FROM trade_dates
+    ),
+    -- Valuation checkpoints: closed markets have no close price, so a trade dated on a
+    -- weekend is valued at the latest trading close instead of an invented weekend bar.
+    -- Crypto trades 24/7 and keeps the raw date. Mapping here (rather than trusting the
+    -- bucket's weekend activity) stops a single Saturday print from any ticker in the
+    -- bucket — bare crypto symbols classify as stock_usd, dirty FX rows land in cash_fx —
+    -- from forcing every other ticker in that bucket to hold a weekend close.
+    valuation_checkpoints AS (
+        SELECT DISTINCT
+            ticker,
+            asset_type,
+            CASE
+                WHEN asset_type = 'crypto' THEN checkpoint_date
+                ELSE last_trading_day_sql(checkpoint_date)
+            END AS checkpoint_date
+        FROM candidates
     )
-    SELECT DISTINCT c.ticker, c.checkpoint_date
-    FROM candidates c
-    WHERE c.checkpoint_date IS NOT NULL
+    SELECT DISTINCT v.ticker, v.checkpoint_date
+    FROM valuation_checkpoints v
+    WHERE v.checkpoint_date IS NOT NULL
       -- ponytail: this data-driven filter has two honest blind spots.
       -- First, a whole-bucket same-day fetch failure on a real trading day is not flagged by
       -- coverage here, because no same-bucket print exists to prove the market was open; that
@@ -568,7 +584,7 @@ AS $$
       -- p_max_age_days. Second, full-bucket historical outages are likewise dropped here, not
       -- just single-ticker-bucket gaps. The upgrade path is an external market-open signal
       -- (for example refresh-audit state), not a hardcoded holiday calendar.
-      AND market_has_price_activity_sql(c.asset_type, c.checkpoint_date)
+      AND market_has_price_activity_sql(v.asset_type, v.checkpoint_date)
 $$;
 
 -- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.
@@ -1544,9 +1560,11 @@ AS $$
             LAG(p.price) OVER (ORDER BY p.date) AS prev_price
         FROM prices p
         CROSS JOIN params prm
+        CROSS JOIN dr_bounds b
         WHERE p.ticker = prm.benchmark_ticker
           AND (prm.as_of_date IS NULL OR p.date <= prm.as_of_date)
-          AND (prm.from_date IS NULL OR p.date >= prm.from_date)
+          AND p.date >= b.start_date::DATE
+          AND p.date <= b.end_date::DATE
         ORDER BY p.date
     ),
     bench_returns AS (
@@ -2709,8 +2727,8 @@ BEGIN
         GROUP BY dr_a.ticker, dr_b.ticker
     )
     SELECT
-        cc.asset_a,
-        cc.asset_b,
+        cc.asset_a::TEXT,
+        cc.asset_b::TEXT,
         CASE
             WHEN cc.n < 5 THEN NULL::DOUBLE PRECISION
             WHEN GREATEST((cc.n * cc.sum_x2 - cc.sum_x * cc.sum_x), 0.0) = 0.0 THEN NULL::DOUBLE PRECISION
