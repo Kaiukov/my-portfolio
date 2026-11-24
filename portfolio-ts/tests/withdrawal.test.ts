@@ -672,6 +672,7 @@ describe("Withdrawal — dispatch adapter parity", () => {
     );
 
     const { dispatchRead } = await import("../src/adapters/read_shared.js");
+    const callsBefore = mockQuerySingle.mock.calls.length;
     const result = await dispatchRead("withdrawal", {
       "annual-withdrawal": "20000",
       "time-horizon-years": "0",
@@ -679,7 +680,7 @@ describe("Withdrawal — dispatch adapter parity", () => {
     });
 
     expect(result.ok).toBe(true);
-    const params = mockQuerySingle.mock.calls[0]?.[1] as unknown[];
+    const params = mockQuerySingle.mock.calls[callsBefore]?.[1] as unknown[];
     expect(params[1]).toBe(20000);
     expect(params[3]).toBe(0);
     expect(params[4]).toBe(0.07);

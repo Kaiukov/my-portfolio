@@ -889,13 +889,14 @@ describe("Projection — dispatch adapter parity", () => {
     );
 
     const { dispatchRead } = await import("../src/adapters/read_shared.js");
+    const callsBefore = mockQuerySingle.mock.calls.length;
     const result = await dispatchRead("projection", {
       "monthly-contribution": "1000",
       "projection-years": "0",
     });
 
     expect(result.ok).toBe(true);
-    const params = mockQuerySingle.mock.calls[0]?.[1] as unknown[];
+    const params = mockQuerySingle.mock.calls[callsBefore]?.[1] as unknown[];
     expect(params[1]).toBe(1000);
     expect(params[4]).toBe(0);
   });
