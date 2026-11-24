@@ -649,3 +649,39 @@ describe("Withdrawal — DB-gated integration", () => {
     expect(data.max_safe_withdrawal_rate).toBeNull();
   });
 });
+
+describe("Withdrawal — dispatch adapter parity", () => {
+  test("kebab-case zero time-horizon-years reaches SQL as 0 instead of NULL", async () => {
+    mockQuerySingle.mockImplementation(() =>
+      Promise.resolve({
+        portfolio_value: 500000,
+        annual_withdrawal: 20000,
+        withdrawal_rate_pct: 4,
+        time_horizon_years: 0,
+        expected_return: 0.07,
+        inflation_rate: 0,
+        years_until_depletion: null,
+        terminal_value: 500000,
+        success_likelihood: 100,
+        max_safe_withdrawal: null,
+        max_safe_withdrawal_rate: null,
+        total_withdrawn: 0,
+        return_generated: 0,
+        shortfall_risk: 0,
+      }),
+    );
+
+    const { dispatchRead } = await import("../src/adapters/read_shared.js");
+    const result = await dispatchRead("withdrawal", {
+      "annual-withdrawal": "20000",
+      "time-horizon-years": "0",
+      "expected-return": "0.07",
+    });
+
+    expect(result.ok).toBe(true);
+    const params = mockQuerySingle.mock.calls[0]?.[1] as unknown[];
+    expect(params[1]).toBe(20000);
+    expect(params[3]).toBe(0);
+    expect(params[4]).toBe(0.07);
+  });
+});

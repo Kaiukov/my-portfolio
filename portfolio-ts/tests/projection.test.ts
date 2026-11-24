@@ -867,3 +867,36 @@ describe("Projection — DB-gated integration", () => {
     expect(result.years_to_goal === null || result.years_to_goal > (1 / 12)).toBe(true);
   });
 });
+
+describe("Projection — dispatch adapter parity", () => {
+  test("kebab-case zero projection-years reaches SQL as 0, not the 10-year default", async () => {
+    mockQuerySingle.mockImplementation(() =>
+      Promise.resolve({
+        current_value: 100000,
+        annual_return_rate: 0.07,
+        monthly_contribution: 1000,
+        inflation_rate: 0,
+        target_value: null,
+        years_to_goal: null,
+        projected_goal_value: null,
+        projection_years: 0,
+        projected_value_nominal: 100000,
+        projected_value_real: 100000,
+        total_contributions: 0,
+        return_portion: 0,
+        required_return_rate: null,
+      }),
+    );
+
+    const { dispatchRead } = await import("../src/adapters/read_shared.js");
+    const result = await dispatchRead("projection", {
+      "monthly-contribution": "1000",
+      "projection-years": "0",
+    });
+
+    expect(result.ok).toBe(true);
+    const params = mockQuerySingle.mock.calls[0]?.[1] as unknown[];
+    expect(params[1]).toBe(1000);
+    expect(params[4]).toBe(0);
+  });
+});
