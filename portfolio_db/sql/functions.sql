@@ -2709,8 +2709,8 @@ BEGIN
         GROUP BY dr_a.ticker, dr_b.ticker
     )
     SELECT
-        cc.asset_a,
-        cc.asset_b,
+        cc.asset_a::TEXT,
+        cc.asset_b::TEXT,
         CASE
             WHEN cc.n < 5 THEN NULL::DOUBLE PRECISION
             WHEN GREATEST((cc.n * cc.sum_x2 - cc.sum_x * cc.sum_x), 0.0) = 0.0 THEN NULL::DOUBLE PRECISION
