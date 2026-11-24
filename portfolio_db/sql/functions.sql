@@ -557,10 +557,26 @@ AS $$
                 ELSE market_last_price_date_sql(asset_type, p_end_date)
             END
         FROM trade_dates
+    ),
+    -- Valuation checkpoints: closed markets have no close price, so a trade dated on a
+    -- weekend is valued at the latest trading close instead of an invented weekend bar.
+    -- Crypto trades 24/7 and keeps the raw date. Mapping here (rather than trusting the
+    -- bucket's weekend activity) stops a single Saturday print from any ticker in the
+    -- bucket — bare crypto symbols classify as stock_usd, dirty FX rows land in cash_fx —
+    -- from forcing every other ticker in that bucket to hold a weekend close.
+    valuation_checkpoints AS (
+        SELECT DISTINCT
+            ticker,
+            asset_type,
+            CASE
+                WHEN asset_type = 'crypto' THEN checkpoint_date
+                ELSE last_trading_day_sql(checkpoint_date)
+            END AS checkpoint_date
+        FROM candidates
     )
-    SELECT DISTINCT c.ticker, c.checkpoint_date
-    FROM candidates c
-    WHERE c.checkpoint_date IS NOT NULL
+    SELECT DISTINCT v.ticker, v.checkpoint_date
+    FROM valuation_checkpoints v
+    WHERE v.checkpoint_date IS NOT NULL
       -- ponytail: this data-driven filter has two honest blind spots.
       -- First, a whole-bucket same-day fetch failure on a real trading day is not flagged by
       -- coverage here, because no same-bucket print exists to prove the market was open; that
@@ -568,7 +584,7 @@ AS $$
       -- p_max_age_days. Second, full-bucket historical outages are likewise dropped here, not
       -- just single-ticker-bucket gaps. The upgrade path is an external market-open signal
       -- (for example refresh-audit state), not a hardcoded holiday calendar.
-      AND market_has_price_activity_sql(c.asset_type, c.checkpoint_date)
+      AND market_has_price_activity_sql(v.asset_type, v.checkpoint_date)
 $$;
 
 -- FIFO cost basis: computes realized/unrealized gain and cost basis for non-cash assets.
