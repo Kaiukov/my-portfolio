@@ -18,4 +18,10 @@ describe("argsFromSearchParams", () => {
     const args = argsFromSearchParams(new URLSearchParams("lookback_days=90&lookback-days=60"));
     expect(args["lookback_days"]).toBe("90");
   });
+  test("diversification route normalizes lookback-days before dispatch", async () => {
+    const { ROUTES } = await import("../src/api/server.js");
+    const args = argsFromSearchParams(new URLSearchParams("lookback-days=60"));
+    expect(args["lookback_days"]).toBe("60");
+    expect(typeof ROUTES["/diversification"]).toBe("function");
+  });
 });
