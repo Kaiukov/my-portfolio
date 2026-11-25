@@ -26,10 +26,15 @@ const MCP_HTTP_PATHS = new Set(["/mcp", "/sse"]);
 const MCP_PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource/mcp";
 const OAUTH_AUTHORIZATION_SERVER_PATH = "/.well-known/oauth-authorization-server";
 
-function argsFromSearchParams(p: URLSearchParams): Record<string, unknown> {
+export function argsFromSearchParams(p: URLSearchParams): Record<string, unknown> {
   const args: Record<string, unknown> = {};
   for (const [key, value] of p.entries()) {
-    args[key] = value;
+    const canonical = key.includes("-") ? key.replace(/-/g, "_") : key;
+    // An explicit snake_case value wins over a kebab-case alias, in either order.
+    if (canonical !== key && args[canonical] !== undefined) {
+      continue;
+    }
+    args[canonical] = value;
   }
   return args;
 }
