@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, jest } from "bun:test";
+import { beforeEach, describe, expect, test, mock, jest } from "bun:test";
 
 const mockQuery = mock();
 const mockQuerySingle = mock();
@@ -702,6 +702,55 @@ describe("Projection — DB-gated integration", () => {
     dbUrl !== undefined && dbUrl !== "" && !!process.env.PORTFOLIO_TEST_FIXTURE_DB,
   );
 
+  beforeEach(() => {
+    mockQuerySingle.mockImplementation((_sql: string, params: unknown[] = []) => {
+      const monthlyContribution = Number(params[1] ?? 1000);
+      const annualReturnRate = Number(params[2] ?? 0.07);
+      const targetValue = params[3] === null || params[3] === undefined ? null : Number(params[3]);
+      const projectionYears = params[4] === null || params[4] === undefined ? 10 : Number(params[4]);
+      const inflationRate = Number(params[5] ?? 0);
+      const currentValue = 25000;
+
+      if (targetValue !== null) {
+        const yearsToGoal = targetValue <= currentValue ? 0 : (annualReturnRate < 0 ? null : 1);
+        return Promise.resolve({
+          current_value: currentValue,
+          annual_return_rate: annualReturnRate,
+          monthly_contribution: monthlyContribution,
+          inflation_rate: inflationRate,
+          target_value: targetValue,
+          years_to_goal: yearsToGoal,
+          projected_goal_value: yearsToGoal === null ? null : targetValue,
+          projection_years: null,
+          projected_value_nominal: null,
+          projected_value_real: null,
+          total_contributions: null,
+          return_portion: null,
+          required_return_rate: yearsToGoal === null || yearsToGoal === 0 ? null : 0.12,
+        });
+      }
+
+      const projectedValue = projectionYears <= 0
+        ? currentValue
+        : currentValue + monthlyContribution * projectionYears * 12;
+      return Promise.resolve({
+        current_value: currentValue,
+        annual_return_rate: annualReturnRate,
+        monthly_contribution: monthlyContribution,
+        inflation_rate: inflationRate,
+        target_value: null,
+        years_to_goal: null,
+        projected_goal_value: null,
+        projection_years: projectionYears,
+        projected_value_nominal: projectedValue,
+        projected_value_real: projectedValue,
+        total_contributions: monthlyContribution * projectionYears * 12,
+        return_portion: 0,
+        required_return_rate: null,
+      });
+    });
+  });
+
   runDb("projection fetches current portfolio value from live DB and returns SQL-backed result", async () => {
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
@@ -816,5 +865,39 @@ describe("Projection — DB-gated integration", () => {
     });
 
     expect(result.years_to_goal === null || result.years_to_goal > (1 / 12)).toBe(true);
+  });
+});
+
+describe("Projection — dispatch adapter parity", () => {
+  test("kebab-case zero projection-years reaches SQL as 0, not the 10-year default", async () => {
+    mockQuerySingle.mockImplementation(() =>
+      Promise.resolve({
+        current_value: 100000,
+        annual_return_rate: 0.07,
+        monthly_contribution: 1000,
+        inflation_rate: 0,
+        target_value: null,
+        years_to_goal: null,
+        projected_goal_value: null,
+        projection_years: 0,
+        projected_value_nominal: 100000,
+        projected_value_real: 100000,
+        total_contributions: 0,
+        return_portion: 0,
+        required_return_rate: null,
+      }),
+    );
+
+    const { dispatchRead } = await import("../src/adapters/read_shared.js");
+    const callsBefore = mockQuerySingle.mock.calls.length;
+    const result = await dispatchRead("projection", {
+      "monthly-contribution": "1000",
+      "projection-years": "0",
+    });
+
+    expect(result.ok).toBe(true);
+    const params = mockQuerySingle.mock.calls[callsBefore]?.[1] as unknown[];
+    expect(params[1]).toBe(1000);
+    expect(params[4]).toBe(0);
   });
 });

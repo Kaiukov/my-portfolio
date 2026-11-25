@@ -1098,24 +1098,25 @@ describe("CLI api dispatch", () => {
   test("api command prints success envelope with port", async () => {
     mockQuerySingle.mockResolvedValue(null);
     mockQuery.mockResolvedValue([]);
-
-    // Mock Bun.serve to not actually start a server
-    const mockServer = { stop: () => {}, port: 8787, hostname: "localhost" };
-    mock.module("bun", () => ({
-      serve: () => mockServer,
-    }));
-
     const mod = await import("../src/cli.js");
     const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Response("occupied"),
+    });
 
-    await mod.dispatch(["bun", "src/cli.ts", "api", "--port", "8787"]);
+    try {
+      await mod.dispatch(["bun", "src/cli.ts", "api", "--port", "0"]);
+    } finally {
+      server.stop(true);
+    }
 
     expect(logSpy).toHaveBeenCalled();
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.ok).toBe(true);
     expect(output.command).toBe("api");
-    expect(output.data.port).toBe(8787);
+    expect(output.data.port).toBe(0);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
